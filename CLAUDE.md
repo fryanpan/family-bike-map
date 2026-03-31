@@ -1,13 +1,19 @@
 # Project: bike-route-finder
 
 ## Overview
-Family-friendly bike route finder for Berlin. Accounts for specific safety preferences (quiet side streets, Fahrradstrasse, separated bike lanes, sidewalk width) that Google and Apple Maps don't handle well.
+Family-friendly bike route finder. Accounts for specific safety preferences (quiet side streets, Fahrradstrasse, separated bike lanes, sidewalk width) that Google and Apple Maps don't handle well.
+
+**Initial focus**: Berlin
+**Long-term vision**: Any city worldwide, crowdsourced kid-friendly bike infrastructure map
+
+See `docs/product/vision.md` for full product vision and requirements.
 
 ### Problem
 - Google/Apple Maps don't understand family-specific bike safety needs
 - No way to encode preferences like "quiet side streets OK at certain times" or "Fahrradstrasse are awesome"
 - Route knowledge lives in people's heads and isn't shareable
-- Komoot/Strava heatmaps lack granular enough filters
+- Existing bike tools (BBBike, InfraVelo, CyclOSM) have either no routing or unusable UX
+- No tool works across cities with consistent quality
 
 ### Safety Preference Model
 Routes are scored based on family-friendliness:
@@ -18,7 +24,14 @@ Routes are scored based on family-friendliness:
 - **Avoid:** Busy streets without protected infrastructure
 
 ## Architecture
-TBD — initial prototype phase
+See `docs/product/architecture.md` for full technical architecture.
+
+**Core Stack:**
+- **Routing Engine**: Valhalla (OSM-based, dynamic bike-specific costing, multi-city support)
+- **API**: Go (or Node.js/Python TBD)
+- **Database**: Postgres + PostGIS
+- **Frontend**: React + MapLibre
+- **Data Source**: OpenStreetMap (any region)
 
 ## Key Files
 
@@ -30,8 +43,12 @@ TBD — initial prototype phase
 ### Documentation
 | File | Purpose |
 |------|---------|
+| `docs/product/vision.md` | Product vision, requirements, success metrics |
+| `docs/product/architecture.md` | Technical architecture and stack decisions |
 | `docs/product/decisions.md` | Architecture & product decisions log |
 | `docs/product/plans/` | Sprint/feature plans |
+| `docs/research/existing-tools.md` | Analysis of existing Berlin bike tools |
+| `docs/research/osm-routing-engines.md` | OSM routing engine comparison |
 | `docs/process/learnings.md` | Technical gotchas |
 | `docs/process/retrospective.md` | Session retro logs |
 
