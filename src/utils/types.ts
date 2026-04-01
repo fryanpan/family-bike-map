@@ -46,14 +46,20 @@ export interface SafetyInfo {
 /**
  * Edge attributes returned by Valhalla trace_attributes.
  *
- * edge.use values (key ones):
- *   0  = road, 18 = living_street, 20 = cycleway, 21 = mountain_bike, 25 = path
+ * The public Valhalla API (valhalla1.openstreetmap.de) returns string values for
+ * enum fields, not the legacy numeric codes found in older documentation.
  *
- * edge.cycle_lane:
- *   0 = none, 1 = shared (sharrow), 2 = dedicated (painted), 3 = separated, 4 = share_busway
+ * edge.use strings (key ones):
+ *   "road", "living_street", "cycleway", "mountain_bike", "path",
+ *   "footway", "pedestrian", "service_road", "driveway"
  *
- * edge.road_class:
- *   0 = motorway … 4 = tertiary, 5 = unclassified, 6 = residential, 7 = service
+ * edge.cycle_lane strings:
+ *   "none", "shared" (sharrow), "dedicated" (painted lane),
+ *   "separated" (elevated/physical barrier), "share_busway"
+ *
+ * edge.road_class strings:
+ *   "motorway", "trunk", "primary", "secondary", "tertiary",
+ *   "unclassified", "residential", "service_other"
  *
  * edge.bicycle_network:
  *   0 = none, 1 = national, 2 = regional, 4 = local, 8 = mountain
@@ -63,9 +69,9 @@ export interface SafetyInfo {
  *   true if the OSM way has bicycle_road=yes (Fahrradstrasse in Germany)
  */
 export interface ValhallaEdge {
-  use?: number
-  cycle_lane?: number
-  road_class?: number
+  use?: string
+  cycle_lane?: string
+  road_class?: string
   bicycle_network?: number
   /** True for Fahrradstrasse (OSM: bicycle_road=yes) */
   bicycle_road?: boolean

@@ -106,14 +106,28 @@ const BAD_SURFACES = new Set([
   'cobblestone:flattened', 'gravel', 'unpaved',
 ])
 
+// Maps road_class string values returned by Valhalla API to a numeric rank
+// (lower = bigger/faster road). Used for fallback road-class comparisons.
+const ROAD_CLASS_RANK: Record<string, number> = {
+  motorway:     0,
+  trunk:        1,
+  primary:      2,
+  secondary:    3,
+  tertiary:     4,
+  unclassified: 5,
+  residential:  6,
+  service_other: 7,
+}
+
 /**
  * Classify a Valhalla edge into our family safety model.
  *
  * Classification is PROFILE-AWARE because safety priorities differ:
  *
  * toddler:
- *   - GREAT: Fahrradstrasse (bicycle_road=yes), car-free cycleway
- *   - GOOD:  Separated/elevated path alongside road (cycleway=track)
+ *   - GREAT: Fahrradstrasse (bicycle_road=yes), car-free cycleway/path/trail
+ *   - GOOD:  Separated/elevated path alongside road (cycleway=track),
+ *            shared footway/pedestrian path (park paths, Tiergarten trails)
  *   - ACCEPTABLE: Quiet residential, living streets
  *   - AVOID: Painted road bike lane (cycleway=lane) — "no better than road without a bike path"
  *   - AVOID: Primary/secondary/tertiary without protected infra
@@ -127,15 +141,14 @@ const BAD_SURFACES = new Set([
  *
  * training:
  *   - GREAT: Fahrradstrasse, car-free cycleway/paths
- *   - GOOD:  Separated path, bus lane
+ *   - GOOD:  Separated path, bus lane (share_busway — e.g. Sonnenallee)
  *   - OK:    Painted road lane, quiet residential
  *   - ACCEPTABLE: Tertiary with low speed limit
  *   - AVOID: Primary/secondary without infra
  *
- * Key fix vs previous version: uses edge.bicycle_road (the Fahrradstrasse flag,
- * OSM: bicycle_road=yes) instead of edge.bicycle_network. The bicycle_network
- * field tracks cycling route memberships (NCN/RCN/LCN), which is orthogonal to
- * bicycle_road=yes. Most Berlin Fahrradstrassen are NOT in a named cycling network.
+ * NOTE: The public Valhalla API (valhalla1.openstreetmap.de) returns STRING values
+ * for use, cycle_lane, and road_class — NOT the numeric codes found in older docs.
+ * All comparisons in this function use the string form.
  */
 export function classifyEdge(
   edge: ValhallaEdge | null | undefined,
@@ -143,9 +156,9 @@ export function classifyEdge(
 ): SafetyClass {
   if (!edge) return 'acceptable'
 
-  const use         = edge.use         ?? 0
-  const cycleLane   = edge.cycle_lane  ?? 0
-  const roadClass   = edge.road_class  ?? 5
+  const use         = edge.use         ?? ''
+  const cycleLane   = edge.cycle_lane  ?? ''
+  const roadClass   = edge.road_class  ?? ''
   const bicycleRoad = edge.bicycle_road ?? false
   const surface     = edge.surface     ?? ''
 
@@ -161,57 +174,64 @@ export function classifyEdge(
 }
 
 function classifyBase(
-  use: number,
-  cycleLane: number,
-  roadClass: number,
+  use: string,
+  cycleLane: string,
+  roadClass: string,
   bicycleRoad: boolean,
   profileKey?: string,
 ): SafetyClass {
+  const rcRank = ROAD_CLASS_RANK[roadClass] ?? 5
+
   // ── GREAT for all profiles ──────────────────────────────────────────────
-  // Car-free dedicated cycleway (Radweg, Mauerweg, greenways)
-  if (use === 20 || use === 25) return 'great'
+  // Car-free dedicated cycleway (Radweg, Mauerweg, greenways) or off-road path/trail
+  if (use === 'cycleway' || use === 'path' || use === 'mountain_bike') return 'great'
 
   // Fahrradstrasse (bicycle_road=yes) — the priority infrastructure in Berlin.
   // Correctly detected via edge.bicycle_road (NOT bicycle_network which is for NCN/RCN/LCN).
   if (bicycleRoad) return 'great'
 
+  // ── GOOD: shared footway/pedestrian path (park paths, Tiergarten trails) ──
+  // These are car-free routes shared with pedestrians — safe and pleasant for toddlers.
+  if (use === 'footway' || use === 'pedestrian') return 'good'
+
   // ── Separated/elevated bike track alongside road (cycleway=track) ───────
   // GOOD for all profiles (this is the elevated-on-sidewalk path the user mentions)
-  if (cycleLane === 3) return 'good'
+  if (cycleLane === 'separated') return 'good'
 
   // ── Painted road bike lane (cycleway=lane) ───────────────────────────────
   // Profile-specific: for toddler this is "no better than a road without a bike path"
   //
-  // NOTE: Valhalla's cycle_lane=2 always means a painted lane. The public Valhalla
-  // instance does NOT expose cycleway:separation or cycleway:buffer tags in edge
-  // attributes, so we cannot distinguish a plain painted lane from a bollard-protected
-  // one here. The overpass.ts overlay DOES check these separation tags directly from OSM
-  // and upgrades such lanes to 'good'. This is a known Valhalla API limitation.
-  if (cycleLane === 2) {
+  // NOTE: Valhalla's cycle_lane="dedicated" always means a painted lane. The public
+  // Valhalla instance does NOT expose cycleway:separation or cycleway:buffer tags in
+  // edge attributes, so we cannot distinguish a plain painted lane from a bollard-
+  // protected one here. The overpass.ts overlay DOES check these separation tags
+  // directly from OSM and upgrades such lanes to 'good'. This is a known Valhalla limitation.
+  if (cycleLane === 'dedicated') {
     if (profileKey === 'toddler') return 'avoid'
     return 'ok'  // trailer and training: a dedicated lane is still better than nothing
   }
 
   // ── Living street (Spielstraße / Wohnstraße) ────────────────────────────
-  if (use === 18) return 'acceptable'
+  if (use === 'living_street') return 'acceptable'
 
   // ── Shared bus lane (cycleway=share_busway) ─────────────────────────────
-  if (cycleLane === 4) {
-    if (profileKey === 'toddler') return 'caution'  // not suitable with small child
-    return 'acceptable'  // ok for trailer, good for training
+  if (cycleLane === 'share_busway') {
+    if (profileKey === 'toddler') return 'caution'   // not suitable with small child
+    if (profileKey === 'training') return 'good'     // bus lanes are good for fast riding
+    return 'acceptable'                              // trailer: ok in a pinch
   }
 
   // ── Shared road marking (sharrow) ──────────────────────────────────────
-  if (cycleLane === 1) {
+  if (cycleLane === 'shared') {
     if (profileKey === 'toddler') return 'avoid'
-    return roadClass >= 4 ? 'caution' : 'avoid'
+    return rcRank >= 4 ? 'caution' : 'avoid'
   }
 
   // ── Quiet residential or service road ──────────────────────────────────
-  if (roadClass >= 6) return 'acceptable'
+  if (rcRank >= 6) return 'acceptable'
 
   // ── Tertiary / unclassified ─────────────────────────────────────────────
-  if (roadClass >= 4) return 'caution'
+  if (rcRank >= 4) return 'caution'
 
   // ── Primary / secondary / trunk / motorway ──────────────────────────────
   return 'avoid'
