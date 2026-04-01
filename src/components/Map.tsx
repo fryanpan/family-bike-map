@@ -1,6 +1,6 @@
 import L from 'leaflet'
 import { Marker, MapContainer, Polyline, TileLayer, Tooltip, useMapEvents } from 'react-leaflet'
-import { SAFETY } from '../utils/classify'
+import { SAFETY, PROFILE_LEGEND } from '../utils/classify'
 import BikeMapOverlay from './BikeMapOverlay'
 import type { Route, RouteSegment } from '../utils/types'
 
@@ -103,18 +103,62 @@ function RouteDisplay({ route }: { route: Route | null }) {
 function Legend({
   segments,
   overlayOn,
+  profileKey,
 }: {
   segments: RouteSegment[] | null
   overlayOn: boolean
+  profileKey: string
 }) {
+  // Profile-aware legend: show per-profile great/ok/bad groups when route loaded or overlay on.
+  const profileGroups = PROFILE_LEGEND[profileKey]
+  const hasRoute = segments && segments.length > 0
+  const showLegend = hasRoute || overlayOn
+
+  if (!showLegend) return null
+
+  // When showing a route, only show levels that actually appear in the segments.
+  const presentClasses = hasRoute
+    ? new Set(segments!.map((s) => s.safetyClass))
+    : null
+
+  // Map safety classes to profile levels to know which levels appear in the route.
+  const levelAppears = (level: string): boolean => {
+    if (!presentClasses) return true
+    const levelToClasses: Record<string, string[]> = {
+      great: ['great', 'good'],
+      ok:    ['ok', 'acceptable'],
+      bad:   ['caution', 'avoid'],
+    }
+    return (levelToClasses[level] ?? []).some((c) => (presentClasses as Set<string>).has(c))
+  }
+
+  if (profileGroups) {
+    const visibleGroups = profileGroups.filter((g) => levelAppears(g.level))
+    if (!visibleGroups.length) return null
+    return (
+      <div className="map-legend">
+        {visibleGroups.map((group) => (
+          <div key={group.level} className="legend-group">
+            <div className="legend-level-row">
+              <span className="legend-dot" style={{ background: group.color }} />
+              <span className="legend-level-label">{group.label}</span>
+            </div>
+            {group.items.map((item) => (
+              <div key={item.name} className="legend-item legend-item-sub">
+                <span className="legend-icon">{item.icon}</span>
+                <span className="legend-text">{item.name}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // Fallback: show raw safety classes for unknown profiles
   const classes = segments
     ? [...new Set(segments.map((s) => s.safetyClass))]
-    : overlayOn
-    ? (Object.keys(SAFETY) as (keyof typeof SAFETY)[])
-    : []
-
-  if (!classes.length) return null
-
+    : (Object.keys(SAFETY) as (keyof typeof SAFETY)[])
   return (
     <div className="map-legend">
       {classes.map((cls) => {
@@ -140,6 +184,7 @@ interface Props {
   overlayEnabled: boolean
   profileKey: string
   onOverlayStatusChange: (status: string) => void
+  legendVisible?: boolean
 }
 
 export default function Map({
@@ -152,6 +197,7 @@ export default function Map({
   overlayEnabled,
   profileKey,
   onOverlayStatusChange,
+  legendVisible = true,
 }: Props) {
   const routeSegments = route?.segments ?? null
 
@@ -189,7 +235,7 @@ export default function Map({
         </Marker>
       ))}
 
-      <Legend segments={routeSegments} overlayOn={overlayEnabled} />
+      {legendVisible && <Legend segments={routeSegments} overlayOn={overlayEnabled} profileKey={profileKey} />}
     </MapContainer>
   )
 }

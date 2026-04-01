@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { formatDistance, formatDuration } from '../services/routing'
+import { computeRouteQuality } from '../utils/classify'
 import type { Route, ValhallaManeuver } from '../utils/types'
 
 // Valhalla maneuver type → direction icon
@@ -44,8 +45,10 @@ interface Props {
 export default function DirectionsPanel({ route, onClose }: Props) {
   const [navigating, setNavigating] = useState(false)
   const [step, setStep] = useState(0)
+  const [turnsExpanded, setTurnsExpanded] = useState(false)
 
-  const { summary, maneuvers } = route
+  const { summary, maneuvers, segments } = route
+  const quality = segments ? computeRouteQuality(segments) : null
 
   useEffect(() => {
     return () => window.speechSynthesis?.cancel()
@@ -73,14 +76,37 @@ export default function DirectionsPanel({ route, onClose }: Props) {
 
   return (
     <div className="directions-panel">
+      {/* Compact summary row */}
       <div className="route-summary">
-        <span className="summary-distance">{formatDistance(summary.distance)}</span>
-        <span className="summary-sep">·</span>
-        <span className="summary-time">{formatDuration(summary.duration)}</span>
-        <button className="close-btn" onClick={onClose} title="Clear route">
-          ✕
-        </button>
+        <div className="summary-stats">
+          <span className="summary-distance">{formatDistance(summary.distance)}</span>
+          <span className="summary-sep">·</span>
+          <span className="summary-time">{formatDuration(summary.duration)}</span>
+        </div>
+        <button className="close-btn" onClick={onClose} title="Clear route">✕</button>
       </div>
+
+      {/* Route quality bar */}
+      {quality && (
+        <div className="quality-bar-wrap">
+          <div className="quality-bar">
+            {quality.great > 0 && (
+              <div className="qb-segment qb-great" style={{ flex: quality.great }} title={`${Math.round(quality.great * 100)}% great`} />
+            )}
+            {quality.ok > 0 && (
+              <div className="qb-segment qb-ok" style={{ flex: quality.ok }} title={`${Math.round(quality.ok * 100)}% ok`} />
+            )}
+            {quality.bad > 0 && (
+              <div className="qb-segment qb-bad" style={{ flex: quality.bad }} title={`${Math.round(quality.bad * 100)}% avoid`} />
+            )}
+          </div>
+          <div className="quality-labels">
+            {quality.great > 0.05 && <span className="ql-great">{Math.round(quality.great * 100)}% great</span>}
+            {quality.ok    > 0.05 && <span className="ql-ok">{Math.round(quality.ok    * 100)}% ok</span>}
+            {quality.bad   > 0.05 && <span className="ql-bad">{Math.round(quality.bad   * 100)}% avoid</span>}
+          </div>
+        </div>
+      )}
 
       {navigating ? (
         <div className="nav-active">
@@ -119,19 +145,31 @@ export default function DirectionsPanel({ route, onClose }: Props) {
           <button className="start-nav-btn" onClick={startNav}>
             ▶ Start Navigation
           </button>
-          <ol className="maneuvers-list">
-            {(maneuvers as ValhallaManeuver[]).map((m, i) => (
-              <li key={i} className="maneuver">
-                <span className="maneuver-icon">{icon(m.type)}</span>
-                <div className="maneuver-body">
-                  <p className="maneuver-text">{m.instruction}</p>
-                  <p className="maneuver-meta">
-                    {formatDistance(m.length)} · {Math.max(1, Math.round(m.time / 60))} min
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ol>
+
+          {/* Collapsible turn-by-turn */}
+          <button
+            className="turns-toggle"
+            onClick={() => setTurnsExpanded((v) => !v)}
+          >
+            <span>Turn-by-turn</span>
+            <span className="turns-toggle-arrow">{turnsExpanded ? '▲' : '▼'}</span>
+          </button>
+
+          {turnsExpanded && (
+            <ol className="maneuvers-list">
+              {(maneuvers as ValhallaManeuver[]).map((m, i) => (
+                <li key={i} className="maneuver">
+                  <span className="maneuver-icon">{icon(m.type)}</span>
+                  <div className="maneuver-body">
+                    <p className="maneuver-text">{m.instruction}</p>
+                    <p className="maneuver-meta">
+                      {formatDistance(m.length)} · {Math.max(1, Math.round(m.time / 60))} min
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
         </>
       )}
     </div>

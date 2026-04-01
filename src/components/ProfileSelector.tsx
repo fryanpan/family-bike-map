@@ -10,24 +10,25 @@ interface Props {
 export default function ProfileSelector({ profiles, selected, onSelect, onEdit }: Props) {
   return (
     <div className="profile-selector">
-      <h3 className="section-title">Riding Profile</h3>
-      <div className="profiles">
+      <div className="profile-chips">
         {Object.entries(profiles).map(([key, profile]) => (
-          <div key={key} className={`profile-card${selected === key ? ' selected' : ''}`}>
-            <button className="profile-main" onClick={() => onSelect(key)}>
-              <span className="profile-emoji">{profile.emoji}</span>
-              <span className="profile-label">{profile.label}</span>
-              <span className="profile-desc">{profile.description}</span>
-            </button>
-            <button
-              className="profile-edit-btn"
-              onClick={(e) => { e.stopPropagation(); onEdit(key) }}
-              title="Customise this profile"
-            >
-              ⚙️
-            </button>
-          </div>
+          <button
+            key={key}
+            className={`profile-chip${selected === key ? ' selected' : ''}`}
+            onClick={() => onSelect(key)}
+            title={profile.description}
+          >
+            <span className="profile-chip-emoji">{profile.emoji}</span>
+            <span className="profile-chip-label">{profile.label}</span>
+          </button>
         ))}
+        <button
+          className="profile-edit-icon"
+          onClick={() => onEdit(selected)}
+          title="Customise profile"
+        >
+          ⚙️
+        </button>
       </div>
     </div>
   )

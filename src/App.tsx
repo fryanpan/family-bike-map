@@ -4,7 +4,8 @@ import SearchBar from './components/SearchBar'
 import ProfileSelector from './components/ProfileSelector'
 import DirectionsPanel from './components/DirectionsPanel'
 import ProfileEditor from './components/ProfileEditor'
-import { getRoute, getRouteSegments, DEFAULT_PROFILES, formatDistance } from './services/routing'
+import FeedbackWidget from './components/FeedbackWidget'
+import { getRoute, getRouteSegments, DEFAULT_PROFILES } from './services/routing'
 import { reverseGeocode } from './services/geocoding'
 import type { Place, Route, ProfileMap, RiderProfile } from './utils/types'
 
@@ -28,9 +29,9 @@ function saveProfiles(profiles: ProfileMap): void {
 }
 
 const MODE_HINT: Record<string, string> = {
-  start:    '👆 Tap map or search to set start',
-  end:      '👆 Tap map or search to set destination',
-  waypoint: '👆 Tap to add waypoints — forces route through that point',
+  start:    'Tap map or search to set start',
+  end:      'Tap map or search to set destination',
+  waypoint: 'Tap to add waypoints',
 }
 
 export default function App() {
@@ -270,6 +271,8 @@ export default function App() {
           onClose={() => handleProfileSave(profiles[editingProfile])}
         />
       )}
+
+      <FeedbackWidget />
     </div>
   )
 }

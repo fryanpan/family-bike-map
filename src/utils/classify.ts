@@ -1,12 +1,103 @@
 import type { SafetyClass, SafetyInfo, ValhallaEdge, RouteSegment } from './types'
 
+// 5-color palette: bright green → sky blue → violet → amber → red
+// Chosen to be distinguishable against OSM base map and against each other.
 export const SAFETY: Record<SafetyClass, SafetyInfo> = {
-  great:      { label: 'Fahrradstrasse / Car-free path', color: '#16a34a', icon: '🚴', textColor: '#fff' },
-  good:       { label: 'Separated bike path',             color: '#2563eb', icon: '🛤️', textColor: '#fff' },
-  ok:         { label: 'Dedicated bike lane',             color: '#7c3aed', icon: '〰️', textColor: '#fff' },
-  acceptable: { label: 'Quiet street / Bus lane',         color: '#d97706', icon: '🏘️', textColor: '#fff' },
-  caution:    { label: 'Road with bike marking',          color: '#ea580c', icon: '⚡', textColor: '#fff' },
-  avoid:      { label: 'Busy road — no infra',            color: '#dc2626', icon: '⚠️', textColor: '#fff' },
+  great:      { label: 'Fahrradstrasse / Car-free path', color: '#22c55e', icon: '🚴', textColor: '#fff' },
+  good:       { label: 'Separated bike path',            color: '#0ea5e9', icon: '🛤️', textColor: '#fff' },
+  ok:         { label: 'Dedicated bike lane',            color: '#a855f7', icon: '〰️', textColor: '#fff' },
+  acceptable: { label: 'Quiet street / Bus lane',        color: '#f59e0b', icon: '🏘️', textColor: '#fff' },
+  caution:    { label: 'Road with bike marking',         color: '#f97316', icon: '⚡', textColor: '#fff' },
+  avoid:      { label: 'Busy road — no infra',           color: '#ef4444', icon: '⚠️', textColor: '#fff' },
+}
+
+// ── Profile-aware legend ────────────────────────────────────────────────────
+// Each profile defines how route types map to "great / ok / bad" levels,
+// with per-route-type icons so users can distinguish infrastructure visually.
+
+export type LegendLevel = 'great' | 'ok' | 'bad'
+
+export interface LegendItem { icon: string; name: string }
+
+export interface LegendGroup {
+  level: LegendLevel
+  label: string
+  color: string
+  items: LegendItem[]
+}
+
+export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
+  toddler: [
+    { level: 'great', label: 'Great', color: '#22c55e', items: [
+      { icon: '🚴', name: 'Car-free path' },
+      { icon: '🚲', name: 'Fahrradstrasse' },
+      { icon: '🛤️', name: 'Separated bike path' },
+    ]},
+    { level: 'ok', label: 'OK', color: '#f59e0b', items: [
+      { icon: '🏘️', name: 'Quiet street' },
+    ]},
+    { level: 'bad', label: 'Avoid', color: '#ef4444', items: [
+      { icon: '〰️', name: 'Painted bike lane' },
+      { icon: '⚠️', name: 'Busy road' },
+    ]},
+  ],
+  trailer: [
+    { level: 'great', label: 'Great', color: '#22c55e', items: [
+      { icon: '🚴', name: 'Car-free path / Fahrradstrasse' },
+      { icon: '🛤️', name: 'Separated bike path' },
+    ]},
+    { level: 'ok', label: 'OK', color: '#f59e0b', items: [
+      { icon: '🏘️', name: 'Quiet street' },
+      { icon: '〰️', name: 'Roadside bike lane' },
+      { icon: '🚌', name: 'Bus lane' },
+    ]},
+    { level: 'bad', label: 'Avoid', color: '#ef4444', items: [
+      { icon: '⚠️', name: 'Busy road' },
+    ]},
+  ],
+  training: [
+    { level: 'great', label: 'Great', color: '#22c55e', items: [
+      { icon: '🚴', name: 'Car-free path / Fahrradstrasse' },
+      { icon: '🛤️', name: 'Separated path' },
+    ]},
+    { level: 'ok', label: 'OK', color: '#f59e0b', items: [
+      { icon: '〰️', name: 'Bike lane' },
+      { icon: '🏘️', name: 'Quiet street' },
+      { icon: '🚌', name: 'Bus lane' },
+    ]},
+    { level: 'bad', label: 'Avoid', color: '#ef4444', items: [
+      { icon: '⚠️', name: 'Busy road' },
+    ]},
+  ],
+}
+
+// ── Route quality stats ─────────────────────────────────────────────────────
+// Maps safety classes to 3 display levels for the compact route summary bar.
+
+const SAFETY_LEVEL: Record<SafetyClass, LegendLevel> = {
+  great:      'great',
+  good:       'great',
+  ok:         'ok',
+  acceptable: 'ok',
+  caution:    'bad',
+  avoid:      'bad',
+}
+
+export interface RouteQuality { great: number; ok: number; bad: number }
+
+/** Compute the fraction of route (by coordinate count) in each quality level. */
+export function computeRouteQuality(segments: RouteSegment[]): RouteQuality {
+  if (!segments.length) return { great: 0, ok: 0, bad: 0 }
+  let great = 0, ok = 0, bad = 0
+  for (const seg of segments) {
+    const count = Math.max(1, seg.coordinates.length - 1)
+    const level = SAFETY_LEVEL[seg.safetyClass]
+    if (level === 'great') great += count
+    else if (level === 'ok') ok += count
+    else bad += count
+  }
+  const total = great + ok + bad || 1
+  return { great: great / total, ok: ok / total, bad: bad / total }
 }
 
 const BAD_SURFACES = new Set([
