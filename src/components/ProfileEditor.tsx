@@ -47,16 +47,18 @@ interface Props {
   onClose: () => void
 }
 
+// Badge colors aligned with the three-color status system (green / amber / red).
+// Darker text + tinted bg for readable badge contrast.
 const LEVEL_COLORS: Record<string, string> = {
-  great: '#15803d',
-  ok:    '#92400e',
-  bad:   '#991b1b',
+  great: '#15803d',  // dark green (text on green-50 bg)
+  ok:    '#92400e',  // dark amber (text on amber-50 bg)
+  bad:   '#991b1b',  // dark red   (text on red-50 bg)
 }
 
 const LEVEL_BG: Record<string, string> = {
-  great: '#f0fdf4',
-  ok:    '#fffbeb',
-  bad:   '#fef2f2',
+  great: '#f0fdf4',  // green-50
+  ok:    '#fffbeb',  // amber-50
+  bad:   '#fef2f2',  // red-50
 }
 
 export default function ProfileEditor({ profileKey, profile, onChange, onClose }: Props) {

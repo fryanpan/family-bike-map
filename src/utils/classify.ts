@@ -1,12 +1,19 @@
 import type { SafetyClass, SafetyInfo, ValhallaEdge, RouteSegment } from './types'
 
-// 4-level color palette: green → blue → amber → red
-// Maps to the 4 SafetyClass levels: great → good → ok → avoid
+// Three-color display palette: green / amber / red
+// 'great' and 'good' both show green — they're grouped into the same top-tier
+// display level (LegendLevel='great' / RouteQuality.great) so they share one color.
+export const STATUS_COLOR = {
+  green: '#22c55e',
+  amber: '#f59e0b',
+  red:   '#ef4444',
+} as const
+
 export const SAFETY: Record<SafetyClass, SafetyInfo> = {
-  great: { label: 'Car-free path / Fahrradstrasse', color: '#22c55e', icon: '🚴', textColor: '#fff' },
-  good:  { label: 'Shared footway / Pedestrian path', color: '#0ea5e9', icon: '🛤️', textColor: '#fff' },
-  ok:    { label: 'Separated track / Living street', color: '#f59e0b', icon: '〰️', textColor: '#fff' },
-  avoid: { label: 'Road without protection', color: '#ef4444', icon: '⚠️', textColor: '#fff' },
+  great: { label: 'Car-free path / Fahrradstrasse', color: STATUS_COLOR.green, icon: '🚴', textColor: '#fff' },
+  good:  { label: 'Shared footway / Pedestrian path', color: STATUS_COLOR.green, icon: '🛤️', textColor: '#fff' },
+  ok:    { label: 'Separated track / Living street', color: STATUS_COLOR.amber, icon: '〰️', textColor: '#fff' },
+  avoid: { label: 'Road without protection', color: STATUS_COLOR.red, icon: '⚠️', textColor: '#fff' },
 }
 
 // ── Profile-aware legend ────────────────────────────────────────────────────

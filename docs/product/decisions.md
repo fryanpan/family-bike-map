@@ -1,5 +1,20 @@
 # Architecture & Product Decisions
 
+## 2026-04-01: Three-color status indicator system (BC-243)
+
+**Context**: The map overlay and route polylines were showing 4 distinct colors (green, blue, amber, red) for the 4 internal SafetyClass levels, while the route quality bar and profile editor badges were already using a consistent 3-color system (green/amber/red).
+
+**Decision**: Consolidate to a three-color display palette: green (good/great), amber (ok), red (bad). The 4-level `SafetyClass` type (`great`, `good`, `ok`, `avoid`) is preserved internally for routing logic, but `great` and `good` now share the same green color for display.
+
+**Rationale**:
+- `great` and `good` already mapped to the same `LegendLevel='great'` and `RouteQuality.great` — making them the same color on the map eliminates the visual inconsistency
+- Simpler 3-color system is easier to understand at a glance (green = safe, amber = caution, red = avoid)
+- A named `STATUS_COLOR` constant is exported from `classify.ts` as the single source of truth for all three colors
+
+**Status**: Implemented. All 65 tests pass.
+
+---
+
 ## 2026-04-01: avoid_bad_surfaces calibration (Engeldam / Fahrradstraße routing)
 
 **Context**: Route from Dresdener Straße 112 → Schillingbrücke was not using the Fahrradstraße or the dirt path through the Engeldam park. Investigation confirmed this is a routing weight issue, not missing OSM data (Berlin OSM coverage for bike infra and park paths is excellent).
