@@ -15,7 +15,7 @@ type Env = {
   LINEAR_TEAM_ID?: string
   LINEAR_PROJECT_ID?: string
   LINEAR_ASSIGNEE_ID?: string
-  ASSETS: Fetcher
+  ASSETS: { fetch: (request: Request) => Promise<Response> }
 }
 
 export default {
