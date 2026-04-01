@@ -9,7 +9,7 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 
 [[routes]]
-pattern = "bike.fryanpan.com"
+pattern = "bike-map.fryanpan.com"
 custom_domain = true
 
 [observability]
