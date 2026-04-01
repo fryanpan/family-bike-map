@@ -48,6 +48,18 @@ function ClickHandler({ onClick }: { onClick: (latlng: L.LatLng) => void }) {
   return null
 }
 
+function EditModeButton({ editMode, onToggle }: { editMode: boolean; onToggle: () => void }) {
+  return (
+    <button
+      className={`edit-mode-btn${editMode ? ' edit-mode-active' : ''}`}
+      onClick={onToggle}
+      title={editMode ? 'Exit edit mode' : 'Activate to tap map and set points'}
+    >
+      ✏️ {editMode ? 'Editing' : 'Edit'}
+    </button>
+  )
+}
+
 function midpoint(coords: [number, number][]): [number, number] {
   return coords[Math.floor(coords.length / 2)]
 }
@@ -184,6 +196,8 @@ interface Props {
   overlayEnabled: boolean
   profileKey: string
   onOverlayStatusChange: (status: string) => void
+  editMode: boolean
+  onToggleEditMode: () => void
   legendVisible?: boolean
 }
 
@@ -197,6 +211,8 @@ export default function Map({
   overlayEnabled,
   profileKey,
   onOverlayStatusChange,
+  editMode,
+  onToggleEditMode,
   legendVisible = true,
 }: Props) {
   const routeSegments = route?.segments ?? null
@@ -212,7 +228,7 @@ export default function Map({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      <ClickHandler onClick={onMapClick} />
+      {editMode && <ClickHandler onClick={onMapClick} />}
 
       <BikeMapOverlay enabled={overlayEnabled} profileKey={profileKey} onStatusChange={onOverlayStatusChange} />
 
@@ -230,12 +246,14 @@ export default function Map({
 
       {waypoints.map((wp, i) => (
         <Marker key={i} position={[wp.lat, wp.lng]} icon={waypointIcon}
-          eventHandlers={{ click: () => onRemoveWaypoint(i) }}
+          eventHandlers={editMode ? { click: () => onRemoveWaypoint(i) } : {}}
         >
         </Marker>
       ))}
 
       {legendVisible && <Legend segments={routeSegments} overlayOn={overlayEnabled} profileKey={profileKey} />}
+
+      <EditModeButton editMode={editMode} onToggle={onToggleEditMode} />
     </MapContainer>
   )
 }
