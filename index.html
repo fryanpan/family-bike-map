@@ -11,9 +11,8 @@
     <script src="/feedback-widget.js"></script>
     <script>
       document.addEventListener('DOMContentLoaded', function () {
-        var workerUrl = '%VITE_WORKER_URL%';
-        if (window.FeedbackWidget && workerUrl && workerUrl.indexOf('%') === -1) {
-          FeedbackWidget.init({ mode: 'live', endpoint: workerUrl + '/feedback' });
+        if (window.FeedbackWidget) {
+          FeedbackWidget.init({ mode: 'live', endpoint: '/api/feedback' });
         }
       });
     </script>

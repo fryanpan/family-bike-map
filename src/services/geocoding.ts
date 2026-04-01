@@ -1,8 +1,8 @@
 import type { Place } from '../utils/types'
 
-// In production (surge.sh), route through the Cloudflare Worker.
-// In dev, Vite proxy handles /api/* directly.
-const API_BASE = import.meta.env.VITE_WORKER_URL ?? '/api'
+// All API calls use relative paths — same origin in production (Cloudflare Worker
+// serves both assets and API), and proxied via wrangler dev locally.
+const API_BASE = '/api'
 
 /**
  * Search for places using Nominatim (OpenStreetMap geocoding).
