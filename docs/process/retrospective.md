@@ -28,3 +28,19 @@
 - The profiles were implemented without carefully matching the product spec's priority rules — specifically, the toddler profile spec says painted road bike lanes are "no better than a road without a bike path", which requires profile-aware classification (classifyEdge now takes a profileKey).
 
 **Action:** When implementing safety-score-based features, always trace each product spec rule explicitly to code with a comment referencing the spec. Don't assume Valhalla's field names match intuitive meanings (bicycle_network vs bicycle_road is non-obvious).
+
+---
+
+## 2026-04-01 — BC-242: Path rating consolidation + 4-level classification
+
+**What worked:**
+- Posting a full classification table to Slack before touching code caught real inconsistencies (footway great vs good, share_busway training inconsistency between Valhalla and OSM). Worth the extra turn every time.
+- Reducing SafetyClass from 6→4 levels (great/good/ok/avoid) removed a lot of cognitive overhead — `acceptable` and `caution` were never clearly distinguished from `ok` and `avoid` in practice.
+- Exporting `BAD_SURFACES` from classify.ts and importing in overpass.ts is a clean consolidation pattern for shared constants; better than copy-paste with a comment.
+- The PROFILE_LEGEND-derived path preferences panel in ProfileEditor is a zero-cost way to make the settings UX meaningful — shows exactly what the profile prefers without adding new state or bidirectional param mapping.
+
+**What didn't:**
+- The integration test `quality.bad < 0.5` for toddler was fragile — it was testing the old classification. When residential roads changed from `ok` to `avoid` for toddler (by design), the test broke. Route quality thresholds in integration tests need to account for classification model changes.
+- Valhalla and OSM overlay had subtly different classifications for the same path types (e.g., share_busway: Valhalla=good/trailer vs OSM=ok/trailer). These divergences are intentional (routing preference vs display) but should be documented explicitly.
+
+**Action:** When changing path classification rules, update integration test quality thresholds to match the new model. Consider adding a comment explaining why the threshold is set where it is.

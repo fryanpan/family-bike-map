@@ -83,10 +83,10 @@ function SeparatedPathSign() {
 }
 
 const LEGEND_ICON_OVERRIDE: Record<string, React.ReactNode> = {
-  'Fahrradstrasse':                                     <FahrradstrasseSign />,
-  'Recreational path (car free) / Fahrradstrasse':      <FahrradstrasseSign />,
-  'Separated bike path':                                <SeparatedPathSign />,
-  'Separated path':                                     <SeparatedPathSign />,
+  'Fahrradstrasse':                      <FahrradstrasseSign />,
+  'Separated bike track':                <SeparatedPathSign />,
+  'Separated bike track (narrow)':       <SeparatedPathSign />,
+  'Separated bike track (slow)':         <SeparatedPathSign />,
 }
 
 function midpoint(coords: [number, number][]): [number, number] {
@@ -100,7 +100,7 @@ function RouteDisplay({ route }: { route: Route | null }) {
     return (
       <>
         {route.segments.map((seg: RouteSegment, i: number) => {
-          const s = SAFETY[seg.safetyClass] ?? SAFETY.acceptable
+          const s = SAFETY[seg.safetyClass] ?? SAFETY.avoid
           return (
             <Polyline
               key={i}
@@ -118,7 +118,7 @@ function RouteDisplay({ route }: { route: Route | null }) {
         {route.segments
           .filter((seg) => seg.coordinates.length >= 4)
           .map((seg, i) => {
-            const s = SAFETY[seg.safetyClass] ?? SAFETY.acceptable
+            const s = SAFETY[seg.safetyClass] ?? SAFETY.avoid
             return (
               <Marker
                 key={`icon-${i}`}
@@ -165,8 +165,8 @@ function Legend({
     if (!presentClasses) return true
     const levelToClasses: Record<string, string[]> = {
       great: ['great', 'good'],
-      ok:    ['ok', 'acceptable'],
-      bad:   ['caution', 'avoid'],
+      ok:    ['ok'],
+      bad:   ['avoid'],
     }
     return (levelToClasses[level] ?? []).some((c) => (presentClasses as Set<string>).has(c))
   }

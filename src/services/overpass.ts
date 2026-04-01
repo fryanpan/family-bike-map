@@ -1,5 +1,5 @@
 import type { SafetyClass, OsmWay } from '../utils/types'
-import { worsen } from '../utils/classify'
+import { BAD_SURFACES } from '../utils/classify'
 import type { LatLngBounds } from 'leaflet'
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
@@ -37,18 +37,34 @@ out geom;
 `
 }
 
-const BAD_SURFACES = new Set([
-  'cobblestone', 'paving_stones', 'sett', 'unhewn_cobblestone',
-  'cobblestone:flattened', 'gravel', 'unpaved',
-])
+// BAD_SURFACES is imported from classify.ts — single source of truth.
+// See classify.ts for the canonical list and rationale.
 
 /**
- * Map raw OSM tags to a safety class, mirroring classify.ts profile-aware logic.
+ * Map raw OSM tags to a safety class using the same classification model as classify.ts.
  *
- * Profile differences (same rules as classifyEdge in classify.ts):
- *  toddler  — painted bike lanes (cycleway=lane) → avoid; share_busway → caution
- *  trailer  — painted lanes → ok; share_busway → acceptable
- *  training — same as trailer; tolerates bad surfaces (no worsening)
+ * Classification uses a 4-level system (great/good/ok/avoid) per profile:
+ *
+ * toddler:
+ *   Good:  highway=cycleway/path/footway/track, bicycle_road=yes
+ *   OK:    cycleway=track (separated), living_street
+ *   Avoid: cycleway=lane, share_busway, residential, bad surface
+ *
+ * trailer:
+ *   Good:  highway=cycleway/path/footway/track, bicycle_road=yes, share_busway
+ *   OK:    cycleway=lane, living_street, residential
+ *   Avoid: cycleway=track (too narrow for trailer), bad surface
+ *
+ * training:
+ *   Good:  highway=cycleway/path/footway/track, bicycle_road=yes, cycleway=lane, share_busway
+ *   OK:    living_street, residential
+ *   Avoid: cycleway=track (too slow for training), bad surface
+ *
+ * Physical separation (bollards/buffer on a painted lane) is treated the same as
+ * cycleway=track for classification — the separation tag upgrades the base lane
+ * classification to the "separated track" tier.
+ *
+ * Valhalla↔OSM mapping: see classify.ts comment block for the full correlation.
  */
 const SEPARATION_TAGS = new Set([
   'flex_post', 'separation_kerb', 'guard_rail',
@@ -70,17 +86,15 @@ function hasSeparation(tags: Record<string, string>): boolean {
 }
 
 function classifyOsmTags(tags: Record<string, string>, profileKey?: string): SafetyClass {
+  const surface = tags.surface ?? ''
+
+  // Bad surfaces → avoid for all profiles
+  if (BAD_SURFACES.has(surface)) return 'avoid'
+
   const highway = tags.highway ?? ''
   const cycleway = tags.cycleway ?? ''
   const bicycleRoad = tags.bicycle_road === 'yes'
-  const surface = tags.surface ?? ''
-  const badSurface = BAD_SURFACES.has(surface)
-
-  const base = classifyOsmBase(highway, cycleway, bicycleRoad, tags, profileKey)
-
-  // Bad surfaces worsen the class by one step — except for the training profile
-  if (badSurface && profileKey !== 'training') return worsen(base)
-  return base
+  return classifyOsmBase(highway, cycleway, bicycleRoad, tags, profileKey)
 }
 
 function classifyOsmBase(
@@ -90,45 +104,62 @@ function classifyOsmBase(
   tags: Record<string, string>,
   profileKey?: string,
 ): SafetyClass {
+  // Car-free dedicated cycleway or Fahrradstrasse — great for all
   if (highway === 'cycleway' || bicycleRoad) return 'great'
 
-  // Car-free shared paths (park/canal/river paths and footway+bicycle=designated)
-  // These are physically separated from car traffic, so rated great regardless of profile.
-  if (highway === 'path' || highway === 'footway') return 'great'
+  // Car-free shared paths (park/canal paths, footway+bicycle=designated, tracks)
+  // These are physically separated from car traffic.
+  if (highway === 'path' || highway === 'footway' || highway === 'track') return 'great'
 
-  // Dirt/gravel tracks accessible to bikes — great if paved/compacted, but BAD_SURFACES
-  // penalty in classifyOsmTags will worsen gravel/unpaved to 'good'.
-  if (highway === 'track') return 'great'
+  // Physically separated tracks alongside road (cycleway=track, cycleway:*=track)
+  // Toddler: ok (safe but slow/interrupted at crossings)
+  // Trailer/training: avoid (too narrow for trailers, too slow for training)
+  if (cycleway === 'track' || cycleway === 'opposite_track') {
+    return profileKey === 'toddler' ? 'ok' : 'avoid'
+  }
 
-  if (cycleway === 'track' || cycleway === 'opposite_track') return 'good'
-
-  // Directional separated lanes via cycleway:right/left/both=track
   const cRight = tags['cycleway:right'] ?? ''
   const cLeft  = tags['cycleway:left']  ?? ''
   const cBoth  = tags['cycleway:both']  ?? ''
-  if (cRight === 'track' || cLeft === 'track' || cBoth === 'track') return 'good'
+  if (cRight === 'track' || cLeft === 'track' || cBoth === 'track') {
+    return profileKey === 'toddler' ? 'ok' : 'avoid'
+  }
 
+  // Painted road bike lane (cycleway=lane, cycleway:*=lane)
+  // Physical separation (bollards/buffer) treats it the same as a separated track.
   if (cycleway === 'lane' || cycleway === 'opposite_lane') {
-    // If the painted lane has physical separation (bollards, buffer, etc.), upgrade to good.
-    if (hasSeparation(tags)) return 'good'
-    // toddler treats painted road lanes as no better than an unprotected road
-    return profileKey === 'toddler' ? 'avoid' : 'ok'
+    if (hasSeparation(tags)) return profileKey === 'toddler' ? 'ok' : 'avoid'
+    if (profileKey === 'toddler') return 'avoid'
+    if (profileKey === 'training') return 'good'
+    return 'ok'  // trailer
   }
 
-  // Directional painted lanes via cycleway:right/left/both=lane
   if (cRight === 'lane' || cLeft === 'lane' || cBoth === 'lane') {
-    if (hasSeparation(tags)) return 'good'
+    if (hasSeparation(tags)) return profileKey === 'toddler' ? 'ok' : 'avoid'
+    if (profileKey === 'toddler') return 'avoid'
+    if (profileKey === 'training') return 'good'
+    return 'ok'  // trailer
+  }
+
+  // Shared bus lane
+  // Toddler: avoid (buses are hazardous with small children)
+  // Trailer: ok (acceptable, buses give wide berth)
+  // Training: good (wide, well-maintained)
+  if (cycleway === 'share_busway') {
+    if (profileKey === 'toddler') return 'avoid'
+    if (profileKey === 'training') return 'good'
+    return 'ok'  // trailer
+  }
+
+  if (highway === 'living_street') return 'ok'
+
+  // Residential roads
+  // Toddler: avoid; trailer/training: ok
+  if (highway === 'residential') {
     return profileKey === 'toddler' ? 'avoid' : 'ok'
   }
 
-  if (cycleway === 'share_busway') {
-    return profileKey === 'toddler' ? 'caution' : 'acceptable'
-  }
-
-  if (highway === 'living_street') return 'acceptable'
-  if (highway === 'residential') return 'acceptable'
-
-  return 'acceptable'
+  return 'ok'  // fallback for other queried ways (service roads, etc.)
 }
 
 interface OverpassElement {

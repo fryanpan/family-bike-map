@@ -9,7 +9,7 @@ function OverlayLines({ ways }: { ways: OsmWay[] }) {
   return (
     <>
       {ways.map((way) => {
-        const s = SAFETY[way.safetyClass] ?? SAFETY.acceptable
+        const s = SAFETY[way.safetyClass] ?? SAFETY.avoid
         return (
           <Polyline
             key={way.osmId}

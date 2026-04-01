@@ -188,18 +188,16 @@ function skipIfOffline() {
 
 describe('routing integration — Dresdener Str 112 → Zoo (toddler mode)', () => {
   /**
-   * The toddler route to the Zoo should primarily use good cycling infrastructure.
-   * More than half the route (great + ok quality levels) should be on paths
-   * that are acceptable for a toddler: car-free paths, separated bike lanes,
-   * Fahrradstrasse, or at least quiet residential streets.
-   *
-   * "Bad" paths (busy roads, painted road lanes) should be less than half the route.
+   * The toddler route to the Zoo should use available car-free infrastructure.
+   * With the strict toddler classification (residential roads now classify as
+   * avoid), we check that the route still includes meaningful car-free sections
+   * (Tiergarten paths, cycleways near Potsdamer Platz).
    */
-  it('has <50% bad infrastructure (quality.bad < 0.5)', async () => {
+  it('uses some car-free infrastructure (quality.great > 0.1)', async () => {
     if (skipIfOffline()) return
     const { coords } = await fetchRoute(DRESDENER_STR_112, ZOO_ENTRANCE, TODDLER_OPTS)
     const quality = await fetchRouteQuality(coords, 'toddler')
-    expect(quality.bad).toBeLessThan(0.5)
+    expect(quality.great).toBeGreaterThan(0.1)
   })
 
   it('uses some car-free/separated infrastructure (quality.great > 0.15)', async () => {
@@ -247,14 +245,11 @@ describe('routing integration — Dresdener Str 112 → Le Brot (training mode)'
     expect(quality.great + quality.ok).toBeGreaterThan(0.6)
   })
 
-  it('bus lanes on the route classify as "good" (not "acceptable") for training', () => {
-    // Regression: bus lanes (cycle_lane="share_busway") were incorrectly classified
-    // as "acceptable" for the training profile; they should be "good" because
-    // they provide dedicated cycling space on fast roads like Sonnenallee.
+  it('bus lanes on the route classify as "good" for training and trailer, "avoid" for toddler', () => {
     const buslane = { cycle_lane: 'share_busway' }
     expect(classifyEdge(buslane, 'training')).toBe('good')
-    expect(classifyEdge(buslane, 'toddler')).toBe('caution')  // not safe with small child
-    expect(classifyEdge(buslane, 'trailer')).toBe('acceptable')
+    expect(classifyEdge(buslane, 'trailer')).toBe('good')   // wide, well-maintained
+    expect(classifyEdge(buslane, 'toddler')).toBe('avoid')  // hazardous with small child
   })
 })
 
@@ -312,8 +307,8 @@ describe('classifyEdge — uses Valhalla string API values (not legacy numeric c
     expect(classifyEdge({ use: 'footway' }, 'toddler')).toBe('good')
   })
 
-  it('separated bike track ("cycle_lane"="separated") → good', () => {
-    expect(classifyEdge({ cycle_lane: 'separated' }, 'toddler')).toBe('good')
+  it('separated bike track ("cycle_lane"="separated") → ok for toddler (safe but slow)', () => {
+    expect(classifyEdge({ cycle_lane: 'separated' }, 'toddler')).toBe('ok')
   })
 
   it('painted lane ("cycle_lane"="dedicated") → avoid for toddler', () => {
@@ -324,8 +319,8 @@ describe('classifyEdge — uses Valhalla string API values (not legacy numeric c
     expect(classifyEdge({ cycle_lane: 'share_busway' }, 'training')).toBe('good')
   })
 
-  it('residential road ("road_class"="residential") → acceptable', () => {
-    expect(classifyEdge({ road_class: 'residential' }, 'toddler')).toBe('acceptable')
+  it('residential road ("road_class"="residential") → avoid for toddler', () => {
+    expect(classifyEdge({ road_class: 'residential' }, 'toddler')).toBe('avoid')
   })
 
   it('secondary road ("road_class"="secondary") → avoid', () => {

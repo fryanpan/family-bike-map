@@ -269,6 +269,7 @@ export default function App() {
       {editingProfile && (
         <Suspense fallback={null}>
           <ProfileEditor
+            profileKey={editingProfile}
             profile={profiles[editingProfile]}
             onChange={(updated) => {
               setProfiles((prev) => ({ ...prev, [editingProfile]: updated }))

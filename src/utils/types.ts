@@ -34,7 +34,9 @@ export type ProfileKey = string
 
 export type ProfileMap = Record<ProfileKey, RiderProfile>
 
-export type SafetyClass = 'great' | 'good' | 'ok' | 'acceptable' | 'caution' | 'avoid'
+// 4-level classification: great > good > ok > avoid
+// (replaces the old 6-level system that had 'acceptable' and 'caution')
+export type SafetyClass = 'great' | 'good' | 'ok' | 'avoid'
 
 export interface SafetyInfo {
   label: string
