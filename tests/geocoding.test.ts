@@ -48,7 +48,16 @@ describe('searchPlaces — shortLabel formatting', () => {
     expect(place.shortLabel).toBe('Dresdener Straße')
   })
 
-  it('falls back to name when no address', async () => {
+  it('uses POI name even when address.road is also present', async () => {
+    // Regression: POI results (e.g. "Humboldt Forum") have both name and address.road.
+    // shortLabel must be the POI name, not the road it sits on.
+    stubFetch([makeResult({ name: 'Humboldt Forum', address: { road: 'Schloßplatz' } })])
+    const { searchPlaces } = await import('../src/services/geocoding')
+    const [place] = await searchPlaces('Humboldt Forum')
+    expect(place.shortLabel).toBe('Humboldt Forum')
+  })
+
+  it('uses name when no address', async () => {
     stubFetch([makeResult({ name: 'Tiergarten', address: undefined })])
     const { searchPlaces } = await import('../src/services/geocoding')
     const [place] = await searchPlaces('Tiergarten')

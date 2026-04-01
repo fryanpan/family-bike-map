@@ -23,12 +23,16 @@ function looksLikeAddress(query: string): boolean {
 function mapResults(results: NominatimResult[]): Place[] {
   return results.map((r) => {
     let shortLabel: string
-    if (r.address?.road) {
+    // Prefer the result's own name (POI, landmark) when it's distinct from the road.
+    // Only format as "Road HouseNumber" for pure address results that lack a named entity.
+    if (r.name && r.name !== r.address?.road) {
+      shortLabel = r.name
+    } else if (r.address?.road) {
       shortLabel = r.address.house_number
         ? `${r.address.road} ${r.address.house_number}`
         : r.address.road
     } else {
-      shortLabel = r.name ?? r.display_name.split(',')[0]
+      shortLabel = r.display_name.split(',')[0]
     }
     return {
       label: r.display_name,
