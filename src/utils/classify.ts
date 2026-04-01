@@ -26,6 +26,10 @@ export interface LegendGroup {
   items: LegendItem[]
 }
 
+// Legend level → representative color from the SAFETY palette:
+//   great → green  (#22c55e, matching SAFETY.great)
+//   ok    → violet (#a855f7, matching SAFETY.ok — the more visible of ok+acceptable)
+//   bad   → orange (#f97316, matching SAFETY.caution — the entry point to "avoid" territory)
 export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
   toddler: [
     { level: 'great', label: 'Great', color: '#22c55e', items: [
@@ -33,10 +37,10 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🚲', name: 'Fahrradstrasse' },
       { icon: '🛤️', name: 'Separated bike path' },
     ]},
-    { level: 'ok', label: 'OK', color: '#f59e0b', items: [
+    { level: 'ok', label: 'OK', color: '#a855f7', items: [
       { icon: '🏘️', name: 'Quiet street' },
     ]},
-    { level: 'bad', label: 'Avoid', color: '#ef4444', items: [
+    { level: 'bad', label: 'Avoid', color: '#f97316', items: [
       { icon: '〰️', name: 'Painted bike lane' },
       { icon: '⚠️', name: 'Busy road' },
     ]},
@@ -46,12 +50,12 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🚴', name: 'Car-free path / Fahrradstrasse' },
       { icon: '🛤️', name: 'Separated bike path' },
     ]},
-    { level: 'ok', label: 'OK', color: '#f59e0b', items: [
+    { level: 'ok', label: 'OK', color: '#a855f7', items: [
       { icon: '🏘️', name: 'Quiet street' },
       { icon: '〰️', name: 'Roadside bike lane' },
       { icon: '🚌', name: 'Bus lane' },
     ]},
-    { level: 'bad', label: 'Avoid', color: '#ef4444', items: [
+    { level: 'bad', label: 'Avoid', color: '#f97316', items: [
       { icon: '⚠️', name: 'Busy road' },
     ]},
   ],
@@ -60,12 +64,12 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🚴', name: 'Car-free path / Fahrradstrasse' },
       { icon: '🛤️', name: 'Separated path' },
     ]},
-    { level: 'ok', label: 'OK', color: '#f59e0b', items: [
+    { level: 'ok', label: 'OK', color: '#a855f7', items: [
       { icon: '〰️', name: 'Bike lane' },
       { icon: '🏘️', name: 'Quiet street' },
       { icon: '🚌', name: 'Bus lane' },
     ]},
-    { level: 'bad', label: 'Avoid', color: '#ef4444', items: [
+    { level: 'bad', label: 'Avoid', color: '#f97316', items: [
       { icon: '⚠️', name: 'Busy road' },
     ]},
   ],
