@@ -56,7 +56,7 @@ export default function App() {
 
   const [panelOpen, setPanelOpen] = useState(true)
 
-  const [overlayEnabled, setOverlayEnabled] = useState(false)
+  const [overlayEnabled, setOverlayEnabled] = useState(true)
   const [overlayStatus, setOverlayStatus]   = useState('idle')
 
   // Legend toggle state — managed here so Legend can render outside MapContainer
@@ -253,6 +253,17 @@ export default function App() {
             onToggleGroup={toggleGroup}
           />
         </div>
+        {/* On-map bike layer toggle */}
+        <div className="map-bike-layer-toggle">
+          <button
+            className={`bike-layer-btn${overlayEnabled ? ' active' : ''}`}
+            onClick={() => setOverlayEnabled((v) => !v)}
+            title="Toggle bike infrastructure layer"
+          >
+            🗺️ Bike Layer
+          </button>
+          {overlayStatusMsg && <p className="bike-layer-status">{overlayStatusMsg}</p>}
+        </div>
       </div>
 
       <div className={`panel${panelOpen ? ' panel-open' : ' panel-closed'}`}>
@@ -267,21 +278,7 @@ export default function App() {
 
         <div className="panel-content">
           <div className="panel-header">
-            <div className="header-row">
-              <div>
-                <h1 className="app-title">Family Bike Map</h1>
-              </div>
-              <button
-                className={`overlay-toggle${overlayEnabled ? ' overlay-on' : ''}`}
-                onClick={() => setOverlayEnabled((v) => !v)}
-                title="Show bike infrastructure on map"
-              >
-                🗺️ Bike map
-              </button>
-            </div>
-            {overlayStatusMsg && (
-              <p className="overlay-status">{overlayStatusMsg}</p>
-            )}
+            <h1 className="app-title">Family Bike Map</h1>
           </div>
 
           <div className="search-section">
