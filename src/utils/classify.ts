@@ -94,19 +94,75 @@ export const SAFETY_LEVEL: Record<SafetyClass, LegendLevel> = {
 
 export interface RouteQuality { good: number; ok: number; bad: number }
 
-/** Compute the fraction of route (by coordinate count) in each quality level. */
-export function computeRouteQuality(segments: RouteSegment[]): RouteQuality {
+/**
+ * Compute the fraction of route (by coordinate count) in each quality level.
+ *
+ * If `preferredClasses` is provided, uses a preferred/other model:
+ *   - preferred class → "good" bucket
+ *   - non-preferred class → "bad" bucket
+ *   - "ok" bucket is always 0 in this mode
+ *
+ * Without `preferredClasses`, falls back to the default good/ok/bad mapping.
+ */
+export function computeRouteQuality(
+  segments: RouteSegment[],
+  preferredClasses?: Set<SafetyClass>,
+): RouteQuality {
   if (!segments.length) return { good: 0, ok: 0, bad: 0 }
   let good = 0, ok = 0, bad = 0
   for (const seg of segments) {
     const count = Math.max(1, seg.coordinates.length - 1)
-    const level = SAFETY_LEVEL[seg.safetyClass]
-    if (level === 'good') good += count
-    else if (level === 'ok') ok += count
-    else bad += count
+    if (preferredClasses) {
+      if (preferredClasses.has(seg.safetyClass)) good += count
+      else bad += count
+    } else {
+      const level = SAFETY_LEVEL[seg.safetyClass]
+      if (level === 'good') good += count
+      else if (level === 'ok') ok += count
+      else bad += count
+    }
   }
   const total = good + ok + bad || 1
   return { good: good / total, ok: ok / total, bad: bad / total }
+}
+
+// ── Preferred item helpers ──────────────────────────────────────────────────
+
+/**
+ * Returns the set of item names that are "preferred" by default for a profile.
+ * Default: all items from 'good' and 'ok' legend groups.
+ */
+export function getDefaultPreferredItems(profileKey: string): Set<string> {
+  const groups = PROFILE_LEGEND[profileKey]
+  if (!groups) return new Set()
+  const names = new Set<string>()
+  for (const group of groups) {
+    if (group.level === 'good' || group.level === 'ok') {
+      group.items.forEach((item) => names.add(item.name))
+    }
+  }
+  return names
+}
+
+/**
+ * Returns the SafetyClasses that are "preferred" given a set of preferred item names.
+ * A class is preferred if AT LEAST ONE of its items (for the profile) is preferred.
+ */
+export function getPreferredSafetyClasses(
+  preferredNames: Set<string>,
+  profileKey: string,
+): Set<SafetyClass> {
+  const groups = PROFILE_LEGEND[profileKey]
+  if (!groups) return new Set()
+  const preferred = new Set<SafetyClass>()
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (preferredNames.has(item.name)) {
+        preferred.add(item.safetyClass)
+      }
+    }
+  }
+  return preferred
 }
 
 // Surfaces that always classify as avoid — rough/uncomfortable for family biking.

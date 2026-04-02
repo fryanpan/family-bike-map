@@ -1,4 +1,3 @@
-import { SAFETY, PROFILE_LEGEND } from '../utils/classify'
 import type { RiderProfile, BicycleType, BicycleCostingOptions } from '../utils/types'
 
 const BIKE_TYPES: BicycleType[] = ['Hybrid', 'Road', 'Cross', 'Mountain']
@@ -47,23 +46,8 @@ interface Props {
   onClose: () => void
 }
 
-// Badge colors aligned with the three-color status system (green / amber / red).
-// Darker text + tinted bg for readable badge contrast.
-const LEVEL_COLORS: Record<string, string> = {
-  great: '#15803d',  // dark green (text on green-50 bg)
-  ok:    '#92400e',  // dark amber (text on amber-50 bg)
-  bad:   '#991b1b',  // dark red   (text on red-50 bg)
-}
-
-const LEVEL_BG: Record<string, string> = {
-  great: '#f0fdf4',  // green-50
-  ok:    '#fffbeb',  // amber-50
-  bad:   '#fef2f2',  // red-50
-}
-
-export default function ProfileEditor({ profileKey, profile, onChange, onClose }: Props) {
+export default function ProfileEditor({ profile, onChange, onClose }: Props) {
   const opts: BicycleCostingOptions = profile.costingOptions
-  const profileGroups = profileKey ? PROFILE_LEGEND[profileKey] : null
 
   function set(key: keyof BicycleCostingOptions, value: number | string) {
     onChange({ ...profile, costingOptions: { ...opts, [key]: value } })
@@ -177,36 +161,6 @@ export default function ProfileEditor({ profileKey, profile, onChange, onClose }
               </label>
             </div>
           </div>
-
-          {profileGroups && (
-            <div className="pe-field">
-              <label className="pe-label">Path preferences for this profile</label>
-              <p className="pe-hint">How each path type is classified when displaying routes</p>
-              <div className="pe-pref-section">
-                {profileGroups.map((group) => (
-                  <div key={group.level} className="pe-pref-group">
-                    <span
-                      className="pe-pref-badge"
-                      style={{ color: LEVEL_COLORS[group.level], background: LEVEL_BG[group.level] }}
-                    >
-                      {group.label}
-                    </span>
-                    <div className="pe-pref-items">
-                      {group.items.map((item) => (
-                        <div key={item.name} className="pe-pref-item">
-                          <span
-                            className="pe-pref-dot"
-                            style={{ background: SAFETY[item.safetyClass]?.color }}
-                          />
-                          <span className="pe-pref-name">{item.icon} {item.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="modal-footer">

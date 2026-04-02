@@ -1,7 +1,7 @@
 import React from 'react'
 import { SAFETY, PROFILE_LEGEND } from '../utils/classify'
-import type { LegendLevel } from '../utils/classify'
-import type { RouteSegment, SafetyClass } from '../utils/types'
+import type { LegendItem } from '../utils/classify'
+import type { RouteSegment } from '../utils/types'
 
 // Official Fahrradstrasse sign (Zeichen 244.1): blue circle with white bicycle
 function FahrradstrasseSign() {
@@ -43,119 +43,106 @@ const LEGEND_ICON_OVERRIDE: Record<string, React.ReactNode> = {
   'Separated bike track (slow)':         <SeparatedPathSign />,
 }
 
-function CheckMark() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 10 10" style={{ display: 'block' }}>
-      <polyline points="1.5,5 4,7.5 8.5,2" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  )
-}
-
 interface Props {
   segments: RouteSegment[] | null
   overlayOn: boolean
   profileKey: string
-  hiddenSafetyClasses: Set<SafetyClass>
-  onToggleSafetyClass: (cls: SafetyClass) => void
-  onToggleGroup: (level: LegendLevel) => void
+  preferredItemNames: Set<string>
+  onMoveToPreferred: (name: string) => void
+  onMoveToOther: (name: string) => void
 }
 
 export default function Legend({
   segments,
   overlayOn,
   profileKey,
-  hiddenSafetyClasses,
-  onToggleSafetyClass,
-  onToggleGroup,
+  preferredItemNames,
+  onMoveToPreferred,
+  onMoveToOther,
 }: Props) {
   const profileGroups = PROFILE_LEGEND[profileKey]
   const hasRoute = segments && segments.length > 0
   const showLegend = hasRoute || overlayOn
 
-  if (!showLegend) return null
+  if (!showLegend || !profileGroups) return null
 
-  // When showing route only (no overlay), limit to levels that appear in segments
+  // All items for this profile, flattened and deduplicated by name
+  const allItemsRaw = profileGroups.flatMap((g) => g.items)
+  const seenNames = new Set<string>()
+  const allItems = allItemsRaw.filter((item) => {
+    if (seenNames.has(item.name)) return false
+    seenNames.add(item.name)
+    return true
+  })
+
+  // When showing route only (no overlay), limit to safety classes present in route
   const presentClasses = (hasRoute && !overlayOn)
     ? new Set(segments!.map((s) => s.safetyClass))
     : null
 
-  const levelAppears = (level: string): boolean => {
-    if (!presentClasses) return true
-    const levelToClasses: Record<string, string[]> = {
-      good: ['great', 'good'],
-      ok:   ['ok'],
-      bad:  ['bad'],
-    }
-    return (levelToClasses[level] ?? []).some((c) => (presentClasses as Set<string>).has(c))
-  }
+  const preferredItems = allItems.filter((item) => {
+    if (presentClasses && !presentClasses.has(item.safetyClass)) return false
+    return preferredItemNames.has(item.name)
+  })
 
-  if (profileGroups) {
-    const visibleGroups = profileGroups.filter((g) => levelAppears(g.level))
-    if (!visibleGroups.length) return null
+  const otherItems = allItems.filter((item) => {
+    if (presentClasses && !presentClasses.has(item.safetyClass)) return false
+    return !preferredItemNames.has(item.name)
+  })
 
+  if (preferredItems.length === 0 && otherItems.length === 0) return null
+
+  function renderItem(item: LegendItem, inPreferred: boolean) {
+    const itemColor = SAFETY[item.safetyClass]?.color ?? '#888'
+    const iconNode = LEGEND_ICON_OVERRIDE[item.name] ?? (
+      <span className="legend-icon">{item.icon}</span>
+    )
     return (
-      <div className="map-legend">
-        {visibleGroups.map((group) => {
-          const groupSafetyClasses = [...new Set(group.items.map((i) => i.safetyClass))]
-          const allHidden = groupSafetyClasses.every((c) => hiddenSafetyClasses.has(c))
-          const groupChecked = !allHidden
-
-          return (
-            <div key={group.level} className={`legend-group${allHidden ? ' legend-group-hidden' : ''}`}>
-              <button
-                className="legend-group-toggle"
-                onClick={() => onToggleGroup(group.level)}
-                title={`${groupChecked ? 'Hide' : 'Show'} ${group.label} paths`}
-              >
-                <span className={`legend-toggle-box${groupChecked ? ' checked' : ''}`}>
-                  {groupChecked && <CheckMark />}
-                </span>
-                <span className="legend-level-label">{group.label}</span>
-              </button>
-              {group.items.map((item) => {
-                const itemColor = SAFETY[item.safetyClass]?.color ?? '#888'
-                const itemChecked = !hiddenSafetyClasses.has(item.safetyClass)
-                const iconNode = LEGEND_ICON_OVERRIDE[item.name] ?? (
-                  <span className="legend-icon">{item.icon}</span>
-                )
-                return (
-                  <button
-                    key={item.name}
-                    className={`legend-item legend-item-toggle${itemChecked ? '' : ' legend-item-off'}`}
-                    onClick={() => onToggleSafetyClass(item.safetyClass)}
-                    title={`${itemChecked ? 'Hide' : 'Show'} ${item.name}`}
-                  >
-                    <span className={`legend-toggle-box legend-toggle-box-sm${itemChecked ? ' checked' : ''}`}>
-                      {itemChecked && <CheckMark />}
-                    </span>
-                    <span className="legend-dot" style={{ background: itemColor }} />
-                    {iconNode}
-                    <span className="legend-text">{item.name}</span>
-                  </button>
-                )
-              })}
-            </div>
-          )
-        })}
+      <div key={item.name} className="legend-item legend-item-row">
+        <span className="legend-dot" style={{ background: itemColor }} />
+        {iconNode}
+        <span className="legend-text legend-text-flex">{item.name}</span>
+        {inPreferred ? (
+          <button
+            className="legend-move-btn"
+            onClick={() => onMoveToOther(item.name)}
+            title="Move to Other Types"
+            aria-label={`Move ${item.name} to Other Types`}
+          >
+            ↓
+          </button>
+        ) : (
+          <button
+            className="legend-move-btn legend-move-btn-up"
+            onClick={() => onMoveToPreferred(item.name)}
+            title="Move to Preferred"
+            aria-label={`Move ${item.name} to Preferred Path Types`}
+          >
+            ↑
+          </button>
+        )}
       </div>
     )
   }
 
-  // Fallback for unknown profiles
-  const classes = segments
-    ? [...new Set(segments.map((s) => s.safetyClass))]
-    : (Object.keys(SAFETY) as (keyof typeof SAFETY)[])
   return (
     <div className="map-legend">
-      {classes.map((cls) => {
-        const s = SAFETY[cls]
-        return (
-          <div key={cls} className="legend-item">
-            <span className="legend-dot" style={{ background: s.color }} />
-            <span className="legend-text">{s.icon} {s.label}</span>
+      {preferredItems.length > 0 && (
+        <div className="legend-section">
+          <div className="legend-section-header legend-section-header-preferred">
+            Preferred
           </div>
-        )
-      })}
+          {preferredItems.map((item) => renderItem(item, true))}
+        </div>
+      )}
+      {otherItems.length > 0 && (
+        <div className={`legend-section${preferredItems.length > 0 ? ' legend-section-other' : ''}`}>
+          <div className="legend-section-header legend-section-header-other">
+            Other
+          </div>
+          {otherItems.map((item) => renderItem(item, false))}
+        </div>
+      )}
     </div>
   )
 }

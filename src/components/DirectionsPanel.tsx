@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { formatDistance, formatDuration } from '../services/routing'
 import { computeRouteQuality } from '../utils/classify'
-import type { Route, ValhallaManeuver } from '../utils/types'
+import type { Route, SafetyClass, ValhallaManeuver } from '../utils/types'
 
 // Valhalla maneuver type → direction icon
 const ICONS: Record<number, string> = {
@@ -40,15 +40,16 @@ function speak(text: string): void {
 interface Props {
   route: Route
   onClose: () => void
+  preferredClasses?: Set<SafetyClass>
 }
 
-export default function DirectionsPanel({ route, onClose }: Props) {
+export default function DirectionsPanel({ route, onClose, preferredClasses }: Props) {
   const [navigating, setNavigating] = useState(false)
   const [step, setStep] = useState(0)
   const [turnsExpanded, setTurnsExpanded] = useState(false)
 
   const { summary, maneuvers, segments } = route
-  const quality = segments ? computeRouteQuality(segments) : null
+  const quality = segments ? computeRouteQuality(segments, preferredClasses) : null
 
   useEffect(() => {
     return () => window.speechSynthesis?.cancel()
@@ -101,9 +102,19 @@ export default function DirectionsPanel({ route, onClose }: Props) {
             )}
           </div>
           <div className="quality-labels">
-            {quality.good > 0.05 && <span className="ql-good">{Math.round(quality.good * 100)}% good</span>}
-            {quality.ok   > 0.05 && <span className="ql-ok">{Math.round(quality.ok    * 100)}% ok</span>}
-            {quality.bad  > 0.05 && <span className="ql-bad">{Math.round(quality.bad   * 100)}% bad</span>}
+            {quality.good > 0.05 && (
+              <span className="ql-good">
+                {Math.round(quality.good * 100)}% {preferredClasses ? 'preferred' : 'good'}
+              </span>
+            )}
+            {quality.ok > 0.05 && !preferredClasses && (
+              <span className="ql-ok">{Math.round(quality.ok * 100)}% ok</span>
+            )}
+            {quality.bad > 0.05 && (
+              <span className="ql-bad">
+                {Math.round(quality.bad * 100)}% {preferredClasses ? 'other' : 'bad'}
+              </span>
+            )}
           </div>
         </div>
       )}

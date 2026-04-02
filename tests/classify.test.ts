@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'bun:test'
-import { classifyEdge, worsen } from '../src/utils/classify'
-import type { ValhallaEdge } from '../src/utils/types'
+import {
+  classifyEdge,
+  worsen,
+  getDefaultPreferredItems,
+  getPreferredSafetyClasses,
+  computeRouteQuality,
+} from '../src/utils/classify'
+import type { ValhallaEdge, RouteSegment } from '../src/utils/types'
 
 // NOTE: Valhalla's trace_attributes API returns STRING values for use, cycle_lane,
 // and road_class (not the numeric codes in older docs). All test fixtures below
@@ -234,5 +240,103 @@ describe('worsen', () => {
 
   it('cannot degrade below avoid', () => {
     expect(worsen('bad')).toBe('bad')
+  })
+})
+
+// ── getDefaultPreferredItems ──────────────────────────────────────────────────
+
+describe('getDefaultPreferredItems', () => {
+  it('returns good + ok items for toddler profile', () => {
+    const items = getDefaultPreferredItems('toddler')
+    expect(items.has('Car-free path / Radweg')).toBe(true)
+    expect(items.has('Fahrradstrasse')).toBe(true)
+    expect(items.has('Shared footway (park path)')).toBe(true)
+    expect(items.has('Separated bike track')).toBe(true)
+    expect(items.has('Living street')).toBe(true)
+    // bad items should NOT be preferred by default
+    expect(items.has('Painted bike lane')).toBe(false)
+    expect(items.has('Residential road')).toBe(false)
+  })
+
+  it('returns good + ok items for training profile', () => {
+    const items = getDefaultPreferredItems('training')
+    expect(items.has('Car-free path / Radweg')).toBe(true)
+    expect(items.has('Painted bike lane')).toBe(true) // good for training
+    expect(items.has('Living street')).toBe(true)     // ok for training
+    expect(items.has('Separated bike track (slow)')).toBe(false) // bad for training
+  })
+
+  it('returns empty set for unknown profile', () => {
+    expect(getDefaultPreferredItems('unknown').size).toBe(0)
+  })
+})
+
+// ── getPreferredSafetyClasses ─────────────────────────────────────────────────
+
+describe('getPreferredSafetyClasses', () => {
+  it('includes great + good safetyClasses when their items are preferred', () => {
+    const preferred = new Set(['Car-free path / Radweg', 'Fahrradstrasse', 'Shared footway (park path)'])
+    const classes = getPreferredSafetyClasses(preferred, 'toddler')
+    expect(classes.has('great')).toBe(true)
+    expect(classes.has('good')).toBe(true)
+    expect(classes.has('ok')).toBe(false)
+    expect(classes.has('bad')).toBe(false)
+  })
+
+  it('includes a class if ANY of its items is preferred', () => {
+    // Only one of two 'great' items preferred — class should still be included
+    const preferred = new Set(['Fahrradstrasse'])
+    const classes = getPreferredSafetyClasses(preferred, 'toddler')
+    expect(classes.has('great')).toBe(true)
+  })
+
+  it('excludes a class when none of its items is preferred', () => {
+    const preferred = new Set(['Car-free path / Radweg'])
+    const classes = getPreferredSafetyClasses(preferred, 'toddler')
+    expect(classes.has('ok')).toBe(false)
+    expect(classes.has('bad')).toBe(false)
+  })
+
+  it('returns empty set for unknown profile', () => {
+    expect(getPreferredSafetyClasses(new Set(['anything']), 'unknown').size).toBe(0)
+  })
+})
+
+// ── computeRouteQuality with preferredClasses ─────────────────────────────────
+
+describe('computeRouteQuality — preferred/other model', () => {
+  const seg = (cls: RouteSegment['safetyClass'], len: number): RouteSegment => ({
+    safetyClass: cls,
+    coordinates: Array.from({ length: len + 1 }, (_, i) => [i, 0] as [number, number]),
+  })
+
+  it('puts preferred classes into "good" bucket and others into "bad"', () => {
+    const segments: RouteSegment[] = [
+      seg('great', 3),
+      seg('ok', 1),
+      seg('bad', 1),
+    ]
+    const preferred = new Set<RouteSegment['safetyClass']>(['great', 'ok'])
+    const q = computeRouteQuality(segments, preferred)
+    expect(q.ok).toBe(0)
+    expect(q.good).toBeCloseTo(4 / 5)
+    expect(q.bad).toBeCloseTo(1 / 5)
+  })
+
+  it('returns all preferred when every segment is preferred', () => {
+    const segments: RouteSegment[] = [seg('great', 4), seg('good', 1)]
+    const preferred = new Set<RouteSegment['safetyClass']>(['great', 'good'])
+    const q = computeRouteQuality(segments, preferred)
+    expect(q.good).toBe(1)
+    expect(q.bad).toBe(0)
+    expect(q.ok).toBe(0)
+  })
+
+  it('falls back to good/ok/bad model when no preferredClasses given', () => {
+    const segments: RouteSegment[] = [seg('great', 2), seg('ok', 2), seg('bad', 1)]
+    const q = computeRouteQuality(segments)
+    expect(q.good).toBeCloseTo(2 / 5)
+    expect(q.ok).toBeCloseTo(2 / 5)
+    expect(q.bad).toBeCloseTo(1 / 5)
   })
 })

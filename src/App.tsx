@@ -10,7 +10,11 @@ import DirectionsPanel from './components/DirectionsPanel'
 import FeedbackWidget from './components/FeedbackWidget'
 import { getRoute, getRouteSegments, DEFAULT_PROFILES } from './services/routing'
 import { reverseGeocode } from './services/geocoding'
-import { SAFETY_LEVEL, PROFILE_LEGEND } from './utils/classify'
+import {
+  SAFETY_LEVEL,
+  getDefaultPreferredItems,
+  getPreferredSafetyClasses,
+} from './utils/classify'
 import type { LegendLevel } from './utils/classify'
 import type { Place, Route, ProfileMap, RiderProfile, SafetyClass } from './utils/types'
 
@@ -22,6 +26,8 @@ const HOME_PLACE: Place = {
 }
 
 const STORAGE_KEY = 'bike-route-profiles'
+const CUSTOM_PREFERRED_KEY = 'bike-route-custom-preferred'
+const CUSTOM_MODE_KEY = 'bike-route-mode'
 
 function loadProfiles(): ProfileMap {
   try {
@@ -40,9 +46,56 @@ function saveProfiles(profiles: ProfileMap): void {
   } catch { /* ignore */ }
 }
 
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const item of a) if (!b.has(item)) return false
+  return true
+}
+
+/** Read initial profile + preferred items from URL params, then localStorage, then defaults. */
+function getInitialState(): { profileKey: string; preferredItems: Set<string> } {
+  const params = new URLSearchParams(window.location.search)
+  const modeParam = params.get('mode')
+  const preferredParam = params.get('preferred')
+
+  // URL preferred param takes top priority
+  if (preferredParam !== null) {
+    const items = new Set(preferredParam.split(',').filter(Boolean))
+    const profile = (modeParam && DEFAULT_PROFILES[modeParam]) ? modeParam : 'toddler'
+    return { profileKey: profile, preferredItems: items }
+  }
+
+  // URL mode param (no custom preferred)
+  if (modeParam && DEFAULT_PROFILES[modeParam]) {
+    return { profileKey: modeParam, preferredItems: getDefaultPreferredItems(modeParam) }
+  }
+
+  // Fall back to localStorage
+  try {
+    const savedMode = localStorage.getItem(CUSTOM_MODE_KEY)
+    const savedCustom = localStorage.getItem(CUSTOM_PREFERRED_KEY)
+    if (savedCustom) {
+      const items = new Set(JSON.parse(savedCustom) as string[])
+      const profile = (savedMode && DEFAULT_PROFILES[savedMode]) ? savedMode : 'toddler'
+      return { profileKey: profile, preferredItems: items }
+    }
+    if (savedMode && DEFAULT_PROFILES[savedMode]) {
+      return { profileKey: savedMode, preferredItems: getDefaultPreferredItems(savedMode) }
+    }
+  } catch { /* ignore */ }
+
+  return { profileKey: 'toddler', preferredItems: getDefaultPreferredItems('toddler') }
+}
+
 export default function App() {
   const [profiles, setProfiles] = useState<ProfileMap>(loadProfiles)
-  const [selectedProfile, setSelectedProfile] = useState('toddler')
+
+  const initialState = getInitialState()
+  const [selectedProfile, setSelectedProfile] = useState(initialState.profileKey)
+  const [preferredItemNames, setPreferredItemNames] = useState<Set<string>>(
+    () => initialState.preferredItems
+  )
+
   const [editingProfile, setEditingProfile] = useState<string | null>(null)
 
   const [startPoint, setStartPoint] = useState<Place | null>(null)
@@ -60,47 +113,62 @@ export default function App() {
   const [overlayEnabled, setOverlayEnabled] = useState(true)
   const [overlayStatus, setOverlayStatus]   = useState('idle')
 
-  // Legend toggle state — managed here so Legend can render outside MapContainer
-  const [hiddenSafetyClasses, setHiddenSafetyClasses] = useState<Set<SafetyClass>>(
-    () => new Set<SafetyClass>(['bad'])
+  // Derived: which safetyClasses are "preferred"
+  const preferredSafetyClasses: Set<SafetyClass> = getPreferredSafetyClasses(
+    preferredItemNames,
+    selectedProfile,
+  )
+
+  // Derived: which safetyClasses to hide on map (those not preferred)
+  const hiddenSafetyClasses = new Set<SafetyClass>(
+    (Object.keys({ great: true, good: true, ok: true, bad: true }) as SafetyClass[]).filter(
+      (c) => !preferredSafetyClasses.has(c)
+    )
   )
 
   const hiddenLevels = new Set<LegendLevel>(
     [...hiddenSafetyClasses].map((cls) => SAFETY_LEVEL[cls])
   )
 
-  function toggleSafetyClass(cls: SafetyClass) {
-    setHiddenSafetyClasses((prev) => {
-      const next = new Set(prev)
-      if (next.has(cls)) next.delete(cls)
-      else next.add(cls)
-      return next
-    })
-  }
+  // Derived: is the user in custom mode (preferred differs from profile defaults)?
+  const isCustomMode = !setsEqual(preferredItemNames, getDefaultPreferredItems(selectedProfile))
 
-  function toggleGroup(level: LegendLevel) {
-    const profileGroups = PROFILE_LEGEND[selectedProfile]
-    if (!profileGroups) return
-    const group = profileGroups.find((g) => g.level === level)
-    if (!group) return
-    const groupClasses = [...new Set(group.items.map((i) => i.safetyClass))]
-    const allHidden = groupClasses.every((c) => hiddenSafetyClasses.has(c))
-    setHiddenSafetyClasses((prev) => {
-      const next = new Set(prev)
-      if (allHidden) {
-        groupClasses.forEach((c) => next.delete(c))
+  // Sync URL params and localStorage on every state change
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('mode', selectedProfile)
+    if (isCustomMode) {
+      params.set('preferred', [...preferredItemNames].join(','))
+    } else {
+      params.delete('preferred')
+    }
+    window.history.replaceState({}, '', `?${params.toString()}`)
+
+    try {
+      localStorage.setItem(CUSTOM_MODE_KEY, selectedProfile)
+      if (isCustomMode) {
+        localStorage.setItem(CUSTOM_PREFERRED_KEY, JSON.stringify([...preferredItemNames]))
       } else {
-        groupClasses.forEach((c) => next.add(c))
+        localStorage.removeItem(CUSTOM_PREFERRED_KEY)
       }
-      return next
-    })
-  }
+    } catch { /* ignore */ }
+  }, [selectedProfile, preferredItemNames, isCustomMode])
 
   useEffect(() => {
     saveProfiles(profiles)
   }, [profiles])
 
+  function moveToPreferred(name: string) {
+    setPreferredItemNames((prev) => new Set([...prev, name]))
+  }
 
+  function moveToOther(name: string) {
+    setPreferredItemNames((prev) => {
+      const next = new Set(prev)
+      next.delete(name)
+      return next
+    })
+  }
 
   async function computeRoute(
     start: Place,
@@ -162,11 +230,12 @@ export default function App() {
 
   function handleProfileChange(key: string) {
     setSelectedProfile(key)
+    // Reset preferred items to this profile's defaults (clears custom mode)
+    setPreferredItemNames(getDefaultPreferredItems(key))
     if (startPoint && endPoint) computeRoute(startPoint, endPoint, key, waypoints)
   }
 
   function handleRemoveWaypoint(index: number) {
-    // Waypoints can be removed by clicking their marker; no-op if list is empty
     const newWps = waypoints.filter((_, i) => i !== index)
     if (startPoint && endPoint) computeRoute(startPoint, endPoint, selectedProfile, newWps)
   }
@@ -229,6 +298,7 @@ export default function App() {
             selected={selectedProfile}
             onSelect={handleProfileChange}
             onEdit={(key) => setEditingProfile(key)}
+            isCustomMode={isCustomMode}
           />
         </div>
         {/* Top-right controls: feedback button + legend, laid out as a flex row */}
@@ -238,9 +308,9 @@ export default function App() {
             segments={route?.segments ?? null}
             overlayOn={overlayEnabled}
             profileKey={selectedProfile}
-            hiddenSafetyClasses={hiddenSafetyClasses}
-            onToggleSafetyClass={toggleSafetyClass}
-            onToggleGroup={toggleGroup}
+            preferredItemNames={preferredItemNames}
+            onMoveToPreferred={moveToPreferred}
+            onMoveToOther={moveToOther}
           />
         </div>
         {/* On-map bike layer toggle */}
@@ -297,7 +367,11 @@ export default function App() {
           {error && <div className="error-msg">⚠️ {error}</div>}
 
           {route && !isLoading && (
-            <DirectionsPanel route={route} onClose={clearAll} />
+            <DirectionsPanel
+              route={route}
+              onClose={clearAll}
+              preferredClasses={preferredSafetyClasses}
+            />
           )}
         </div>
       </div>

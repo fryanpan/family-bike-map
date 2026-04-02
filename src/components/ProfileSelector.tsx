@@ -105,16 +105,17 @@ interface Props {
   selected: string
   onSelect: (key: string) => void
   onEdit: (key: string) => void
+  isCustomMode: boolean
 }
 
-export default function ProfileSelector({ profiles, selected, onSelect, onEdit }: Props) {
+export default function ProfileSelector({ profiles, selected, onSelect, onEdit, isCustomMode }: Props) {
   return (
     <div className="profile-selector">
       <div className="profile-chips">
         {Object.entries(profiles).map(([key, profile]) => (
           <button
             key={key}
-            className={`profile-chip${selected === key ? ' selected' : ''}`}
+            className={`profile-chip${selected === key && !isCustomMode ? ' selected' : ''}`}
             onClick={() => onSelect(key)}
             title={`${profile.label}\n${profile.description}`}
           >
@@ -125,6 +126,17 @@ export default function ProfileSelector({ profiles, selected, onSelect, onEdit }
             </span>
           </button>
         ))}
+        {isCustomMode && (
+          <button
+            className="profile-chip profile-chip-custom selected"
+            title="Custom mode — you have edited the preferred path types"
+            onClick={() => onSelect(selected)}
+          >
+            <span className="profile-chip-icon">
+              <span className="profile-chip-emoji" style={{ fontSize: 14 }}>✎ Custom</span>
+            </span>
+          </button>
+        )}
         <button
           className="profile-edit-icon"
           onClick={() => onEdit(selected)}
