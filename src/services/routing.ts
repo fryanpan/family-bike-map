@@ -57,7 +57,7 @@ export const DEFAULT_PROFILES: ProfileMap = {
     label: 'With Toddler',
     emoji: '👶',
     description:
-      'Only Fahrradstrasse, car-free trails and elevated separated paths. Quiet side streets ok. Painted road bike lanes treated as roads — avoided.',
+      'Toddler on their own bike/scooter (~10 km/h) — not yet comfortable biking beside cars or following traffic rules. Only Fahrradstrasse, car-free trails and elevated separated paths. Busy roads and painted road bike lanes avoided.',
     costingOptions: {
       bicycle_type: 'Hybrid',
       cycling_speed: 10,
@@ -76,7 +76,7 @@ export const DEFAULT_PROFILES: ProfileMap = {
     label: 'Bike Trailer',
     emoji: '🚲',
     description:
-      'Mostly separated paths; roadside non-elevated bike lanes and bus lanes are OK in a pinch. Avoids cobblestones.',
+      'Riding 15–25 km/h with a child trailer. Prefers wide, smooth paths that are easy to navigate with a trailer. Narrow separated tracks and cobblestones avoided.',
     costingOptions: {
       bicycle_type: 'Hybrid',
       cycling_speed: 11,
@@ -93,7 +93,7 @@ export const DEFAULT_PROFILES: ProfileMap = {
     label: 'Fast Training',
     emoji: '⚡',
     description:
-      'Prioritises speed. Fahrradstrasse and recreational paths are great; bus lanes good; multi-lane roads with ≤30 km/h acceptable.',
+      '~30 km/h rides focused on sustaining speed. Fast enough to ride with traffic on 30 km/h roads. Fahrradstrasse and recreational paths preferred; bus lanes and painted lanes good; slow/interrupted separated tracks avoided.',
     costingOptions: {
       bicycle_type: 'Road',
       cycling_speed: 22,

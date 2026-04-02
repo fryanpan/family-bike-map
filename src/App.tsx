@@ -1,13 +1,16 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
 const Map = lazy(() => import('./components/Map'))
 const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
+import Legend from './components/Legend'
 import SearchBar from './components/SearchBar'
 import ProfileSelector from './components/ProfileSelector'
 import DirectionsPanel from './components/DirectionsPanel'
 import FeedbackWidget from './components/FeedbackWidget'
 import { getRoute, getRouteSegments, DEFAULT_PROFILES } from './services/routing'
 import { reverseGeocode } from './services/geocoding'
-import type { Place, Route, ProfileMap, RiderProfile } from './utils/types'
+import { SAFETY_LEVEL, PROFILE_LEGEND } from './utils/classify'
+import type { LegendLevel } from './utils/classify'
+import type { Place, Route, ProfileMap, RiderProfile, SafetyClass } from './utils/types'
 
 const STORAGE_KEY = 'bike-route-profiles'
 
@@ -28,12 +31,6 @@ function saveProfiles(profiles: ProfileMap): void {
   } catch { /* ignore */ }
 }
 
-const MODE_HINT: Record<string, string> = {
-  start:    'Tap map or search to set start',
-  end:      'Tap map or search to set destination',
-  waypoint: 'Tap map to add waypoints',
-}
-
 export default function App() {
   const [profiles, setProfiles] = useState<ProfileMap>(loadProfiles)
   const [selectedProfile, setSelectedProfile] = useState('toddler')
@@ -41,17 +38,52 @@ export default function App() {
 
   const [startPoint, setStartPoint] = useState<Place | null>(null)
   const [endPoint, setEndPoint]     = useState<Place | null>(null)
-  const [waypoints, setWaypoints]   = useState<Array<{ lat: number; lng: number }>>([])
+  const [waypoints]                 = useState<Array<{ lat: number; lng: number }>>([])
 
   const [route, setRoute]         = useState<Route | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError]         = useState<string | null>(null)
 
-  const [clickMode, setClickMode]   = useState('start')
-  const [panelOpen, setPanelOpen]   = useState(true)
+  const [panelOpen, setPanelOpen] = useState(true)
 
   const [overlayEnabled, setOverlayEnabled] = useState(false)
   const [overlayStatus, setOverlayStatus]   = useState('idle')
+
+  // Legend toggle state — managed here so Legend can render outside MapContainer
+  const [hiddenSafetyClasses, setHiddenSafetyClasses] = useState<Set<SafetyClass>>(
+    () => new Set<SafetyClass>(['avoid'])
+  )
+
+  const hiddenLevels = new Set<LegendLevel>(
+    [...hiddenSafetyClasses].map((cls) => SAFETY_LEVEL[cls])
+  )
+
+  function toggleSafetyClass(cls: SafetyClass) {
+    setHiddenSafetyClasses((prev) => {
+      const next = new Set(prev)
+      if (next.has(cls)) next.delete(cls)
+      else next.add(cls)
+      return next
+    })
+  }
+
+  function toggleGroup(level: LegendLevel) {
+    const profileGroups = PROFILE_LEGEND[selectedProfile]
+    if (!profileGroups) return
+    const group = profileGroups.find((g) => g.level === level)
+    if (!group) return
+    const groupClasses = [...new Set(group.items.map((i) => i.safetyClass))]
+    const allHidden = groupClasses.every((c) => hiddenSafetyClasses.has(c))
+    setHiddenSafetyClasses((prev) => {
+      const next = new Set(prev)
+      if (allHidden) {
+        groupClasses.forEach((c) => next.delete(c))
+      } else {
+        groupClasses.forEach((c) => next.add(c))
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     saveProfiles(profiles)
@@ -102,34 +134,9 @@ export default function App() {
     if (startPoint && endPoint) computeRoute(startPoint, endPoint, key, waypoints)
   }
 
-  async function handleMapClick({ lat, lng }: { lat: number; lng: number }) {
-    const shortLabel = `${lat.toFixed(4)}, ${lng.toFixed(4)}`
-    const point: Place = { lat, lng, label: shortLabel, shortLabel }
-
-    if (clickMode === 'start') {
-      setStartPoint(point)
-      setClickMode('end')
-      if (endPoint) computeRoute(point, endPoint, selectedProfile, waypoints)
-      reverseGeocode(lat, lng).then((geo) => {
-        if (geo) setStartPoint((p) => (p?.lat === lat ? { ...p, ...geo } : p))
-      })
-    } else if (clickMode === 'end') {
-      setEndPoint(point)
-      setClickMode('waypoint')
-      if (startPoint) computeRoute(startPoint, point, selectedProfile, waypoints)
-      reverseGeocode(lat, lng).then((geo) => {
-        if (geo) setEndPoint((p) => (p?.lat === lat ? { ...p, ...geo } : p))
-      })
-    } else {
-      const newWps = [...waypoints, { lat, lng }]
-      setWaypoints(newWps)
-      if (startPoint && endPoint) computeRoute(startPoint, endPoint, selectedProfile, newWps)
-    }
-  }
-
   function handleRemoveWaypoint(index: number) {
+    // Waypoints can be removed by clicking their marker; no-op if list is empty
     const newWps = waypoints.filter((_, i) => i !== index)
-    setWaypoints(newWps)
     if (startPoint && endPoint) computeRoute(startPoint, endPoint, selectedProfile, newWps)
   }
 
@@ -137,8 +144,6 @@ export default function App() {
     setRoute(null)
     setStartPoint(null)
     setEndPoint(null)
-    setWaypoints([])
-    setClickMode('start')
     setError(null)
   }
 
@@ -147,7 +152,6 @@ export default function App() {
     setProfiles((prev) => ({ ...prev, [editingProfile]: updatedProfile }))
     setEditingProfile(null)
     if (startPoint && endPoint && editingProfile === selectedProfile) {
-      // Recompute with updated settings
       setTimeout(() => computeRoute(startPoint, endPoint, editingProfile, waypoints), 0)
     }
   }
@@ -167,11 +171,11 @@ export default function App() {
             endPoint={endPoint}
             route={route}
             waypoints={waypoints}
-            onMapClick={handleMapClick}
             onRemoveWaypoint={handleRemoveWaypoint}
             overlayEnabled={overlayEnabled}
             profileKey={selectedProfile}
             onOverlayStatusChange={setOverlayStatus}
+            hiddenLevels={hiddenLevels}
           />
         </Suspense>
         <div className="map-mode-overlay">
@@ -180,6 +184,18 @@ export default function App() {
             selected={selectedProfile}
             onSelect={handleProfileChange}
             onEdit={(key) => setEditingProfile(key)}
+          />
+        </div>
+        {/* Top-right controls: feedback button + legend, laid out as a flex row */}
+        <div className="map-top-right">
+          <FeedbackWidget />
+          <Legend
+            segments={route?.segments ?? null}
+            overlayOn={overlayEnabled}
+            profileKey={selectedProfile}
+            hiddenSafetyClasses={hiddenSafetyClasses}
+            onToggleSafetyClass={toggleSafetyClass}
+            onToggleGroup={toggleGroup}
           />
         </div>
       </div>
@@ -227,30 +243,7 @@ export default function App() {
               onSelect={handleEndSelect}
               placeholder="Search destination…"
             />
-            <p className="click-hint">
-              {MODE_HINT[clickMode]}
-            </p>
           </div>
-
-          {waypoints.length > 0 && (
-            <div className="waypoints-section">
-              <div className="waypoints-row">
-                <span className="waypoints-label">
-                  📍 {waypoints.length} waypoint{waypoints.length > 1 ? 's' : ''}
-                </span>
-                <button
-                  className="link-btn"
-                  onClick={() => {
-                    setWaypoints([])
-                    if (startPoint && endPoint) computeRoute(startPoint, endPoint, selectedProfile, [])
-                  }}
-                >
-                  Clear all
-                </button>
-              </div>
-              <p className="hint">Tap a waypoint marker on the map to remove it</p>
-            </div>
-          )}
 
           {isLoading && (
             <div className="loading">
@@ -279,8 +272,6 @@ export default function App() {
           />
         </Suspense>
       )}
-
-      <FeedbackWidget />
     </div>
   )
 }

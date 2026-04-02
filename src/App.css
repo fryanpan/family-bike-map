@@ -494,17 +494,38 @@ button { font-family: inherit; cursor: pointer; }
   border: 1.5px solid rgba(0,0,0,.1);
 }
 
-/* ── Map legend (Leaflet overlay, profile-aware) ─────── */
-.map-legend {
+/* ── Top-right map controls overlay (legend + feedback) ─ */
+/*
+ * Contains both the feedback FAB and the legend.
+ * On mobile: flex row — feedback to the left, legend to the right.
+ * On desktop: feedback escapes to position:fixed bottom-right; legend stays.
+ */
+.map-top-right {
   position: absolute;
-  bottom: 24px;
+  top: 80px; /* below profile selector on mobile */
   right: 10px;
-  z-index: 400;
+  z-index: 450;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+.map-top-right > * {
+  pointer-events: auto;
+}
+@media (min-width: 768px) {
+  .map-top-right {
+    top: 12px; /* profile selector is centered, no right-side overlap */
+  }
+}
+
+/* ── Map legend ─────────────────────────────────────── */
+.map-legend {
   background: rgba(255,255,255,.96);
   border-radius: 10px;
   padding: 8px 12px;
   box-shadow: 0 2px 12px rgba(0,0,0,.15);
-  pointer-events: auto;
   max-width: 220px;
 }
 .legend-group {
@@ -574,9 +595,10 @@ button { font-family: inherit; cursor: pointer; }
   text-align: left;
 }
 .legend-item-toggle:hover .legend-text { color: #2563eb; }
+/* For hidden items: fade only the text, keep dot/icon colors visible so the
+   legend remains readable as a color key even when paths are toggled off. */
 .legend-item-off .legend-text { color: #9ca3af; }
-.legend-item-off .legend-dot { opacity: 0.35; }
-.legend-item-off .legend-icon { opacity: 0.35; }
+.legend-group-hidden { opacity: 1; }
 .legend-dot {
   width: 10px;
   height: 10px;
@@ -743,11 +765,12 @@ button { font-family: inherit; cursor: pointer; }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* ── Feedback widget ───────────────────────────────────── */
+/*
+ * Mobile: FAB is a flex item inside .map-top-right (position: relative).
+ * Desktop: FAB escapes the flex container and sits fixed at bottom-right.
+ */
 .feedback-fab {
-  position: fixed;
-  bottom: 80px;  /* above panel handle */
-  right: 16px;
-  z-index: 490;
+  position: relative;
   width: 44px;
   height: 44px;
   border-radius: 50%;
@@ -759,6 +782,7 @@ button { font-family: inherit; cursor: pointer; }
   align-items: center;
   justify-content: center;
   transition: transform .15s, box-shadow .15s;
+  flex-shrink: 0;
 }
 .feedback-fab:hover {
   transform: scale(1.08);
@@ -773,7 +797,13 @@ button { font-family: inherit; cursor: pointer; }
 }
 @media (min-width: 768px) {
   .feedback-sheet { border-radius: 16px; max-width: 420px; }
-  .feedback-fab   { bottom: 24px; }
+  /* On desktop the FAB escapes the flex container and goes to the viewport bottom-right */
+  .feedback-fab {
+    position: fixed;
+    bottom: 24px;
+    right: 16px;
+    z-index: 490;
+  }
 }
 .feedback-body {
   padding: 16px;
@@ -835,6 +865,13 @@ button { font-family: inherit; cursor: pointer; }
 }
 .feedback-done-icon { font-size: 40px; margin-bottom: 8px; }
 .feedback-done-msg  { font-size: 16px; font-weight: 600; color: #111827; }
+
+/* ── Leaflet attribution: push above panel handle on mobile ── */
+@media (max-width: 767px) {
+  .leaflet-bottom.leaflet-right {
+    bottom: 56px;
+  }
+}
 
 /* ── Desktop layout ────────────────────────────────────── */
 @media (min-width: 768px) {
