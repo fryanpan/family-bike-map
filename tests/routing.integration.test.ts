@@ -5,7 +5,11 @@
  * to verify that our routing profiles produce routes with correct infrastructure
  * characteristics for key Berlin journeys.
  *
- * Tests are skipped automatically if Valhalla is unreachable (e.g. in offline CI).
+ * SKIPPED BY DEFAULT — run locally with: RUN_INTEGRATION=1 bun test
+ * Run these when changing classification logic (classify.ts) or routing
+ * parameters (routing.ts). They are skipped in CI to avoid external API flakiness.
+ *
+ * Tests are also skipped automatically if Valhalla is unreachable.
  *
  * Route quality is measured using classifyEdge + computeRouteQuality on the
  * trace_attributes response. These are the same functions used to render the
@@ -177,6 +181,9 @@ beforeAll(async () => {
 })
 
 function skipIfOffline() {
+  if (process.env.RUN_INTEGRATION !== '1') {
+    return true
+  }
   if (!valhallaReachable) {
     console.log('  [SKIP] Valhalla not reachable — skipping integration test')
     return true
