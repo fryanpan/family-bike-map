@@ -1,14 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import { fetchBikeInfra } from '../services/overpass'
-import { SAFETY } from '../utils/classify'
+import { SAFETY, SAFETY_LEVEL } from '../utils/classify'
+import type { LegendLevel } from '../utils/classify'
 import type { OsmWay } from '../utils/types'
 import type { LatLngBounds } from 'leaflet'
 
-function OverlayLines({ ways }: { ways: OsmWay[] }) {
+function OverlayLines({ ways, hiddenLevels }: { ways: OsmWay[]; hiddenLevels: Set<LegendLevel> }) {
+  const visible = ways.filter((w) => !hiddenLevels.has(SAFETY_LEVEL[w.safetyClass]))
   return (
     <>
-      {ways.map((way) => {
+      {visible.map((way) => {
         const s = SAFETY[way.safetyClass] ?? SAFETY.avoid
         return (
           <Polyline
@@ -34,10 +36,11 @@ function OverlayLines({ ways }: { ways: OsmWay[] }) {
 interface ControllerProps {
   enabled: boolean
   profileKey: string
+  hiddenLevels: Set<LegendLevel>
   onStatusChange: (status: string) => void
 }
 
-function OverlayController({ enabled, profileKey, onStatusChange }: ControllerProps) {
+function OverlayController({ enabled, profileKey, hiddenLevels, onStatusChange }: ControllerProps) {
   const map = useMap()
   const [ways, setWays] = useState<OsmWay[]>([])
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -83,15 +86,16 @@ function OverlayController({ enabled, profileKey, onStatusChange }: ControllerPr
   }, [enabled, profileKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!enabled || !ways.length) return null
-  return <OverlayLines ways={ways} />
+  return <OverlayLines ways={ways} hiddenLevels={hiddenLevels} />
 }
 
 interface Props {
   enabled: boolean
   profileKey: string
+  hiddenLevels: Set<LegendLevel>
   onStatusChange: (status: string) => void
 }
 
-export default function BikeMapOverlay({ enabled, profileKey, onStatusChange }: Props) {
-  return <OverlayController enabled={enabled} profileKey={profileKey} onStatusChange={onStatusChange} />
+export default function BikeMapOverlay({ enabled, profileKey, hiddenLevels, onStatusChange }: Props) {
+  return <OverlayController enabled={enabled} profileKey={profileKey} hiddenLevels={hiddenLevels} onStatusChange={onStatusChange} />
 }

@@ -19,7 +19,7 @@ export const SAFETY: Record<SafetyClass, SafetyInfo> = {
 // ── Profile-aware legend ────────────────────────────────────────────────────
 // Each profile defines how route types map to "good / ok / avoid" levels.
 
-export type LegendLevel = 'great' | 'ok' | 'bad'
+export type LegendLevel = 'good' | 'ok' | 'bad'
 
 export interface LegendItem { icon: string; name: string; safetyClass: SafetyClass }
 
@@ -33,7 +33,7 @@ export interface LegendGroup {
 // (from the SAFETY palette) per item — keeping legend and overlay in sync.
 export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
   toddler: [
-    { level: 'great', label: 'Good', items: [
+    { level: 'good', label: 'Good', items: [
       { icon: '🚴', name: 'Car-free path / Radweg',    safetyClass: 'great' },
       { icon: '🚲', name: 'Fahrradstrasse',             safetyClass: 'great' },
       { icon: '🛤️', name: 'Shared footway (park path)', safetyClass: 'good'  },
@@ -49,7 +49,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
     ]},
   ],
   trailer: [
-    { level: 'great', label: 'Good', items: [
+    { level: 'good', label: 'Good', items: [
       { icon: '🚴', name: 'Car-free path / Radweg',    safetyClass: 'great' },
       { icon: '🚲', name: 'Fahrradstrasse',             safetyClass: 'great' },
       { icon: '🛤️', name: 'Shared footway (park path)', safetyClass: 'good'  },
@@ -65,7 +65,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
     ]},
   ],
   training: [
-    { level: 'great', label: 'Good', items: [
+    { level: 'good', label: 'Good', items: [
       { icon: '🚴', name: 'Car-free path / Radweg',    safetyClass: 'great' },
       { icon: '🚲', name: 'Fahrradstrasse',             safetyClass: 'great' },
       { icon: '🛤️', name: 'Shared footway (park path)', safetyClass: 'good'  },
@@ -85,28 +85,28 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
 // ── Route quality stats ─────────────────────────────────────────────────────
 // Maps safety classes to 3 display levels for the compact route summary bar.
 
-const SAFETY_LEVEL: Record<SafetyClass, LegendLevel> = {
-  great: 'great',
-  good:  'great',
+export const SAFETY_LEVEL: Record<SafetyClass, LegendLevel> = {
+  great: 'good',
+  good:  'good',
   ok:    'ok',
   avoid: 'bad',
 }
 
-export interface RouteQuality { great: number; ok: number; bad: number }
+export interface RouteQuality { good: number; ok: number; bad: number }
 
 /** Compute the fraction of route (by coordinate count) in each quality level. */
 export function computeRouteQuality(segments: RouteSegment[]): RouteQuality {
-  if (!segments.length) return { great: 0, ok: 0, bad: 0 }
-  let great = 0, ok = 0, bad = 0
+  if (!segments.length) return { good: 0, ok: 0, bad: 0 }
+  let good = 0, ok = 0, bad = 0
   for (const seg of segments) {
     const count = Math.max(1, seg.coordinates.length - 1)
     const level = SAFETY_LEVEL[seg.safetyClass]
-    if (level === 'great') great += count
+    if (level === 'good') good += count
     else if (level === 'ok') ok += count
     else bad += count
   }
-  const total = great + ok + bad || 1
-  return { great: great / total, ok: ok / total, bad: bad / total }
+  const total = good + ok + bad || 1
+  return { good: good / total, ok: ok / total, bad: bad / total }
 }
 
 // Surfaces that always classify as avoid — rough/uncomfortable for family biking.

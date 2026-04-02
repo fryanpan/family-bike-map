@@ -90,8 +90,8 @@ export default function DirectionsPanel({ route, onClose }: Props) {
       {quality && (
         <div className="quality-bar-wrap">
           <div className="quality-bar">
-            {quality.great > 0 && (
-              <div className="qb-segment qb-great" style={{ flex: quality.great }} title={`${Math.round(quality.great * 100)}% great`} />
+            {quality.good > 0 && (
+              <div className="qb-segment qb-good" style={{ flex: quality.good }} title={`${Math.round(quality.good * 100)}% good`} />
             )}
             {quality.ok > 0 && (
               <div className="qb-segment qb-ok" style={{ flex: quality.ok }} title={`${Math.round(quality.ok * 100)}% ok`} />
@@ -101,9 +101,9 @@ export default function DirectionsPanel({ route, onClose }: Props) {
             )}
           </div>
           <div className="quality-labels">
-            {quality.great > 0.05 && <span className="ql-great">{Math.round(quality.great * 100)}% great</span>}
-            {quality.ok    > 0.05 && <span className="ql-ok">{Math.round(quality.ok    * 100)}% ok</span>}
-            {quality.bad   > 0.05 && <span className="ql-bad">{Math.round(quality.bad   * 100)}% avoid</span>}
+            {quality.good > 0.05 && <span className="ql-good">{Math.round(quality.good * 100)}% good</span>}
+            {quality.ok   > 0.05 && <span className="ql-ok">{Math.round(quality.ok    * 100)}% ok</span>}
+            {quality.bad  > 0.05 && <span className="ql-bad">{Math.round(quality.bad   * 100)}% avoid</span>}
           </div>
         </div>
       )}

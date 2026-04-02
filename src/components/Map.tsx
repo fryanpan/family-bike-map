@@ -1,9 +1,10 @@
-import React from 'react'
+import React, { useState } from 'react'
 import L from 'leaflet'
 import { Marker, MapContainer, Polyline, TileLayer, Tooltip, useMapEvents } from 'react-leaflet'
-import { SAFETY, PROFILE_LEGEND } from '../utils/classify'
+import { SAFETY, PROFILE_LEGEND, SAFETY_LEVEL } from '../utils/classify'
+import type { LegendLevel } from '../utils/classify'
 import BikeMapOverlay from './BikeMapOverlay'
-import type { Route, RouteSegment } from '../utils/types'
+import type { Route, RouteSegment, SafetyClass } from '../utils/types'
 
 // Fix Leaflet default icons broken by Vite's asset bundling
 import markerIconUrl from 'leaflet/dist/images/marker-icon.png'
@@ -93,13 +94,20 @@ function midpoint(coords: [number, number][]): [number, number] {
   return coords[Math.floor(coords.length / 2)]
 }
 
-function RouteDisplay({ route }: { route: Route | null }) {
+function RouteDisplay({
+  route,
+  hiddenSafetyClasses,
+}: {
+  route: Route | null
+  hiddenSafetyClasses: Set<SafetyClass>
+}) {
   if (!route) return null
 
   if (route.segments?.length) {
+    const visible = route.segments.filter((seg) => !hiddenSafetyClasses.has(seg.safetyClass))
     return (
       <>
-        {route.segments.map((seg: RouteSegment, i: number) => {
+        {visible.map((seg: RouteSegment, i: number) => {
           const s = SAFETY[seg.safetyClass] ?? SAFETY.avoid
           return (
             <Polyline
@@ -115,7 +123,7 @@ function RouteDisplay({ route }: { route: Route | null }) {
             </Polyline>
           )
         })}
-        {route.segments
+        {visible
           .filter((seg) => seg.coordinates.length >= 4)
           .map((seg, i) => {
             const s = SAFETY[seg.safetyClass] ?? SAFETY.avoid
@@ -141,14 +149,29 @@ function RouteDisplay({ route }: { route: Route | null }) {
   )
 }
 
+// Check mark SVG for toggle boxes
+function CheckMark() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" style={{ display: 'block' }}>
+      <polyline points="1.5,5 4,7.5 8.5,2" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+
 function Legend({
   segments,
   overlayOn,
   profileKey,
+  hiddenSafetyClasses,
+  onToggleSafetyClass,
+  onToggleGroup,
 }: {
   segments: RouteSegment[] | null
   overlayOn: boolean
   profileKey: string
+  hiddenSafetyClasses: Set<SafetyClass>
+  onToggleSafetyClass: (cls: SafetyClass) => void
+  onToggleGroup: (level: LegendLevel) => void
 }) {
   const profileGroups = PROFILE_LEGEND[profileKey]
   const hasRoute = segments && segments.length > 0
@@ -164,9 +187,9 @@ function Legend({
   const levelAppears = (level: string): boolean => {
     if (!presentClasses) return true
     const levelToClasses: Record<string, string[]> = {
-      great: ['great', 'good'],
-      ok:    ['ok'],
-      bad:   ['avoid'],
+      good: ['great', 'good'],
+      ok:   ['ok'],
+      bad:  ['avoid'],
     }
     return (levelToClasses[level] ?? []).some((c) => (presentClasses as Set<string>).has(c))
   }
@@ -174,33 +197,57 @@ function Legend({
   if (profileGroups) {
     const visibleGroups = profileGroups.filter((g) => levelAppears(g.level))
     if (!visibleGroups.length) return null
+
     return (
       <div className="map-legend">
-        {visibleGroups.map((group) => (
-          <div key={group.level} className="legend-group">
-            <div className="legend-level-row">
-              <span className="legend-level-label">{group.label}</span>
+        {visibleGroups.map((group) => {
+          // Group is "checked" if at least one item in it is visible
+          const groupSafetyClasses = [...new Set(group.items.map((i) => i.safetyClass))]
+          const allHidden = groupSafetyClasses.every((c) => hiddenSafetyClasses.has(c))
+          const groupChecked = !allHidden
+
+          return (
+            <div key={group.level} className={`legend-group${allHidden ? ' legend-group-hidden' : ''}`}>
+              <button
+                className="legend-group-toggle"
+                onClick={() => onToggleGroup(group.level)}
+                title={`${groupChecked ? 'Hide' : 'Show'} ${group.label} paths`}
+              >
+                <span className={`legend-toggle-box${groupChecked ? ' checked' : ''}`}>
+                  {groupChecked && <CheckMark />}
+                </span>
+                <span className="legend-level-label">{group.label}</span>
+              </button>
+              {group.items.map((item) => {
+                const itemColor = SAFETY[item.safetyClass]?.color ?? '#888'
+                const itemChecked = !hiddenSafetyClasses.has(item.safetyClass)
+                const iconNode = LEGEND_ICON_OVERRIDE[item.name] ?? (
+                  <span className="legend-icon">{item.icon}</span>
+                )
+                return (
+                  <button
+                    key={item.name}
+                    className={`legend-item legend-item-toggle${itemChecked ? '' : ' legend-item-off'}`}
+                    onClick={() => onToggleSafetyClass(item.safetyClass)}
+                    title={`${itemChecked ? 'Hide' : 'Show'} ${item.name}`}
+                  >
+                    <span className={`legend-toggle-box legend-toggle-box-sm${itemChecked ? ' checked' : ''}`}>
+                      {itemChecked && <CheckMark />}
+                    </span>
+                    <span className="legend-dot" style={{ background: itemColor }} />
+                    {iconNode}
+                    <span className="legend-text">{item.name}</span>
+                  </button>
+                )
+              })}
             </div>
-            {group.items.map((item) => {
-              const itemColor = SAFETY[item.safetyClass]?.color ?? '#888'
-              const iconNode = LEGEND_ICON_OVERRIDE[item.name] ?? (
-                <span className="legend-icon">{item.icon}</span>
-              )
-              return (
-                <div key={item.name} className="legend-item">
-                  <span className="legend-dot" style={{ background: itemColor }} />
-                  {iconNode}
-                  <span className="legend-text">{item.name}</span>
-                </div>
-              )
-            })}
-          </div>
-        ))}
+          )
+        })}
       </div>
     )
   }
 
-  // Fallback: show raw safety classes for unknown profiles
+  // Fallback: show raw safety classes for unknown profiles (non-interactive)
   const classes = segments
     ? [...new Set(segments.map((s) => s.safetyClass))]
     : (Object.keys(SAFETY) as (keyof typeof SAFETY)[])
@@ -246,6 +293,45 @@ export default function Map({
 }: Props) {
   const routeSegments = route?.segments ?? null
 
+  // Default: 'avoid' safetyClass hidden (bad paths off)
+  const [hiddenSafetyClasses, setHiddenSafetyClasses] = useState<Set<SafetyClass>>(
+    () => new Set<SafetyClass>(['avoid'])
+  )
+
+  // Compute hidden LegendLevels from hidden safetyClasses (for overlay filtering)
+  const hiddenLevels = new Set<LegendLevel>(
+    [...hiddenSafetyClasses].map((cls) => SAFETY_LEVEL[cls])
+  )
+
+  function toggleSafetyClass(cls: SafetyClass) {
+    setHiddenSafetyClasses((prev) => {
+      const next = new Set(prev)
+      if (next.has(cls)) next.delete(cls)
+      else next.add(cls)
+      return next
+    })
+  }
+
+  function toggleGroup(level: LegendLevel) {
+    const profileGroups = PROFILE_LEGEND[profileKey]
+    if (!profileGroups) return
+    const group = profileGroups.find((g) => g.level === level)
+    if (!group) return
+    const groupClasses = [...new Set(group.items.map((i) => i.safetyClass))]
+    const allHidden = groupClasses.every((c) => hiddenSafetyClasses.has(c))
+    setHiddenSafetyClasses((prev) => {
+      const next = new Set(prev)
+      if (allHidden) {
+        // All hidden → show all
+        groupClasses.forEach((c) => next.delete(c))
+      } else {
+        // Some or all visible → hide all
+        groupClasses.forEach((c) => next.add(c))
+      }
+      return next
+    })
+  }
+
   return (
     <MapContainer
       center={[52.52, 13.405]}
@@ -259,9 +345,14 @@ export default function Map({
 
       <ClickHandler onClick={onMapClick} />
 
-      <BikeMapOverlay enabled={overlayEnabled} profileKey={profileKey} onStatusChange={onOverlayStatusChange} />
+      <BikeMapOverlay
+        enabled={overlayEnabled}
+        profileKey={profileKey}
+        hiddenLevels={hiddenLevels}
+        onStatusChange={onOverlayStatusChange}
+      />
 
-      <RouteDisplay route={route} />
+      <RouteDisplay route={route} hiddenSafetyClasses={hiddenSafetyClasses} />
 
       {startPoint && (
         <Marker position={[startPoint.lat, startPoint.lng]} icon={startIcon}>
@@ -280,7 +371,16 @@ export default function Map({
         </Marker>
       ))}
 
-      {legendVisible && <Legend segments={routeSegments} overlayOn={overlayEnabled} profileKey={profileKey} />}
+      {legendVisible && (
+        <Legend
+          segments={routeSegments}
+          overlayOn={overlayEnabled}
+          profileKey={profileKey}
+          hiddenSafetyClasses={hiddenSafetyClasses}
+          onToggleSafetyClass={toggleSafetyClass}
+          onToggleGroup={toggleGroup}
+        />
+      )}
     </MapContainer>
   )
 }
