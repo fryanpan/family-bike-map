@@ -650,12 +650,6 @@ button { font-family: inherit; cursor: pointer; }
   gap: 6px;
   padding: 2px 0;
 }
-.legend-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
 .legend-icon { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
 .legend-text { font-size: 11px; color: #374151; }
 .legend-text-flex { flex: 1; }

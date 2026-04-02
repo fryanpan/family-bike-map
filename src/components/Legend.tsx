@@ -1,5 +1,5 @@
 import React from 'react'
-import { SAFETY, PROFILE_LEGEND, PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
+import { PROFILE_LEGEND, PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
 import type { LegendItem } from '../utils/classify'
 import type { RouteSegment } from '../utils/types'
 
@@ -97,13 +97,11 @@ export default function Legend({
   if (preferredItems.length === 0 && otherItems.length === 0) return null
 
   function renderItem(item: LegendItem, inPreferred: boolean) {
-    const itemColor = SAFETY[item.safetyClass]?.color ?? '#888'
     const iconNode = LEGEND_ICON_OVERRIDE[item.name] ?? (
       <span className="legend-icon">{item.icon}</span>
     )
     return (
       <div key={item.name} className="legend-item legend-item-row">
-        <span className="legend-dot" style={{ background: itemColor }} />
         {iconNode}
         <span className="legend-text legend-text-flex">{item.name}</span>
         {inPreferred ? (
