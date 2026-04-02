@@ -174,6 +174,14 @@ export default function App() {
             onOverlayStatusChange={setOverlayStatus}
           />
         </Suspense>
+        <div className="map-mode-overlay">
+          <ProfileSelector
+            profiles={profiles}
+            selected={selectedProfile}
+            onSelect={handleProfileChange}
+            onEdit={(key) => setEditingProfile(key)}
+          />
+        </div>
       </div>
 
       <div className={`panel${panelOpen ? ' panel-open' : ' panel-closed'}`}>
@@ -223,13 +231,6 @@ export default function App() {
               {MODE_HINT[clickMode]}
             </p>
           </div>
-
-          <ProfileSelector
-            profiles={profiles}
-            selected={selectedProfile}
-            onSelect={handleProfileChange}
-            onEdit={(key) => setEditingProfile(key)}
-          />
 
           {waypoints.length > 0 && (
             <div className="waypoints-section">
