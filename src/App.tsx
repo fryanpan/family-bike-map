@@ -1,4 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
+import { useGeolocation } from './hooks/useGeolocation'
 const Map = lazy(() => import('./components/Map'))
 const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
 import Legend from './components/Legend'
@@ -48,7 +49,7 @@ export default function App() {
   const [endPoint, setEndPoint]     = useState<Place | null>(null)
   const [waypoints]                 = useState<Array<{ lat: number; lng: number }>>([])
 
-  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const { location: currentLocation } = useGeolocation()
 
   const [route, setRoute]         = useState<Route | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -99,16 +100,6 @@ export default function App() {
     saveProfiles(profiles)
   }, [profiles])
 
-  // Track current location for the map dot. Silently no-ops if geolocation is denied.
-  useEffect(() => {
-    if (!navigator.geolocation) return
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => setCurrentLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => { /* permission denied or unavailable — ignore */ },
-      { enableHighAccuracy: false, timeout: 10000 },
-    )
-    return () => navigator.geolocation.clearWatch(watchId)
-  }, [])
 
 
   async function computeRoute(
@@ -151,7 +142,6 @@ export default function App() {
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords
-        setCurrentLocation({ lat, lng })
         const geocoded = await reverseGeocode(lat, lng)
         const place: Place = {
           lat,
