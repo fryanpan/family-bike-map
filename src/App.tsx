@@ -269,7 +269,7 @@ export default function App() {
           <div className="panel-header">
             <div className="header-row">
               <div>
-                <h1 className="app-title">🚲 Berlin Bike Routes</h1>
+                <h1 className="app-title">Family Bike Map</h1>
               </div>
               <button
                 className={`overlay-toggle${overlayEnabled ? ' overlay-on' : ''}`}

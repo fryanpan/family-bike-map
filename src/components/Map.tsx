@@ -1,5 +1,6 @@
 import L from 'leaflet'
-import { Marker, MapContainer, Polyline, TileLayer, Tooltip } from 'react-leaflet'
+import { useEffect, useRef } from 'react'
+import { Marker, MapContainer, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet'
 import { SAFETY } from '../utils/classify'
 import type { LegendLevel } from '../utils/classify'
 import BikeMapOverlay from './BikeMapOverlay'
@@ -42,6 +43,20 @@ function makeSegmentIcon(emoji: string): L.DivIcon {
     iconSize: [28, 28],
     iconAnchor: [14, 14],
   })
+}
+
+function MapCenterController({ currentLocation }: { currentLocation: { lat: number; lng: number } | null }) {
+  const map = useMap()
+  const hasCentered = useRef(false)
+
+  useEffect(() => {
+    if (currentLocation && !hasCentered.current) {
+      map.setView([currentLocation.lat, currentLocation.lng], 14)
+      hasCentered.current = true
+    }
+  }, [currentLocation, map])
+
+  return null
 }
 
 function midpoint(coords: [number, number][]): [number, number] {
@@ -135,6 +150,7 @@ export default function Map({
       zoom={13}
       style={{ width: '100%', height: '100%' }}
     >
+      <MapCenterController currentLocation={currentLocation} />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
