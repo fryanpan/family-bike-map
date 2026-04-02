@@ -12,7 +12,7 @@
  * quality bar in the UI.
  *
  * Quality levels (from computeRouteQuality):
- *   quality.great = fraction of route on Fahrradstrasse, car-free paths, separated
+ *   quality.good = fraction of route on Fahrradstrasse, car-free paths, separated
  *                   bike tracks, and park footways (great + good safety classes)
  *   quality.ok    = fraction on quiet streets, residential roads, acceptable lanes
  *   quality.bad   = fraction on busy roads, roads with no bike infra, etc.
@@ -120,7 +120,7 @@ async function fetchRoute(
 async function fetchRouteQuality(
   coords: [number, number][],
   profileKey: string,
-): Promise<{ great: number; ok: number; bad: number }> {
+): Promise<{ good: number; ok: number; bad: number }> {
   // Sample down to ≤150 points to keep the API call fast
   const stride = Math.max(1, Math.ceil(coords.length / 150))
   const sampled = coords.filter((_, i) => i % stride === 0)
@@ -193,19 +193,19 @@ describe('routing integration — Dresdener Str 112 → Zoo (toddler mode)', () 
    * avoid), we check that the route still includes meaningful car-free sections
    * (Tiergarten paths, cycleways near Potsdamer Platz).
    */
-  it('uses some car-free infrastructure (quality.great > 0.1)', async () => {
+  it('uses some car-free infrastructure (quality.good > 0.1)', async () => {
     if (skipIfOffline()) return
     const { coords } = await fetchRoute(DRESDENER_STR_112, ZOO_ENTRANCE, TODDLER_OPTS)
     const quality = await fetchRouteQuality(coords, 'toddler')
-    expect(quality.great).toBeGreaterThan(0.1)
+    expect(quality.good).toBeGreaterThan(0.1)
   })
 
-  it('uses some car-free/separated infrastructure (quality.great > 0.15)', async () => {
+  it('uses some car-free/separated infrastructure (quality.good > 0.15)', async () => {
     if (skipIfOffline()) return
     const { coords } = await fetchRoute(DRESDENER_STR_112, ZOO_ENTRANCE, TODDLER_OPTS)
     const quality = await fetchRouteQuality(coords, 'toddler')
     // The route includes cycleway sections near Potsdamer Platz and Tiergarten
-    expect(quality.great).toBeGreaterThan(0.15)
+    expect(quality.good).toBeGreaterThan(0.15)
   })
 
   it('distance is under 10km (not taking a crazy detour)', async () => {
@@ -238,11 +238,11 @@ describe('routing integration — Dresdener Str 112 → Le Brot (training mode)'
     expect(usesKottbusser).toBe(true)
   })
 
-  it('has majority good/great infrastructure (quality.great + quality.ok > 0.6)', async () => {
+  it('has majority good/great infrastructure (quality.good + quality.ok > 0.6)', async () => {
     if (skipIfOffline()) return
     const { coords } = await fetchRoute(DRESDENER_STR_112, LE_BROT, TRAINING_OPTS)
     const quality = await fetchRouteQuality(coords, 'training')
-    expect(quality.great + quality.ok).toBeGreaterThan(0.6)
+    expect(quality.good + quality.ok).toBeGreaterThan(0.6)
   })
 
   it('bus lanes on the route classify as "good" for training and trailer, "avoid" for toddler', () => {
@@ -277,12 +277,12 @@ describe('routing integration — Dresdener Str 112 → Humboldt Forum (toddler 
     expect(reachesMitte).toBe(true)
   })
 
-  it('uses car-free or park paths near the destination (quality.great > 0)', async () => {
+  it('uses car-free or park paths near the destination (quality.good > 0)', async () => {
     if (skipIfOffline()) return
     const { coords } = await fetchRoute(DRESDENER_STR_112, HUMBOLDT_FORUM, TODDLER_OPTS)
     const quality = await fetchRouteQuality(coords, 'toddler')
     // The Schloßplatz approach and Fischerinsel area include car-free sections
-    expect(quality.great).toBeGreaterThan(0)
+    expect(quality.good).toBeGreaterThan(0)
   })
 })
 
