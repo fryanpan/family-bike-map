@@ -1,323 +1,136 @@
-# Technical Architecture Proposal
+# Technical Architecture
 
-## Architecture Overview
+## Current Architecture (Implemented)
+
+The app is a single-page web application deployed on Cloudflare Workers. There is no separate backend — the Worker serves both static assets and proxies API calls.
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
-        Web[Web UI]
-        Mobile[Mobile App]
+    subgraph "Client (React SPA)"
+        UI[Map UI<br/>React + MapLibre/Leaflet]
+        Classify[Route Classifier<br/>classify.ts / overpass.ts]
     end
 
-    subgraph "API Layer"
-        API[API Server<br/>Node.js/Go/Python]
-        API -->|translate prefs| Router
-        API -->|store/retrieve| DB
+    subgraph "Cloudflare Worker"
+        Worker[Worker<br/>serves assets + proxies API]
     end
 
-    subgraph "Routing Engine"
-        Router[Valhalla Instance]
-        OSMData[OSM Extract<br/>Berlin]
-        OSMData -->|preprocessed| Router
+    subgraph "External APIs"
+        Valhalla[Valhalla<br/>valhalla1.openstreetmap.de<br/>bicycle routing]
+        Nominatim[Nominatim<br/>nominatim.openstreetmap.org<br/>geocoding]
+        Overpass[Overpass API<br/>overpass-api.de<br/>OSM tile data for overlay]
     end
 
-    subgraph "Data Layer"
-        DB[(Database<br/>Postgres+PostGIS)]
-        Cache[(Redis Cache)]
-    end
-
-    Web -->|REST/GraphQL| API
-    Mobile -->|REST/GraphQL| API
-    API -->|cache| Cache
-
-    style Router fill:#f9f,stroke:#333,stroke-width:2px
+    UI -->|route request| Worker
+    UI -->|geocode| Nominatim
+    Classify -->|tile bounding box query| Overpass
+    Worker -->|proxy| Valhalla
 ```
 
 ## Component Details
 
-### 1. Routing Engine: Valhalla
+### Frontend (React + Leaflet)
 
-**Why Valhalla:**
-- Dynamic costing allows preference adjustments without graph rebuild
-- Comprehensive bike-specific features
-- Production-ready and battle-tested
-- Flexible enough to implement our safety preference model
+**Key files:**
 
-**Setup:**
-- Self-hosted Valhalla instance
-- Berlin OSM extract from Geofabrik
-- Pre-process into Valhalla tile format
-- Update monthly (or as needed)
+| File | Purpose |
+|------|---------|
+| `src/App.tsx` | App state, route computation, profile management |
+| `src/components/Map.tsx` | Leaflet map, route polyline display, auto-fit bounds |
+| `src/components/ProfileEditor.tsx` | Edit rider profiles, avoidances, costing sliders |
+| `src/components/ProfileSelector.tsx` | Profile switcher (on-map overlay) |
+| `src/components/BikeMapOverlay.tsx` | Tile-cached bike infrastructure overlay from Overpass |
+| `src/components/Legend.tsx` | Route quality legend with safety class toggles |
+| `src/components/SearchBar.tsx` | Address autocomplete via Nominatim |
+| `src/components/DirectionsPanel.tsx` | Turn-by-turn directions and route summary |
+| `src/services/routing.ts` | Valhalla route requests, profile definitions |
+| `src/services/overpass.ts` | OSM bike infrastructure queries and classification |
+| `src/services/geocoding.ts` | Nominatim forward/reverse geocoding |
+| `src/utils/classify.ts` | Edge → SafetyClass classification (profile-aware) |
+| `src/utils/types.ts` | Shared types including `SafetyClass`, `RiderProfile` |
+| `src/hooks/useGeolocation.ts` | GPS watch position hook |
 
-**Costing Profiles:**
+### Routing: Valhalla (Public Instance)
 
-```json
-{
-  "family_with_trailer": {
-    "bicycle_type": "hybrid",
-    "use_roads": 0.2,
-    "cycling_speed": 12,
-    "avoid_bad_surfaces": 0.9,
-    "use_hills": 0.3
-  },
-  "confident_solo": {
-    "bicycle_type": "road",
-    "use_roads": 0.6,
-    "cycling_speed": 20,
-    "avoid_bad_surfaces": 0.5,
-    "use_hills": 0.7
-  }
-}
-```
+All routing calls go through the Cloudflare Worker which proxies to `valhalla1.openstreetmap.de`. The Worker handles CORS and rate limiting.
 
-### 2. API Server
+**Costing profiles** (defined in `routing.ts`):
 
-**Responsibilities:**
-- Accept routing requests with user preferences
-- Translate preferences to Valhalla costing parameters
-- Store user profiles, saved routes, feedback
-- Serve route alternatives
-- Handle route tweaking (avoid segments, prefer segments)
-- Aggregate feedback for route quality scoring
+| Profile | Bicycle Type | Speed | Use Roads | Avoid Bad Surfaces |
+|---------|-------------|-------|-----------|-------------------|
+| toddler | Hybrid | 10 km/h | 0.0 | 0.5 |
+| trailer | Hybrid | 11 km/h | 0.15 | 0.5 |
+| training | Road | 22 km/h | 0.6 | 0.4 |
 
-**Technology Options:**
-- **Option A (Recommended)**: Go + Chi/Gin
-  - Fast, efficient, good concurrency
-  - Easy deployment (single binary)
-  - Good Valhalla client libraries
-- **Option B**: Node.js + Express
-  - Fast iteration, familiar ecosystem
-  - Good for MVP
-- **Option C**: Python + FastAPI
-  - If team prefers Python
-  - Easy integration with GIS libraries
+When a profile has `avoidances: ['cobblestones']`, the routing enforces `avoid_bad_surfaces >= 0.5` in the Valhalla request.
 
-**Key Endpoints:**
-```
-POST /routes/search
-  - Input: start, end, profile, preferences
-  - Output: Route(s) with segments and safety scores
+**Two-phase route rendering:**
+1. `getRoute()` — fast Valhalla `/route` call, returns geometry + maneuvers
+2. `getRouteSegments()` — async Valhalla `trace_attributes` call, classifies each edge and colors segments by safety class
 
-GET /routes/:id
-  - Retrieve saved route
+### Safety Classification Model
 
-POST /routes/:id/feedback
-  - Submit feedback on route segment
+Routes are displayed using a 4-level safety model (`SafetyClass`):
 
-PUT /routes/:id/tweak
-  - Adjust route (avoid/prefer segments)
+| Level | Constant | Color | Meaning |
+|-------|----------|-------|---------|
+| `great` | `SAFETY_CLASS.GREAT` | Green | Car-free path / Fahrradstrasse |
+| `good` | `SAFETY_CLASS.GOOD` | Green | Shared footway / pedestrian path |
+| `ok` | `SAFETY_CLASS.OK` | Amber | Separated track / living street |
+| `bad` | `SAFETY_CLASS.BAD` | Red | Road without protection |
 
-GET /profiles
-  - List available rider profiles
+Classification is **profile-aware** — the same road can be 'ok' for a trailer but 'bad' for a toddler. See `classify.ts` and `overpass.ts` for the full logic.
 
-POST /profiles
-  - Create custom profile
-```
+Use `SAFETY_CLASS` constants (from `types.ts`) instead of raw string literals.
 
-### 3. Database: Postgres + PostGIS
+### Bike Infrastructure Overlay
 
-**Schema (simplified):**
+`BikeMapOverlay` fetches OSM data via Overpass API at the current map viewport. Results are cached by tile (256px grid), so panning/zooming reuses already-fetched data. Rendering is throttled by zoom level — the overlay only activates at zoom ≥ 14.
 
-```sql
--- User profiles
-CREATE TABLE rider_profiles (
-  id UUID PRIMARY KEY,
-  user_id UUID,
-  name VARCHAR(255),
-  preferences JSONB,  -- safety weights, speeds, etc.
-  created_at TIMESTAMP
-);
+### Deployment
 
--- Saved routes
-CREATE TABLE routes (
-  id UUID PRIMARY KEY,
-  user_id UUID,
-  profile_id UUID,
-  start_point GEOGRAPHY(POINT),
-  end_point GEOGRAPHY(POINT),
-  geometry GEOGRAPHY(LINESTRING),
-  metadata JSONB,  -- distance, estimated time, safety score
-  created_at TIMESTAMP
-);
+**Cloudflare Workers** serves everything:
+- Static assets (React SPA, built by Vite)
+- API proxy endpoints at `/api/valhalla/*`
+- Feedback endpoint at `/api/feedback`
 
--- Segment feedback
-CREATE TABLE segment_feedback (
-  id UUID PRIMARY KEY,
-  route_id UUID,
-  segment_geom GEOGRAPHY(LINESTRING),
-  rating INTEGER,  -- 1-5
-  tags TEXT[],  -- ["too_busy", "great_surface", "narrow", etc.]
-  comment TEXT,
-  created_at TIMESTAMP
-);
-
--- Route tweaks
-CREATE TABLE route_tweaks (
-  id UUID PRIMARY KEY,
-  route_id UUID,
-  tweak_type VARCHAR(50),  -- 'avoid' or 'prefer'
-  segment_geom GEOGRAPHY(LINESTRING),
-  created_at TIMESTAMP
-);
-```
-
-### 4. Client Layer
-
-**MVP: Web UI**
-- Interactive map (Mapbox GL JS or MapLibre)
-- Start/end point selection
-- Profile selector
-- Route preview with segment safety color-coding
-- Segment feedback UI
-
-**Phase 2: Mobile App**
-- React Native or Flutter
-- Turn-by-turn navigation
-- Offline route caching
-- Watch integration (optional)
-
-### 5. Caching Layer: Redis
-
-**Cache Strategy:**
-- Cache common routes (30 day TTL)
-- Cache OSM-derived data (Fahrradstrasse locations, etc.)
-- Cache user profile lookups
-- Invalidate on feedback that significantly changes segment quality
+No database, no cache layer — all state lives in the browser (localStorage for profiles, in-memory for route/overlay data).
 
 ## Data Flow: Route Request
 
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant API
-    participant Cache
+    participant User
+    participant App
+    participant Worker
     participant Valhalla
-    participant DB
 
-    Client->>API: POST /routes/search {start, end, profile}
-    API->>Cache: Check for cached route
-    alt Cache Hit
-        Cache-->>API: Return cached route
-    else Cache Miss
-        API->>DB: Get profile preferences
-        DB-->>API: Profile data
-        API->>API: Translate to Valhalla costing
-        API->>Valhalla: Route request with costing
-        Valhalla-->>API: Route geometry + segments
-        API->>API: Calculate safety scores per segment
-        API->>Cache: Store route
-        Cache-->>API: OK
-    end
-    API->>DB: Get segment feedback stats
-    DB-->>API: Feedback data
-    API->>API: Adjust safety scores
-    API-->>Client: Route with safety-colored segments
+    User->>App: Select start + end
+    App->>Worker: POST /api/valhalla/route
+    Worker->>Valhalla: POST /route (bicycle costing)
+    Valhalla-->>Worker: Route geometry + maneuvers
+    Worker-->>App: Route data
+    App->>App: Decode polyline, fit map bounds
+    App->>Worker: POST /api/valhalla/trace_attributes (async)
+    Worker->>Valhalla: trace_attributes (edge data)
+    Valhalla-->>Worker: Per-edge attributes
+    Worker-->>App: Edge attributes
+    App->>App: Classify edges → colored segments
+    App->>App: Render colored route on map
 ```
 
-## Preference → Valhalla Costing Translation
+## Rider Profiles
 
-**OSM Tag Mapping:**
+Profiles are defined in `routing.ts` as `DEFAULT_PROFILES`. Users can customise any profile (stored in `localStorage`). Each profile has:
 
-| Feature | OSM Tags | Valhalla Costing Adjustment |
-|---------|----------|---------------------------|
-| Fahrradstrasse | `bicycle_road=yes` | `use_roads=0.1`, very low cost |
-| Separated path | `cycleway=track` | Low cost multiplier (0.2x) |
-| Painted lane | `cycleway=lane` | Medium-low cost (0.5x) |
-| Quiet residential | `highway=residential` + low `maxspeed` | Time-aware: 0.7x during off-peak |
-| Bus lane | `cycleway=share_busway` | Medium cost (0.8x for solo, 1.5x for family) |
-| Busy road | `highway=primary/secondary` + no bike infra | High cost (2-5x) |
+- `costingOptions` — Valhalla bicycle costing parameters
+- `avoidances` — named avoidance categories (e.g. `['cobblestones']`) that override costing options
+- `editable` — whether the user can modify this profile
 
-**User Preference Sliders:**
-- Safety priority (0-100): Maps to `use_roads` inversion
-- Hill tolerance (0-100): Maps to `use_hills`
-- Surface quality importance (0-100): Maps to `avoid_bad_surfaces`
-- Speed preference: Maps to `cycling_speed`
+## Open Questions / Future Work
 
-## Deployment Architecture
-
-**MVP (Single Region):**
-```
-┌─────────────────┐
-│   CloudFlare    │  CDN + DDoS protection
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  Load Balancer  │  (nginx or cloud LB)
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    │         │
-┌───▼──┐  ┌──▼───┐
-│ API  │  │ API  │   (2+ instances)
-└───┬──┘  └──┬───┘
-    └────┬────┘
-         │
-    ┌────┴────┐
-    │         │
-┌───▼────┐ ┌─▼──────┐ ┌─▼─────────┐
-│Valhalla│ │Postgres│ │   Redis   │
-└────────┘ └────────┘ └───────────┘
-```
-
-**Hosting Options:**
-- **Option A**: Self-hosted VPS (Hetzner, DigitalOcean)
-  - Lower cost, full control
-  - Valhalla needs ~4GB RAM for Berlin
-- **Option B**: Cloud (AWS/GCP/Azure)
-  - Easier scaling, managed services
-  - Higher cost
-
-## Technology Stack Summary
-
-| Layer | Technology | Rationale |
-|-------|-----------|-----------|
-| Routing Engine | Valhalla | Flexible bike routing, dynamic costing |
-| API Server | Go + Chi/Gin | Fast, efficient, easy deployment |
-| Database | Postgres + PostGIS | Best GIS support, mature |
-| Cache | Redis | Fast, simple, reliable |
-| Web Frontend | React + MapLibre | Modern, good map support |
-| Mobile (Phase 2) | React Native | Code sharing with web |
-| Hosting | Hetzner VPS | Cost-effective for MVP |
-
-## Development Phases
-
-### Phase 0: Research & Validation (Current)
-- ✅ Document vision and requirements
-- ✅ Research routing engines
-- ✅ Propose architecture
-- ⏳ Validate Valhalla with Berlin data (build proof-of-concept)
-
-### Phase 1: MVP (Core Routing)
-- Set up Valhalla with Berlin OSM extract
-- Build API with basic routing endpoints
-- Create web UI with map and route preview
-- Implement 2-3 rider profiles
-- Deploy to staging
-
-### Phase 2: Feedback & Refinement
-- Add segment feedback system
-- Implement route tweaking (avoid/prefer)
-- Aggregate feedback to improve routing
-- Add route saving and sharing
-
-### Phase 3: Mobile & Advanced
-- Mobile app with turn-by-turn
-- Offline route support
-- Watch integration
-- Community route collections
-
-## Open Questions
-
-1. **Hosting location**: Self-hosted VPS vs cloud?
-2. **Authentication**: Do we need user accounts for MVP, or can we start anonymous?
-3. **Data updates**: How often should we refresh OSM data? (Monthly? Weekly?)
-4. **Feedback moderation**: How to handle spam/malicious feedback?
-5. **Business model**: Free/open-source? Donation-supported? Freemium?
-
-## Next Steps
-
-1. Build Valhalla proof-of-concept with Berlin data
-2. Test costing profiles with known routes
-3. Validate that preference model maps correctly to Valhalla parameters
-4. Make go/no-go decision on Valhalla vs alternatives
-5. If go: proceed with API server development
+1. **Multi-city support**: Currently Berlin-only via the public Valhalla instance. Long-term: self-hosted with configurable OSM extracts.
+2. **User accounts**: No auth yet — profiles stored in localStorage only.
+3. **Route saving/sharing**: Not implemented.
+4. **Feedback system**: `FeedbackWidget` exists but feeds a simple endpoint; no aggregation or crowdsourced routing yet.
+5. **Mobile app**: Web-only for now.

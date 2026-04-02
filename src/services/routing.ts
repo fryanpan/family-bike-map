@@ -71,6 +71,7 @@ export const DEFAULT_PROFILES: ProfileMap = {
       use_living_streets: 1.0, // strongly prefers living streets / Fahrradstrasse-adjacent ways
     },
     editable: true,
+    avoidances: ['cobblestones'],
   },
   trailer: {
     label: 'Bike Trailer',
@@ -88,6 +89,7 @@ export const DEFAULT_PROFILES: ProfileMap = {
       use_living_streets: 0.9,
     },
     editable: true,
+    avoidances: ['cobblestones'],
   },
   training: {
     label: 'Fast Training',
@@ -104,6 +106,7 @@ export const DEFAULT_PROFILES: ProfileMap = {
       use_living_streets: 0.5,
     },
     editable: true,
+    avoidances: ['cobblestones'],
   },
 }
 
@@ -129,10 +132,16 @@ export async function getRoute(
     { lat: end.lat, lon: end.lng },
   ]
 
+  // If the profile has cobblestones in avoidances, enforce avoid_bad_surfaces >= 0.5
+  // (treats cobblestones as a separate, explicitly-controlled avoidance category)
+  const costingOptions = profile.avoidances?.includes('cobblestones')
+    ? { ...profile.costingOptions, avoid_bad_surfaces: Math.max(0.5, profile.costingOptions.avoid_bad_surfaces) }
+    : profile.costingOptions
+
   const body = {
     locations,
     costing: 'bicycle',
-    costing_options: { bicycle: profile.costingOptions },
+    costing_options: { bicycle: costingOptions },
     directions_options: { units: 'km', language: 'en-US' },
   }
 

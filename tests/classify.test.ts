@@ -74,12 +74,12 @@ describe('classifyEdge — separated track (cycle_lane="separated")', () => {
 
   it('classifies separated track as avoid for trailer (too narrow)', () => {
     const edge: ValhallaEdge = { cycle_lane: 'separated' }
-    expect(classifyEdge(edge, 'trailer')).toBe('avoid')
+    expect(classifyEdge(edge, 'trailer')).toBe('bad')
   })
 
   it('classifies separated track as avoid for training (too slow/interrupted)', () => {
     const edge: ValhallaEdge = { cycle_lane: 'separated' }
-    expect(classifyEdge(edge, 'training')).toBe('avoid')
+    expect(classifyEdge(edge, 'training')).toBe('bad')
   })
 })
 
@@ -88,7 +88,7 @@ describe('classifyEdge — separated track (cycle_lane="separated")', () => {
 describe('classifyEdge — painted road lane (cycle_lane="dedicated")', () => {
   it('classifies painted lane as avoid for toddler', () => {
     const edge: ValhallaEdge = { cycle_lane: 'dedicated' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
   })
 
   it('classifies painted lane as ok for trailer', () => {
@@ -118,7 +118,7 @@ describe('classifyEdge — living street (use="living_street")', () => {
 describe('classifyEdge — shared bus lane (cycle_lane="share_busway")', () => {
   it('classifies bus lane as avoid for toddler (hazardous with small child)', () => {
     const edge: ValhallaEdge = { cycle_lane: 'share_busway' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
   })
 
   it('classifies bus lane as good for training (wide, predictable)', () => {
@@ -137,15 +137,15 @@ describe('classifyEdge — shared bus lane (cycle_lane="share_busway")', () => {
 describe('classifyEdge — bad surfaces', () => {
   it('classifies cobblestone surface as avoid for all profiles', () => {
     const edge: ValhallaEdge = { cycle_lane: 'separated', surface: 'cobblestone' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
-    expect(classifyEdge(edge, 'trailer')).toBe('avoid')
-    expect(classifyEdge(edge, 'training')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
+    expect(classifyEdge(edge, 'trailer')).toBe('bad')
+    expect(classifyEdge(edge, 'training')).toBe('bad')
   })
 
   it('classifies sett (Kopfsteinpflaster) as avoid for all profiles', () => {
     const edge: ValhallaEdge = { use: 'cycleway', surface: 'sett' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
-    expect(classifyEdge(edge, 'training')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
+    expect(classifyEdge(edge, 'training')).toBe('bad')
   })
 
   it('does NOT treat dirt or compacted as bad surfaces', () => {
@@ -159,10 +159,10 @@ describe('classifyEdge — bad surfaces', () => {
   it('classifies gravel and unpaved as avoid for all profiles', () => {
     const gravel: ValhallaEdge = { cycle_lane: 'separated', surface: 'gravel' }
     const unpaved: ValhallaEdge = { cycle_lane: 'separated', surface: 'unpaved' }
-    expect(classifyEdge(gravel, 'toddler')).toBe('avoid')
-    expect(classifyEdge(gravel, 'trailer')).toBe('avoid')
-    expect(classifyEdge(gravel, 'training')).toBe('avoid')
-    expect(classifyEdge(unpaved, 'toddler')).toBe('avoid')
+    expect(classifyEdge(gravel, 'toddler')).toBe('bad')
+    expect(classifyEdge(gravel, 'trailer')).toBe('bad')
+    expect(classifyEdge(gravel, 'training')).toBe('bad')
+    expect(classifyEdge(unpaved, 'toddler')).toBe('bad')
   })
 })
 
@@ -171,7 +171,7 @@ describe('classifyEdge — bad surfaces', () => {
 describe('classifyEdge — road class fallback', () => {
   it('classifies residential as avoid for toddler', () => {
     const edge: ValhallaEdge = { road_class: 'residential' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
   })
 
   it('classifies residential as ok for trailer and training', () => {
@@ -182,7 +182,7 @@ describe('classifyEdge — road class fallback', () => {
 
   it('classifies service road as avoid for toddler', () => {
     const edge: ValhallaEdge = { road_class: 'service_other' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
   })
 
   it('classifies service road as ok for trailer and training', () => {
@@ -193,24 +193,24 @@ describe('classifyEdge — road class fallback', () => {
 
   it('classifies tertiary as avoid for all profiles', () => {
     const edge: ValhallaEdge = { road_class: 'tertiary' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
-    expect(classifyEdge(edge, 'trailer')).toBe('avoid')
-    expect(classifyEdge(edge, 'training')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
+    expect(classifyEdge(edge, 'trailer')).toBe('bad')
+    expect(classifyEdge(edge, 'training')).toBe('bad')
   })
 
   it('classifies unclassified as avoid for all profiles', () => {
     const edge: ValhallaEdge = { road_class: 'unclassified' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
   })
 
   it('classifies primary as avoid', () => {
     const edge: ValhallaEdge = { road_class: 'primary' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
   })
 
   it('classifies secondary as avoid', () => {
     const edge: ValhallaEdge = { road_class: 'secondary' }
-    expect(classifyEdge(edge, 'toddler')).toBe('avoid')
+    expect(classifyEdge(edge, 'toddler')).toBe('bad')
   })
 })
 
@@ -229,10 +229,10 @@ describe('worsen', () => {
   it('degrades each class by one level through the 4-level system', () => {
     expect(worsen('great')).toBe('good')
     expect(worsen('good')).toBe('ok')
-    expect(worsen('ok')).toBe('avoid')
+    expect(worsen('ok')).toBe('bad')
   })
 
   it('cannot degrade below avoid', () => {
-    expect(worsen('avoid')).toBe('avoid')
+    expect(worsen('bad')).toBe('bad')
   })
 })

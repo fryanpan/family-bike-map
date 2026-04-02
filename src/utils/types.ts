@@ -28,15 +28,24 @@ export interface RiderProfile {
   description: string
   costingOptions: BicycleCostingOptions
   editable: boolean
+  avoidances?: string[]
 }
 
 export type ProfileKey = string
 
 export type ProfileMap = Record<ProfileKey, RiderProfile>
 
-// 4-level classification: great > good > ok > avoid
+// 4-level classification: great > good > ok > bad
 // (replaces the old 6-level system that had 'acceptable' and 'caution')
-export type SafetyClass = 'great' | 'good' | 'ok' | 'avoid'
+export type SafetyClass = 'great' | 'good' | 'ok' | 'bad'
+
+/** Named constants for all SafetyClass values — use these instead of raw string literals. */
+export const SAFETY_CLASS = {
+  GREAT: 'great' as SafetyClass,
+  GOOD:  'good'  as SafetyClass,
+  OK:    'ok'    as SafetyClass,
+  BAD:   'bad'   as SafetyClass,
+} as const
 
 export interface SafetyInfo {
   label: string

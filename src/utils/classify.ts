@@ -13,7 +13,7 @@ export const SAFETY: Record<SafetyClass, SafetyInfo> = {
   great: { label: 'Car-free path / Fahrradstrasse', color: STATUS_COLOR.green, icon: '🚴', textColor: '#fff' },
   good:  { label: 'Shared footway / Pedestrian path', color: STATUS_COLOR.green, icon: '🛤️', textColor: '#fff' },
   ok:    { label: 'Separated track / Living street', color: STATUS_COLOR.amber, icon: '〰️', textColor: '#fff' },
-  avoid: { label: 'Road without protection', color: STATUS_COLOR.red, icon: '⚠️', textColor: '#fff' },
+  bad:   { label: 'Road without protection', color: STATUS_COLOR.red, icon: '⚠️', textColor: '#fff' },
 }
 
 // ── Profile-aware legend ────────────────────────────────────────────────────
@@ -43,9 +43,9 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🏘️', name: 'Living street',              safetyClass: 'ok' },
     ]},
     { level: 'bad', label: 'Avoid', items: [
-      { icon: '〰️', name: 'Painted bike lane',          safetyClass: 'avoid' },
-      { icon: '🚌', name: 'Shared bus lane',            safetyClass: 'avoid' },
-      { icon: '🏠', name: 'Residential road',           safetyClass: 'avoid' },
+      { icon: '〰️', name: 'Painted bike lane',          safetyClass: 'bad' },
+      { icon: '🚌', name: 'Shared bus lane',            safetyClass: 'bad' },
+      { icon: '🏠', name: 'Residential road',           safetyClass: 'bad' },
     ]},
   ],
   trailer: [
@@ -61,7 +61,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🏠', name: 'Residential road',           safetyClass: 'ok' },
     ]},
     { level: 'bad', label: 'Avoid', items: [
-      { icon: '🛡️', name: 'Separated bike track (narrow)', safetyClass: 'avoid' },
+      { icon: '🛡️', name: 'Separated bike track (narrow)', safetyClass: 'bad' },
     ]},
   ],
   training: [
@@ -77,7 +77,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🏠', name: 'Residential road',           safetyClass: 'ok' },
     ]},
     { level: 'bad', label: 'Avoid', items: [
-      { icon: '🛡️', name: 'Separated bike track (slow)', safetyClass: 'avoid' },
+      { icon: '🛡️', name: 'Separated bike track (slow)', safetyClass: 'bad' },
     ]},
   ],
 }
@@ -89,7 +89,7 @@ export const SAFETY_LEVEL: Record<SafetyClass, LegendLevel> = {
   great: 'good',
   good:  'good',
   ok:    'ok',
-  avoid: 'bad',
+  bad:   'bad',
 }
 
 export interface RouteQuality { good: number; ok: number; bad: number }
@@ -187,7 +187,7 @@ export function classifyEdge(
   const surface     = edge.surface     ?? ''
 
   // Bad surfaces (cobblestones, gravel, sett) → avoid for all profiles
-  if (BAD_SURFACES.has(surface)) return 'avoid'
+  if (BAD_SURFACES.has(surface)) return 'bad'
 
   return classifyBase(use, cycleLane, roadClass, bicycleRoad, profileKey)
 }
@@ -214,7 +214,7 @@ function classifyBase(
   // Trailer: avoid (too narrow, turns are tricky with trailer)
   // Training: avoid (too slow and interrupted for fast riding)
   if (cycleLane === 'separated') {
-    return profileKey === 'toddler' ? 'ok' : 'avoid'
+    return profileKey === 'toddler' ? 'ok' : 'bad'
   }
 
   // ── Painted road bike lane (cycleway=lane) ───────────────────────────────
@@ -222,7 +222,7 @@ function classifyBase(
   // Trailer: ok (acceptable, wide enough)
   // Training: good (on-road, fast, consistent)
   if (cycleLane === 'dedicated') {
-    if (profileKey === 'toddler') return 'avoid'
+    if (profileKey === 'toddler') return 'bad'
     if (profileKey === 'training') return 'good'
     return 'ok'
   }
@@ -234,28 +234,28 @@ function classifyBase(
   // Toddler: avoid (buses are hazardous with small children)
   // Trailer/training: good (wide, well-maintained, predictable)
   if (cycleLane === 'share_busway') {
-    return profileKey === 'toddler' ? 'avoid' : 'good'
+    return profileKey === 'toddler' ? 'bad' : 'good'
   }
 
   // ── Shared road marking (sharrow) — avoid for all ──────────────────────
-  if (cycleLane === 'shared') return 'avoid'
+  if (cycleLane === 'shared') return 'bad'
 
   // ── Residential / service road ──────────────────────────────────────────
   // Toddler: avoid (cars on street with small child)
   // Trailer/training: ok (low traffic, acceptable)
   if (rcRank >= 6) {
-    return profileKey === 'toddler' ? 'avoid' : 'ok'
+    return profileKey === 'toddler' ? 'bad' : 'ok'
   }
 
   // ── Everything else (tertiary, unclassified, primary, secondary, trunk) ─
-  return 'avoid'
+  return 'bad'
 }
 
 /** Degrade a safety class by one level. Used for display purposes. */
 export function worsen(cls: SafetyClass): SafetyClass {
-  const order: SafetyClass[] = ['great', 'good', 'ok', 'avoid']
+  const order: SafetyClass[] = ['great', 'good', 'ok', 'bad']
   const idx = order.indexOf(cls)
-  return idx < order.length - 1 ? order[idx + 1] : 'avoid'
+  return idx < order.length - 1 ? order[idx + 1] : 'bad'
 }
 
 interface ClassifiedPoint {

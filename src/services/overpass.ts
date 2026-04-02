@@ -133,7 +133,7 @@ function classifyOsmTags(tags: Record<string, string>, profileKey?: string): Saf
   const surface = tags.surface ?? ''
 
   // Bad surfaces → avoid for all profiles
-  if (BAD_SURFACES.has(surface)) return 'avoid'
+  if (BAD_SURFACES.has(surface)) return 'bad'
 
   const highway = tags.highway ?? ''
   const cycleway = tags.cycleway ?? ''
@@ -159,28 +159,28 @@ function classifyOsmBase(
   // Toddler: ok (safe but slow/interrupted at crossings)
   // Trailer/training: avoid (too narrow for trailers, too slow for training)
   if (cycleway === 'track' || cycleway === 'opposite_track') {
-    return profileKey === 'toddler' ? 'ok' : 'avoid'
+    return profileKey === 'toddler' ? 'ok' : 'bad'
   }
 
   const cRight = tags['cycleway:right'] ?? ''
   const cLeft  = tags['cycleway:left']  ?? ''
   const cBoth  = tags['cycleway:both']  ?? ''
   if (cRight === 'track' || cLeft === 'track' || cBoth === 'track') {
-    return profileKey === 'toddler' ? 'ok' : 'avoid'
+    return profileKey === 'toddler' ? 'ok' : 'bad'
   }
 
   // Painted road bike lane (cycleway=lane, cycleway:*=lane)
   // Physical separation (bollards/buffer) treats it the same as a separated track.
   if (cycleway === 'lane' || cycleway === 'opposite_lane') {
-    if (hasSeparation(tags)) return profileKey === 'toddler' ? 'ok' : 'avoid'
-    if (profileKey === 'toddler') return 'avoid'
+    if (hasSeparation(tags)) return profileKey === 'toddler' ? 'ok' : 'bad'
+    if (profileKey === 'toddler') return 'bad'
     if (profileKey === 'training') return 'good'
     return 'ok'  // trailer
   }
 
   if (cRight === 'lane' || cLeft === 'lane' || cBoth === 'lane') {
-    if (hasSeparation(tags)) return profileKey === 'toddler' ? 'ok' : 'avoid'
-    if (profileKey === 'toddler') return 'avoid'
+    if (hasSeparation(tags)) return profileKey === 'toddler' ? 'ok' : 'bad'
+    if (profileKey === 'toddler') return 'bad'
     if (profileKey === 'training') return 'good'
     return 'ok'  // trailer
   }
@@ -190,7 +190,7 @@ function classifyOsmBase(
   // Trailer: ok (acceptable, buses give wide berth)
   // Training: good (wide, well-maintained)
   if (cycleway === 'share_busway') {
-    if (profileKey === 'toddler') return 'avoid'
+    if (profileKey === 'toddler') return 'bad'
     if (profileKey === 'training') return 'good'
     return 'ok'  // trailer
   }
@@ -200,7 +200,7 @@ function classifyOsmBase(
   // Residential roads
   // Toddler: avoid; trailer/training: ok
   if (highway === 'residential') {
-    return profileKey === 'toddler' ? 'avoid' : 'ok'
+    return profileKey === 'toddler' ? 'bad' : 'ok'
   }
 
   return 'ok'  // fallback for other queried ways (service roads, etc.)
