@@ -59,6 +59,18 @@ function MapCenterController({ currentLocation }: { currentLocation: { lat: numb
   return null
 }
 
+function FitBoundsController({ route }: { route: Route | null }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!route || route.coordinates.length < 2) return
+    const bounds = L.latLngBounds(route.coordinates.map(([lat, lng]) => [lat, lng]))
+    map.fitBounds(bounds, { padding: [40, 40] })
+  }, [route, map])
+
+  return null
+}
+
 function midpoint(coords: [number, number][]): [number, number] {
   return coords[Math.floor(coords.length / 2)]
 }
@@ -71,7 +83,7 @@ function RouteDisplay({ route }: { route: Route | null }) {
     return (
       <>
         {route.segments.map((seg: RouteSegment, i: number) => {
-          const s = SAFETY[seg.safetyClass] ?? SAFETY.avoid
+          const s = SAFETY[seg.safetyClass] ?? SAFETY.bad
           return (
             <Polyline
               key={i}
@@ -89,7 +101,7 @@ function RouteDisplay({ route }: { route: Route | null }) {
         {route.segments
           .filter((seg) => seg.coordinates.length >= 4)
           .map((seg, i) => {
-            const s = SAFETY[seg.safetyClass] ?? SAFETY.avoid
+            const s = SAFETY[seg.safetyClass] ?? SAFETY.bad
             return (
               <Marker
                 key={`icon-${i}`}
@@ -151,6 +163,7 @@ export default function Map({
       style={{ width: '100%', height: '100%' }}
     >
       <MapCenterController currentLocation={currentLocation} />
+      <FitBoundsController route={route} />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

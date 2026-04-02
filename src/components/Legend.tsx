@@ -84,7 +84,7 @@ export default function Legend({
     const levelToClasses: Record<string, string[]> = {
       good: ['great', 'good'],
       ok:   ['ok'],
-      bad:  ['avoid'],
+      bad:  ['bad'],
     }
     return (levelToClasses[level] ?? []).some((c) => (presentClasses as Set<string>).has(c))
   }

@@ -56,7 +56,7 @@ function OverlayLines({ ways, hiddenLevels }: { ways: OsmWay[]; hiddenLevels: Se
   return (
     <>
       {visible.map((way) => {
-        const s = SAFETY[way.safetyClass] ?? SAFETY.avoid
+        const s = SAFETY[way.safetyClass] ?? SAFETY.bad
         const pathType = getPathTypeName(way.tags)
         const debugTags = getDebugTags(way.tags)
         return (

@@ -158,6 +158,26 @@ export default function ProfileEditor({ profileKey, profile, onChange, onClose }
             onChange={(v) => set('use_living_streets', v)}
           />
 
+          <div className="pe-field">
+            <label className="pe-label">Avoid</label>
+            <div className="pe-avoidances">
+              <label className="pe-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={profile.avoidances?.includes('cobblestones') ?? false}
+                  onChange={(e) => {
+                    const current = profile.avoidances ?? []
+                    const next = e.target.checked
+                      ? [...current, 'cobblestones']
+                      : current.filter((a) => a !== 'cobblestones')
+                    onChange({ ...profile, avoidances: next })
+                  }}
+                />
+                <span>🪨 Cobblestones</span>
+              </label>
+            </div>
+          </div>
+
           {profileGroups && (
             <div className="pe-field">
               <label className="pe-label">Path preferences for this profile</label>

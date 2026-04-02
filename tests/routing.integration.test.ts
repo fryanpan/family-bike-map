@@ -249,7 +249,7 @@ describe('routing integration — Dresdener Str 112 → Le Brot (training mode)'
     const buslane = { cycle_lane: 'share_busway' }
     expect(classifyEdge(buslane, 'training')).toBe('good')
     expect(classifyEdge(buslane, 'trailer')).toBe('good')   // wide, well-maintained
-    expect(classifyEdge(buslane, 'toddler')).toBe('avoid')  // hazardous with small child
+    expect(classifyEdge(buslane, 'toddler')).toBe('bad')  // hazardous with small child
   })
 })
 
@@ -312,7 +312,7 @@ describe('classifyEdge — uses Valhalla string API values (not legacy numeric c
   })
 
   it('painted lane ("cycle_lane"="dedicated") → avoid for toddler', () => {
-    expect(classifyEdge({ cycle_lane: 'dedicated' }, 'toddler')).toBe('avoid')
+    expect(classifyEdge({ cycle_lane: 'dedicated' }, 'toddler')).toBe('bad')
   })
 
   it('bus lane ("cycle_lane"="share_busway") → good for training', () => {
@@ -320,10 +320,10 @@ describe('classifyEdge — uses Valhalla string API values (not legacy numeric c
   })
 
   it('residential road ("road_class"="residential") → avoid for toddler', () => {
-    expect(classifyEdge({ road_class: 'residential' }, 'toddler')).toBe('avoid')
+    expect(classifyEdge({ road_class: 'residential' }, 'toddler')).toBe('bad')
   })
 
   it('secondary road ("road_class"="secondary") → avoid', () => {
-    expect(classifyEdge({ road_class: 'secondary' }, 'toddler')).toBe('avoid')
+    expect(classifyEdge({ road_class: 'secondary' }, 'toddler')).toBe('bad')
   })
 })

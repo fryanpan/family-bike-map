@@ -62,7 +62,7 @@ export default function App() {
 
   // Legend toggle state — managed here so Legend can render outside MapContainer
   const [hiddenSafetyClasses, setHiddenSafetyClasses] = useState<Set<SafetyClass>>(
-    () => new Set<SafetyClass>(['avoid'])
+    () => new Set<SafetyClass>(['bad'])
   )
 
   const hiddenLevels = new Set<LegendLevel>(
@@ -268,7 +268,7 @@ export default function App() {
 
         <div className="panel-content">
           <div className="panel-header">
-            <h1 className="app-title">Family Bike Map</h1>
+            <h1 className="app-title">Bike Route Planner</h1>
           </div>
 
           <div className="search-section">
