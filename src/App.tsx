@@ -53,21 +53,24 @@ function setsEqual(a: Set<string>, b: Set<string>): boolean {
 }
 
 /** Read initial profile + preferred items from URL params, then localStorage, then defaults. */
-function getInitialState(): { profileKey: string; preferredItems: Set<string> } {
+function getInitialState(): { profileKey: string; preferredItems: Set<string>; showOtherPaths: boolean } {
   const params = new URLSearchParams(window.location.search)
   const modeParam = params.get('mode')
   const preferredParam = params.get('preferred')
+  const showOtherParam = params.get('showOther')
+
+  const showOtherPaths = showOtherParam === '1'
 
   // URL preferred param takes top priority
   if (preferredParam !== null) {
     const items = new Set(preferredParam.split(',').filter(Boolean))
     const profile = (modeParam && DEFAULT_PROFILES[modeParam]) ? modeParam : 'toddler'
-    return { profileKey: profile, preferredItems: items }
+    return { profileKey: profile, preferredItems: items, showOtherPaths }
   }
 
   // URL mode param (no custom preferred)
   if (modeParam && DEFAULT_PROFILES[modeParam]) {
-    return { profileKey: modeParam, preferredItems: getDefaultPreferredItems(modeParam) }
+    return { profileKey: modeParam, preferredItems: getDefaultPreferredItems(modeParam), showOtherPaths }
   }
 
   // Fall back to localStorage
@@ -77,14 +80,14 @@ function getInitialState(): { profileKey: string; preferredItems: Set<string> } 
     if (savedCustom) {
       const items = new Set(JSON.parse(savedCustom) as string[])
       const profile = (savedMode && DEFAULT_PROFILES[savedMode]) ? savedMode : 'toddler'
-      return { profileKey: profile, preferredItems: items }
+      return { profileKey: profile, preferredItems: items, showOtherPaths }
     }
     if (savedMode && DEFAULT_PROFILES[savedMode]) {
-      return { profileKey: savedMode, preferredItems: getDefaultPreferredItems(savedMode) }
+      return { profileKey: savedMode, preferredItems: getDefaultPreferredItems(savedMode), showOtherPaths }
     }
   } catch { /* ignore */ }
 
-  return { profileKey: 'toddler', preferredItems: getDefaultPreferredItems('toddler') }
+  return { profileKey: 'toddler', preferredItems: getDefaultPreferredItems('toddler'), showOtherPaths }
 }
 
 export default function App() {
@@ -95,6 +98,7 @@ export default function App() {
   const [preferredItemNames, setPreferredItemNames] = useState<Set<string>>(
     () => initialState.preferredItems
   )
+  const [showOtherPaths, setShowOtherPaths] = useState(initialState.showOtherPaths)
 
   const [editingProfile, setEditingProfile] = useState<string | null>(null)
 
@@ -119,16 +123,16 @@ export default function App() {
     selectedProfile,
   )
 
-  // Derived: which safetyClasses to hide on map (those not preferred)
+  // Derived: which safetyClasses to hide on the overlay (non-preferred, unless showOtherPaths)
   const hiddenSafetyClasses = new Set<SafetyClass>(
     (Object.keys({ great: true, good: true, ok: true, bad: true }) as SafetyClass[]).filter(
       (c) => !preferredSafetyClasses.has(c)
     )
   )
 
-  const hiddenLevels = new Set<LegendLevel>(
-    [...hiddenSafetyClasses].map((cls) => SAFETY_LEVEL[cls])
-  )
+  const hiddenLevels = showOtherPaths
+    ? new Set<LegendLevel>()
+    : new Set<LegendLevel>([...hiddenSafetyClasses].map((cls) => SAFETY_LEVEL[cls]))
 
   // Derived: is the user in custom mode (preferred differs from profile defaults)?
   const isCustomMode = !setsEqual(preferredItemNames, getDefaultPreferredItems(selectedProfile))
@@ -142,6 +146,11 @@ export default function App() {
     } else {
       params.delete('preferred')
     }
+    if (showOtherPaths) {
+      params.set('showOther', '1')
+    } else {
+      params.delete('showOther')
+    }
     window.history.replaceState({}, '', `?${params.toString()}`)
 
     try {
@@ -152,7 +161,7 @@ export default function App() {
         localStorage.removeItem(CUSTOM_PREFERRED_KEY)
       }
     } catch { /* ignore */ }
-  }, [selectedProfile, preferredItemNames, isCustomMode])
+  }, [selectedProfile, preferredItemNames, isCustomMode, showOtherPaths])
 
   useEffect(() => {
     saveProfiles(profiles)
@@ -290,6 +299,8 @@ export default function App() {
             onOverlayStatusChange={setOverlayStatus}
             hiddenLevels={hiddenLevels}
             currentLocation={currentLocation}
+            preferredSafetyClasses={preferredSafetyClasses}
+            showOtherPaths={showOtherPaths}
           />
         </Suspense>
         <div className="map-mode-overlay">
@@ -311,6 +322,8 @@ export default function App() {
             preferredItemNames={preferredItemNames}
             onMoveToPreferred={moveToPreferred}
             onMoveToOther={moveToOther}
+            showOtherPaths={showOtherPaths}
+            onToggleOtherPaths={() => setShowOtherPaths((v) => !v)}
           />
         </div>
         {/* On-map bike layer toggle */}

@@ -9,6 +9,10 @@ export const STATUS_COLOR = {
   red:   '#e11d48',
 } as const
 
+// Two-tone route display: preferred paths are green, other paths are orange.
+export const PREFERRED_COLOR = STATUS_COLOR.green  // '#10b981'
+export const OTHER_COLOR     = STATUS_COLOR.amber  // '#f97316'
+
 export const SAFETY: Record<SafetyClass, SafetyInfo> = {
   great: { label: 'Car-free path / Fahrradstrasse', color: STATUS_COLOR.green, icon: '🚴', textColor: '#fff' },
   good:  { label: 'Shared footway / Pedestrian path', color: STATUS_COLOR.green, icon: '🛤️', textColor: '#fff' },

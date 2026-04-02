@@ -1,5 +1,5 @@
 import React from 'react'
-import { SAFETY, PROFILE_LEGEND } from '../utils/classify'
+import { SAFETY, PROFILE_LEGEND, PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
 import type { LegendItem } from '../utils/classify'
 import type { RouteSegment } from '../utils/types'
 
@@ -50,6 +50,8 @@ interface Props {
   preferredItemNames: Set<string>
   onMoveToPreferred: (name: string) => void
   onMoveToOther: (name: string) => void
+  showOtherPaths: boolean
+  onToggleOtherPaths: () => void
 }
 
 export default function Legend({
@@ -59,6 +61,8 @@ export default function Legend({
   preferredItemNames,
   onMoveToPreferred,
   onMoveToOther,
+  showOtherPaths,
+  onToggleOtherPaths,
 }: Props) {
   const profileGroups = PROFILE_LEGEND[profileKey]
   const hasRoute = segments && segments.length > 0
@@ -130,6 +134,7 @@ export default function Legend({
       {preferredItems.length > 0 && (
         <div className="legend-section">
           <div className="legend-section-header legend-section-header-preferred">
+            <span className="legend-heading-swatch" style={{ background: PREFERRED_COLOR }} />
             Preferred
           </div>
           {preferredItems.map((item) => renderItem(item, true))}
@@ -138,9 +143,18 @@ export default function Legend({
       {otherItems.length > 0 && (
         <div className={`legend-section${preferredItems.length > 0 ? ' legend-section-other' : ''}`}>
           <div className="legend-section-header legend-section-header-other">
+            <span className="legend-heading-swatch" style={{ background: OTHER_COLOR }} />
             Other
+            <button
+              className="legend-eyeball-btn"
+              onClick={onToggleOtherPaths}
+              title={showOtherPaths ? 'Hide other paths from map' : 'Show other paths on map'}
+              aria-label={showOtherPaths ? 'Hide other paths' : 'Show other paths'}
+            >
+              {showOtherPaths ? '👁' : '👁‍🗨'}
+            </button>
           </div>
-          {otherItems.map((item) => renderItem(item, false))}
+          {showOtherPaths && otherItems.map((item) => renderItem(item, false))}
         </div>
       )}
     </div>

@@ -127,6 +127,16 @@ Profiles are defined in `routing.ts` as `DEFAULT_PROFILES`. Users can customise 
 - `avoidances` — named avoidance categories (e.g. `['cobblestones']`) that override costing options
 - `editable` — whether the user can modify this profile
 
+## Architecture Rules
+
+### URL State Encoding
+**All map layout state must be encoded in the URL.** This includes:
+- Active profile/mode (`mode=`)
+- Custom preferred item set (`preferred=`)
+- Visibility toggles (e.g. `showOther=1`)
+
+This ensures the map view is shareable and bookmarkable. State that belongs in the URL: anything that changes what the user sees on the map or how the route is rendered. State that does NOT belong: ephemeral UI (loading spinners, hover states), or profile definitions (stored in localStorage).
+
 ## Open Questions / Future Work
 
 1. **Multi-city support**: Currently Berlin-only via the public Valhalla instance. Long-term: self-hosted with configurable OSM extracts.
