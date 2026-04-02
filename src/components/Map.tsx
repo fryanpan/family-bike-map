@@ -1,8 +1,9 @@
 import L from 'leaflet'
 import { useEffect, useRef } from 'react'
 import { Marker, MapContainer, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet'
-import { SAFETY } from '../utils/classify'
+import { SAFETY, PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
 import type { LegendLevel } from '../utils/classify'
+import type { SafetyClass } from '../utils/types'
 import BikeMapOverlay from './BikeMapOverlay'
 import type { Route, RouteSegment } from '../utils/types'
 
@@ -75,20 +76,34 @@ function midpoint(coords: [number, number][]): [number, number] {
   return coords[Math.floor(coords.length / 2)]
 }
 
-// All route segments are always fully visible — not affected by legend toggles.
-function RouteDisplay({ route }: { route: Route | null }) {
+// Route segments are colored green (preferred) or orange (other).
+// Other segments are hidden when showOtherPaths is false.
+function RouteDisplay({
+  route,
+  preferredSafetyClasses,
+  showOtherPaths,
+}: {
+  route: Route | null
+  preferredSafetyClasses: Set<SafetyClass>
+  showOtherPaths: boolean
+}) {
   if (!route) return null
 
   if (route.segments?.length) {
+    const visible = route.segments.filter(
+      (seg) => preferredSafetyClasses.has(seg.safetyClass) || showOtherPaths
+    )
     return (
       <>
-        {route.segments.map((seg: RouteSegment, i: number) => {
+        {visible.map((seg: RouteSegment, i: number) => {
+          const isPreferred = preferredSafetyClasses.has(seg.safetyClass)
+          const color = isPreferred ? PREFERRED_COLOR : OTHER_COLOR
           const s = SAFETY[seg.safetyClass] ?? SAFETY.bad
           return (
             <Polyline
               key={i}
               positions={seg.coordinates}
-              color={s.color}
+              color={color}
               weight={12}
               opacity={0.95}
             >
@@ -98,7 +113,7 @@ function RouteDisplay({ route }: { route: Route | null }) {
             </Polyline>
           )
         })}
-        {route.segments
+        {visible
           .filter((seg) => seg.coordinates.length >= 4)
           .map((seg, i) => {
             const s = SAFETY[seg.safetyClass] ?? SAFETY.bad
@@ -142,6 +157,8 @@ interface Props {
   onOverlayStatusChange: (status: string) => void
   hiddenLevels: Set<LegendLevel>
   currentLocation: { lat: number; lng: number } | null
+  preferredSafetyClasses: Set<SafetyClass>
+  showOtherPaths: boolean
 }
 
 export default function Map({
@@ -155,6 +172,8 @@ export default function Map({
   onOverlayStatusChange,
   hiddenLevels,
   currentLocation,
+  preferredSafetyClasses,
+  showOtherPaths,
 }: Props) {
   return (
     <MapContainer
@@ -176,7 +195,11 @@ export default function Map({
         onStatusChange={onOverlayStatusChange}
       />
 
-      <RouteDisplay route={route} />
+      <RouteDisplay
+        route={route}
+        preferredSafetyClasses={preferredSafetyClasses}
+        showOtherPaths={showOtherPaths}
+      />
 
       {startPoint && (
         <Marker position={[startPoint.lat, startPoint.lng]} icon={startIcon}>

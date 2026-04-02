@@ -603,6 +603,9 @@ button { font-family: inherit; cursor: pointer; }
   padding-top: 4px;
 }
 .legend-section-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -612,6 +615,28 @@ button { font-family: inherit; cursor: pointer; }
 }
 .legend-section-header-preferred { color: #047857; }
 .legend-section-header-other     { color: #6b7280; }
+
+/* Color swatch beside section heading */
+.legend-heading-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* Eyeball toggle button in "Other" heading */
+.legend-eyeball-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  color: #9ca3af;
+  transition: color .1s;
+}
+.legend-eyeball-btn:hover { color: #374151; }
 
 .legend-item {
   display: flex;
