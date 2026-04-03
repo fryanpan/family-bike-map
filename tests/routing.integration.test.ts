@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'bun:test'
-import { classifyEdgeToItem, computeRouteQuality, buildSegments } from '../src/utils/classify'
+import { classifyEdgeToItem, computeRouteQuality, buildSegments, getDefaultPreferredItems } from '../src/utils/classify'
 import type { ValhallaEdge } from '../src/utils/types'
 
 const VALHALLA_BASE = 'https://valhalla1.openstreetmap.de'
@@ -163,11 +163,7 @@ async function fetchRouteQuality(
     return { itemName: classifyEdgeToItem(edge, profileKey), coord: coord as [number, number] }
   }).filter((x): x is NonNullable<typeof x> => x !== null)
 
-  const defaultPreferred = new Set(
-    profileKey === 'toddler' ? ['Car-free path / Radweg', 'Fahrradstrasse', 'Shared footway (park path)', 'Separated bike track', 'Living street'] :
-    profileKey === 'training' ? ['Car-free path / Radweg', 'Fahrradstrasse', 'Shared footway (park path)', 'Painted bike lane', 'Shared bus lane', 'Living street', 'Residential road'] :
-    []
-  )
+  const defaultPreferred = getDefaultPreferredItems(profileKey)
   const segments = buildSegments(classified)
   return computeRouteQuality(segments, defaultPreferred)
 }

@@ -1,5 +1,38 @@
 # Retrospective Log
 
+## 2026-04-03 — BC-258: SafetyClass removal (and why it took 4 prompts)
+
+**What worked:** Once the decision was made to eliminate SafetyClass entirely, the migration was systematic and complete. `classifyEdgeToItem()`, `getCostingFromPreferences()`, binary `RouteQuality`, and preference-driven re-routing are cleaner than the 3-level system.
+
+**What didn't:** It took 4–5 explicit user prompts across this session to reach the conclusion that SafetyClass should be removed:
+
+1. "Review classification architecture and /simplify" → I improved structure but kept safety classes
+2. "Remove legacy safety levels (great/good/ok/avoid)" → I collapsed 4→3 levels but kept the abstraction
+3. "Why do we even have safety class values? That seems no longer necessary?" → I initially reasoned *for* keeping them
+4. "Please remove safety classes from the architecture" → finally acted
+5. Context ran out mid-migration, requiring a second session to finish
+
+And from prior sessions (BC-242), I had already *celebrated* consolidating 6→4 levels as the win — I didn't ask whether the abstraction belonged at all.
+
+**Root causes:**
+
+1. **I interpret "simplify" as "reduce visible complexity", not "question whether this abstraction exists for the right reason."** When the 4-level system was simplified to 3 levels, that felt like simplification. I didn't ask: "is there a single downstream use of SafetyClass that couldn't be served by item names directly?"
+
+2. **I don't challenge abstractions unless explicitly asked to.** The user had to say "why do we even have safety class values?" before I considered removing them. That question should have been mine to ask — after we reduced to 3 levels that mapped one-to-one with preferred/other, the class was pure indirection.
+
+3. **When context overflows mid-migration, I don't flag the incompleteness explicitly.** The previous session ended with 6+ files still using old APIs. The summary noted this as "pending tasks" but there was no forcing function to ensure it got done in the next session.
+
+4. **Even within this session: I missed `Legend.tsx` had stale `s.safetyClass` references** until I read the file. I should scan for all usages of the type being eliminated before declaring the migration "in progress."
+
+**Actions:**
+
+- When asked to simplify, explicitly ask: "Is there a downstream consumer of this abstraction that couldn't be served by a simpler primitive?" before doing the minimum.
+- When an abstraction maps one-to-one with something simpler (SafetyClass → item name preferred/not), flag the redundancy immediately rather than treating the mapping as necessary complexity.
+- Before starting a migration that touches many files, list all files that reference the thing being removed (grep), and treat that list as the definition of done.
+- When context runs out mid-migration, note the specific files still needing update in the retrospective so the next session starts there.
+
+---
+
 ## 2026-04-02 — BC-249 Tile-based map caching
 
 **What worked:** Splitting viewport fetch into tile-based parallel requests with per-tile caching was straightforward. The key insight: use refs (`loadedTilesRef`, `loadingTilesRef`, `generationRef`) so the `loadVisibleTiles` callback has no stale-closure dependency on component state — only on stable values (`enabled`, `profileKey`, `map`, `onStatusChange`).
