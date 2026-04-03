@@ -1,4 +1,4 @@
-import type { SafetyClass, OsmWay } from '../utils/types'
+import type { OsmWay } from '../utils/types'
 import { BAD_SURFACES } from '../utils/classify'
 import type { LatLngBounds } from 'leaflet'
 
@@ -82,33 +82,16 @@ out geom;
 }
 
 // BAD_SURFACES is imported from classify.ts — single source of truth.
-// See classify.ts for the canonical list and rationale.
 
 /**
- * Map raw OSM tags to a safety class using the same classification model as classify.ts.
- *
- * Classification uses a 4-level system (great/good/ok/avoid) per profile:
- *
- * toddler:
- *   Good:  highway=cycleway/path/footway/track, bicycle_road=yes
- *   OK:    cycleway=track (separated), living_street
- *   Avoid: cycleway=lane, share_busway, residential, bad surface
- *
- * trailer:
- *   Good:  highway=cycleway/path/footway/track, bicycle_road=yes, share_busway
- *   OK:    cycleway=lane, living_street, residential
- *   Avoid: cycleway=track (too narrow for trailer), bad surface
- *
- * training:
- *   Good:  highway=cycleway/path/footway/track, bicycle_road=yes, cycleway=lane, share_busway
- *   OK:    living_street, residential
- *   Avoid: cycleway=track (too slow for training), bad surface
- *
- * Physical separation (bollards/buffer on a painted lane) is treated the same as
- * cycleway=track for classification — the separation tag upgrades the base lane
- * classification to the "separated track" tier.
+ * Map raw OSM tags to a PROFILE_LEGEND item name, or null if not representable.
+ * Must stay in sync with classifyEdgeToItem() in classify.ts.
  *
  * Valhalla↔OSM mapping: see classify.ts comment block for the full correlation.
+ *
+ * Physical separation (bollards/buffer on a painted lane) upgrades the classification
+ * to the separated-track tier for toddler — only detectable via raw OSM tags,
+ * not via Valhalla edge attributes (known Valhalla limitation).
  */
 const SEPARATION_TAGS = new Set([
   'flex_post', 'separation_kerb', 'guard_rail',
@@ -116,94 +99,57 @@ const SEPARATION_TAGS = new Set([
 
 function hasSeparation(tags: Record<string, string>): boolean {
   const keys = [
-    'cycleway:separation',
-    'cycleway:right:separation',
-    'cycleway:left:separation',
-    'cycleway:both:separation',
+    'cycleway:separation', 'cycleway:right:separation',
+    'cycleway:left:separation', 'cycleway:both:separation',
   ]
   for (const key of keys) {
     if (SEPARATION_TAGS.has(tags[key])) return true
   }
-  // Buffer lane also counts as physical separation
   if (tags['cycleway:buffer']) return true
   return false
 }
 
-function classifyOsmTags(tags: Record<string, string>, profileKey?: string): SafetyClass {
-  const surface = tags.surface ?? ''
+function classifyOsmTagsToItem(tags: Record<string, string>, profileKey: string): string | null {
+  if (BAD_SURFACES.has(tags.surface ?? '')) return null
 
-  // Bad surfaces → avoid for all profiles
-  if (BAD_SURFACES.has(surface)) return 'bad'
-
-  const highway = tags.highway ?? ''
-  const cycleway = tags.cycleway ?? ''
+  const highway     = tags.highway ?? ''
+  const cycleway    = tags.cycleway ?? ''
   const bicycleRoad = tags.bicycle_road === 'yes'
-  return classifyOsmBase(highway, cycleway, bicycleRoad, tags, profileKey)
-}
 
-function classifyOsmBase(
-  highway: string,
-  cycleway: string,
-  bicycleRoad: boolean,
-  tags: Record<string, string>,
-  profileKey?: string,
-): SafetyClass {
-  // Car-free dedicated cycleway or Fahrradstrasse — great for all
-  if (highway === 'cycleway' || bicycleRoad) return 'great'
+  if (bicycleRoad) return 'Fahrradstrasse'
+  if (highway === 'cycleway' || highway === 'path' || highway === 'track') return 'Car-free path / Radweg'
+  if (highway === 'footway') return 'Shared footway (park path)'
 
-  // Car-free shared paths (park/canal paths, footway+bicycle=designated, tracks)
-  // These are physically separated from car traffic.
-  if (highway === 'path' || highway === 'footway' || highway === 'track') return 'great'
-
-  // Physically separated tracks alongside road (cycleway=track, cycleway:*=track)
-  // Toddler: ok (safe but slow/interrupted at crossings)
-  // Trailer/training: avoid (too narrow for trailers, too slow for training)
-  if (cycleway === 'track' || cycleway === 'opposite_track') {
-    return profileKey === 'toddler' ? 'ok' : 'bad'
-  }
-
+  // Physically separated track (cycleway=track or physical separation on a lane)
   const cRight = tags['cycleway:right'] ?? ''
   const cLeft  = tags['cycleway:left']  ?? ''
   const cBoth  = tags['cycleway:both']  ?? ''
-  if (cRight === 'track' || cLeft === 'track' || cBoth === 'track') {
-    return profileKey === 'toddler' ? 'ok' : 'bad'
+
+  const isSeparatedTrack =
+    cycleway === 'track' || cycleway === 'opposite_track' ||
+    cRight === 'track' || cLeft === 'track' || cBoth === 'track'
+
+  const isPhysicallySeparatedLane =
+    (cycleway === 'lane' || cycleway === 'opposite_lane' ||
+     cRight === 'lane' || cLeft === 'lane' || cBoth === 'lane') && hasSeparation(tags)
+
+  if (isSeparatedTrack || isPhysicallySeparatedLane) {
+    if (profileKey === 'toddler') return 'Separated bike track'
+    if (profileKey === 'trailer') return 'Separated bike track (narrow)'
+    if (profileKey === 'training') return 'Separated bike track (slow)'
+    return null
   }
 
-  // Painted road bike lane (cycleway=lane, cycleway:*=lane)
-  // Physical separation (bollards/buffer) treats it the same as a separated track.
-  if (cycleway === 'lane' || cycleway === 'opposite_lane') {
-    if (hasSeparation(tags)) return profileKey === 'toddler' ? 'ok' : 'bad'
-    if (profileKey === 'toddler') return 'bad'
-    if (profileKey === 'training') return 'good'
-    return 'ok'  // trailer
+  if (cycleway === 'lane' || cycleway === 'opposite_lane' ||
+      cRight === 'lane' || cLeft === 'lane' || cBoth === 'lane') {
+    return 'Painted bike lane'
   }
 
-  if (cRight === 'lane' || cLeft === 'lane' || cBoth === 'lane') {
-    if (hasSeparation(tags)) return profileKey === 'toddler' ? 'ok' : 'bad'
-    if (profileKey === 'toddler') return 'bad'
-    if (profileKey === 'training') return 'good'
-    return 'ok'  // trailer
-  }
+  if (cycleway === 'share_busway') return 'Shared bus lane'
+  if (highway === 'living_street') return 'Living street'
+  if (highway === 'residential')   return 'Residential road'
 
-  // Shared bus lane
-  // Toddler: avoid (buses are hazardous with small children)
-  // Trailer: ok (acceptable, buses give wide berth)
-  // Training: good (wide, well-maintained)
-  if (cycleway === 'share_busway') {
-    if (profileKey === 'toddler') return 'bad'
-    if (profileKey === 'training') return 'good'
-    return 'ok'  // trailer
-  }
-
-  if (highway === 'living_street') return 'ok'
-
-  // Residential roads
-  // Toddler: avoid; trailer/training: ok
-  if (highway === 'residential') {
-    return profileKey === 'toddler' ? 'bad' : 'ok'
-  }
-
-  return 'ok'  // fallback for other queried ways (service roads, etc.)
+  return null
 }
 
 interface OverpassElement {
@@ -230,13 +176,13 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 1): Prom
   }
 }
 
-function parseOverpassResponse(data: { elements: OverpassElement[] }, profileKey?: string): OsmWay[] {
+function parseOverpassResponse(data: { elements: OverpassElement[] }, profileKey: string): OsmWay[] {
   return data.elements
     .filter((el): el is OverpassElement & { geometry: NonNullable<OverpassElement['geometry']> } =>
       el.type === 'way' && el.geometry != null,
     )
     .map((el) => ({
-      safetyClass: classifyOsmTags(el.tags ?? {}, profileKey),
+      itemName: classifyOsmTagsToItem(el.tags ?? {}, profileKey),
       coordinates: el.geometry.map((pt): [number, number] => [pt.lat, pt.lon]),
       osmId: el.id,
       tags: el.tags ?? {},

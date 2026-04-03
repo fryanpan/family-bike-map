@@ -79,18 +79,18 @@ export default function Legend({
     return true
   })
 
-  // When showing route only (no overlay), limit to safety classes present in route
-  const presentClasses = (hasRoute && !overlayOn)
-    ? new Set(segments!.map((s) => s.safetyClass))
+  // When showing route only (no overlay), limit to item names present in route
+  const presentItemNames = (hasRoute && !overlayOn)
+    ? new Set(segments!.map((s) => s.itemName).filter((n): n is string => n !== null))
     : null
 
   const preferredItems = allItems.filter((item) => {
-    if (presentClasses && !presentClasses.has(item.safetyClass)) return false
+    if (presentItemNames && !presentItemNames.has(item.name)) return false
     return preferredItemNames.has(item.name)
   })
 
   const otherItems = allItems.filter((item) => {
-    if (presentClasses && !presentClasses.has(item.safetyClass)) return false
+    if (presentItemNames && !presentItemNames.has(item.name)) return false
     return !preferredItemNames.has(item.name)
   })
 

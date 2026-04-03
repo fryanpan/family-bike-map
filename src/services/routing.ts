@@ -1,5 +1,5 @@
 import { decode } from '../utils/polyline'
-import { classifyEdge, buildSegments } from '../utils/classify'
+import { classifyEdgeToItem, buildSegments } from '../utils/classify'
 import type {
   Place,
   LatLng,
@@ -181,9 +181,9 @@ export async function getRoute(
  * Fetch per-edge attributes for a route from Valhalla trace_attributes.
  * Returns profile-aware colored segments, or null on failure.
  *
- * profileKey is passed to classifyEdge() so segment colors reflect what THIS profile
- * considers safe — e.g. painted road lanes show as 'avoid' for the toddler profile
- * but 'ok' for the training profile.
+ * profileKey is passed to classifyEdgeToItem() so segment item names reflect what THIS
+ * profile maps the infrastructure to — e.g. separated tracks get different item names
+ * per profile (toddler vs trailer vs training).
  *
  * Key fix: requests edge.bicycle_road to correctly identify Fahrradstrasse
  * (bicycle_road=yes). The old code used edge.bicycle_network which tracks cycling
@@ -192,7 +192,7 @@ export async function getRoute(
  */
 export async function getRouteSegments(
   coordinates: [number, number][],
-  profileKey?: string,
+  profileKey: string,
 ): Promise<RouteSegment[] | null> {
   if (coordinates.length < 2) return null
 
@@ -243,7 +243,7 @@ export async function getRouteSegments(
         const coord = sampled[i]
         if (!coord) return null
         const edge = edges[mp.edge_index ?? 0] ?? null
-        return { safetyClass: classifyEdge(edge, profileKey), coord: coord as [number, number] }
+        return { itemName: classifyEdgeToItem(edge, profileKey), coord: coord as [number, number] }
       })
       .filter((item): item is NonNullable<typeof item> => item !== null)
 

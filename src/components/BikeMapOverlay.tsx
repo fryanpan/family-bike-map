@@ -1,39 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import { fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey } from '../services/overpass'
-import { SAFETY, SAFETY_LEVEL } from '../utils/classify'
-import type { LegendLevel } from '../utils/classify'
+import { PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
 import type { OsmWay } from '../utils/types'
 
 // Max tiles allowed in viewport. Beyond this the map is too zoomed out to be
 // useful — show the "zoom in" prompt instead of firing many parallel requests.
 const MAX_VISIBLE_TILES = 12
-
-/** Derive a human-readable path type name from raw OSM tags. */
-function getPathTypeName(tags: Record<string, string>): string {
-  const highway = tags.highway ?? ''
-  const cycleway = tags.cycleway ?? ''
-  const bicycleRoad = tags.bicycle_road === 'yes'
-
-  if (bicycleRoad) return 'Fahrradstrasse'
-  if (highway === 'cycleway') return 'Cycleway'
-  if (highway === 'path') return 'Path'
-  if (highway === 'footway') return 'Shared footway'
-  if (highway === 'track') return 'Track'
-  if (highway === 'living_street') return 'Living street'
-  if (highway === 'residential') return 'Residential road'
-  if (cycleway === 'track' || cycleway === 'opposite_track') return 'Separated bike track'
-  if (cycleway === 'lane' || cycleway === 'opposite_lane') return 'Painted bike lane'
-  if (cycleway === 'share_busway') return 'Shared bus lane'
-
-  const cRight = tags['cycleway:right'] ?? ''
-  const cLeft  = tags['cycleway:left']  ?? ''
-  const cBoth  = tags['cycleway:both']  ?? ''
-  if (cRight === 'track' || cLeft === 'track' || cBoth === 'track') return 'Separated bike track (side)'
-  if (cRight === 'lane'  || cLeft === 'lane'  || cBoth === 'lane')  return 'Painted bike lane (side)'
-
-  return highway ? `Road (${highway})` : 'Unknown'
-}
 
 /** Build a compact debug string of the OSM tags relevant to classification. */
 function getDebugTags(tags: Record<string, string>): string {
@@ -51,33 +24,36 @@ function getDebugTags(tags: Record<string, string>): string {
   return parts.join(' · ')
 }
 
-function OverlayLines({ ways, hiddenLevels }: { ways: OsmWay[]; hiddenLevels: Set<LegendLevel> }) {
-  const visible = ways.filter((w) => !hiddenLevels.has(SAFETY_LEVEL[w.safetyClass]))
+function OverlayLines({ ways, preferredItemNames, showOtherPaths }: {
+  ways: OsmWay[]
+  preferredItemNames: Set<string>
+  showOtherPaths: boolean
+}) {
+  const visible = ways.filter((w) => showOtherPaths || (w.itemName !== null && preferredItemNames.has(w.itemName)))
   return (
     <>
       {visible.map((way) => {
-        const s = SAFETY[way.safetyClass] ?? SAFETY.bad
-        const pathType = getPathTypeName(way.tags)
+        const isPreferred = way.itemName !== null && preferredItemNames.has(way.itemName)
+        const color = isPreferred ? PREFERRED_COLOR : OTHER_COLOR
         const debugTags = getDebugTags(way.tags)
         return (
           <Polyline
             key={way.osmId}
             positions={way.coordinates}
-            color={s.color}
+            color={color}
             weight={5}
             opacity={0.7}
           >
             <Tooltip sticky direction="top" offset={[0, -4]}>
               <div style={{ fontSize: 12, lineHeight: '1.5', maxWidth: 240 }}>
                 <div style={{ fontWeight: 700 }}>
-                  {pathType}{way.tags.name ? ` — ${way.tags.name}` : ''}
+                  {way.itemName ?? 'Unknown'}{way.tags.name ? ` — ${way.tags.name}` : ''}
                 </div>
                 {debugTags && (
                   <div style={{ color: '#6b7280', fontSize: 11, marginTop: 1 }}>
                     {debugTags}
                   </div>
                 )}
-                <div style={{ marginTop: 2 }}>{s.icon} {s.label}</div>
               </div>
             </Tooltip>
           </Polyline>
@@ -90,11 +66,12 @@ function OverlayLines({ ways, hiddenLevels }: { ways: OsmWay[]; hiddenLevels: Se
 interface ControllerProps {
   enabled: boolean
   profileKey: string
-  hiddenLevels: Set<LegendLevel>
+  preferredItemNames: Set<string>
+  showOtherPaths: boolean
   onStatusChange: (status: string) => void
 }
 
-function OverlayController({ enabled, profileKey, hiddenLevels, onStatusChange }: ControllerProps) {
+function OverlayController({ enabled, profileKey, preferredItemNames, showOtherPaths, onStatusChange }: ControllerProps) {
   const map = useMap()
 
   // Per-tile way data. Tiles accumulate as the user pans — previously loaded
@@ -228,16 +205,17 @@ function OverlayController({ enabled, profileKey, hiddenLevels, onStatusChange }
   }
 
   if (!enabled || allWays.length === 0) return null
-  return <OverlayLines ways={allWays} hiddenLevels={hiddenLevels} />
+  return <OverlayLines ways={allWays} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} />
 }
 
 interface Props {
   enabled: boolean
   profileKey: string
-  hiddenLevels: Set<LegendLevel>
+  preferredItemNames: Set<string>
+  showOtherPaths: boolean
   onStatusChange: (status: string) => void
 }
 
-export default function BikeMapOverlay({ enabled, profileKey, hiddenLevels, onStatusChange }: Props) {
-  return <OverlayController enabled={enabled} profileKey={profileKey} hiddenLevels={hiddenLevels} onStatusChange={onStatusChange} />
+export default function BikeMapOverlay({ enabled, profileKey, preferredItemNames, showOtherPaths, onStatusChange }: Props) {
+  return <OverlayController enabled={enabled} profileKey={profileKey} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} onStatusChange={onStatusChange} />
 }

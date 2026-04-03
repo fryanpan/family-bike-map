@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { formatDistance, formatDuration } from '../services/routing'
 import { computeRouteQuality } from '../utils/classify'
-import type { Route, SafetyClass, ValhallaManeuver } from '../utils/types'
+import type { Route, ValhallaManeuver } from '../utils/types'
 
 // Valhalla maneuver type → direction icon
 const ICONS: Record<number, string> = {
@@ -40,16 +40,16 @@ function speak(text: string): void {
 interface Props {
   route: Route
   onClose: () => void
-  preferredClasses?: Set<SafetyClass>
+  preferredItemNames: Set<string>
 }
 
-export default function DirectionsPanel({ route, onClose, preferredClasses }: Props) {
+export default function DirectionsPanel({ route, onClose, preferredItemNames }: Props) {
   const [navigating, setNavigating] = useState(false)
   const [step, setStep] = useState(0)
   const [turnsExpanded, setTurnsExpanded] = useState(false)
 
   const { summary, maneuvers, segments } = route
-  const quality = segments ? computeRouteQuality(segments, preferredClasses) : null
+  const quality = segments ? computeRouteQuality(segments, preferredItemNames) : null
 
   useEffect(() => {
     return () => window.speechSynthesis?.cancel()
@@ -91,29 +91,19 @@ export default function DirectionsPanel({ route, onClose, preferredClasses }: Pr
       {quality && (
         <div className="quality-bar-wrap">
           <div className="quality-bar">
-            {quality.good > 0 && (
-              <div className="qb-segment qb-good" style={{ flex: quality.good }} title={`${Math.round(quality.good * 100)}% good`} />
+            {quality.preferred > 0 && (
+              <div className="qb-segment qb-preferred" style={{ flex: quality.preferred }} title={`${Math.round(quality.preferred * 100)}% preferred`} />
             )}
-            {quality.ok > 0 && (
-              <div className="qb-segment qb-ok" style={{ flex: quality.ok }} title={`${Math.round(quality.ok * 100)}% ok`} />
-            )}
-            {quality.bad > 0 && (
-              <div className="qb-segment qb-bad" style={{ flex: quality.bad }} title={`${Math.round(quality.bad * 100)}% bad`} />
+            {quality.other > 0 && (
+              <div className="qb-segment qb-other" style={{ flex: quality.other }} title={`${Math.round(quality.other * 100)}% other`} />
             )}
           </div>
           <div className="quality-labels">
-            {quality.good > 0.05 && (
-              <span className="ql-good">
-                {Math.round(quality.good * 100)}% {preferredClasses ? 'preferred' : 'good'}
-              </span>
+            {quality.preferred > 0.05 && (
+              <span className="ql-preferred">{Math.round(quality.preferred * 100)}% preferred</span>
             )}
-            {quality.ok > 0.05 && !preferredClasses && (
-              <span className="ql-ok">{Math.round(quality.ok * 100)}% ok</span>
-            )}
-            {quality.bad > 0.05 && (
-              <span className="ql-bad">
-                {Math.round(quality.bad * 100)}% {preferredClasses ? 'other' : 'bad'}
-              </span>
+            {quality.other > 0.05 && (
+              <span className="ql-other">{Math.round(quality.other * 100)}% other</span>
             )}
           </div>
         </div>

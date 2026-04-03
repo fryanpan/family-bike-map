@@ -35,18 +35,6 @@ export type ProfileKey = string
 
 export type ProfileMap = Record<ProfileKey, RiderProfile>
 
-// 4-level classification: great > good > ok > bad
-// (replaces the old 6-level system that had 'acceptable' and 'caution')
-export type SafetyClass = 'great' | 'good' | 'ok' | 'bad'
-
-/** Named constants for all SafetyClass values — use these instead of raw string literals. */
-export const SAFETY_CLASS = {
-  GREAT: 'great' as SafetyClass,
-  GOOD:  'good'  as SafetyClass,
-  OK:    'ok'    as SafetyClass,
-  BAD:   'bad'   as SafetyClass,
-} as const
-
 export interface SafetyInfo {
   label: string
   color: string
@@ -89,8 +77,14 @@ export interface ValhallaEdge {
   surface?: string
 }
 
+/**
+ * A contiguous stretch of route with a single infrastructure type.
+ * itemName is the PROFILE_LEGEND item name (e.g. 'Fahrradstrasse'), or null
+ * for infrastructure not represented in the legend (e.g. cobblestone overlay,
+ * arterial roads). Null items are always treated as non-preferred.
+ */
 export interface RouteSegment {
-  safetyClass: SafetyClass
+  itemName: string | null
   coordinates: [number, number][]
 }
 
@@ -112,7 +106,7 @@ export interface Route {
 }
 
 export interface OsmWay {
-  safetyClass: SafetyClass
+  itemName: string | null
   coordinates: [number, number][]
   osmId: number
   tags: Record<string, string>

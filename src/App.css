@@ -349,17 +349,15 @@ button { font-family: inherit; cursor: pointer; }
   gap: 1px;
 }
 .qb-segment { min-width: 3px; border-radius: 2px; }
-.qb-good { background: #10b981; }
-.qb-ok   { background: #f97316; }
-.qb-bad  { background: #e11d48; }
+.qb-preferred { background: #10b981; }
+.qb-other     { background: #f97316; }
 .quality-labels {
   display: flex;
   gap: 12px;
   margin-top: 5px;
 }
-.ql-good { font-size: 11px; color: #047857; font-weight: 600; }
-.ql-ok   { font-size: 11px; color: #c2410c; font-weight: 600; }
-.ql-bad  { font-size: 11px; color: #9f1239; font-weight: 600; }
+.ql-preferred { font-size: 11px; color: #047857; font-weight: 600; }
+.ql-other     { font-size: 11px; color: #c2410c; font-weight: 600; }
 
 .start-nav-btn {
   display: block;

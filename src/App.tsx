@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { useGeolocation } from './hooks/useGeolocation'
 const Map = lazy(() => import('./components/Map'))
 const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
@@ -11,12 +11,10 @@ import FeedbackWidget from './components/FeedbackWidget'
 import { getRoute, getRouteSegments, DEFAULT_PROFILES } from './services/routing'
 import { reverseGeocode } from './services/geocoding'
 import {
-  SAFETY_LEVEL,
   getDefaultPreferredItems,
-  getPreferredSafetyClasses,
+  getCostingFromPreferences,
 } from './utils/classify'
-import type { LegendLevel } from './utils/classify'
-import type { Place, Route, ProfileMap, RiderProfile, SafetyClass } from './utils/types'
+import type { Place, Route, ProfileMap, RiderProfile } from './utils/types'
 
 const HOME_PLACE: Place = {
   lat: 52.5016,
@@ -117,23 +115,6 @@ export default function App() {
   const [overlayEnabled, setOverlayEnabled] = useState(true)
   const [overlayStatus, setOverlayStatus]   = useState('idle')
 
-  // Derived: which safetyClasses are "preferred"
-  const preferredSafetyClasses: Set<SafetyClass> = getPreferredSafetyClasses(
-    preferredItemNames,
-    selectedProfile,
-  )
-
-  // Derived: which safetyClasses to hide on the overlay (non-preferred, unless showOtherPaths)
-  const hiddenSafetyClasses = new Set<SafetyClass>(
-    (Object.keys({ great: true, good: true, ok: true, bad: true }) as SafetyClass[]).filter(
-      (c) => !preferredSafetyClasses.has(c)
-    )
-  )
-
-  const hiddenLevels = showOtherPaths
-    ? new Set<LegendLevel>()
-    : new Set<LegendLevel>([...hiddenSafetyClasses].map((cls) => SAFETY_LEVEL[cls]))
-
   // Derived: is the user in custom mode (preferred differs from profile defaults)?
   const isCustomMode = !setsEqual(preferredItemNames, getDefaultPreferredItems(selectedProfile))
 
@@ -167,6 +148,14 @@ export default function App() {
     saveProfiles(profiles)
   }, [profiles])
 
+  // Re-route when preferred items change so costing reflects the new preferences.
+  // We skip this on initial mount (the route is computed explicitly when start/end are set).
+  const preferencesMountedRef = useRef(false)
+  useEffect(() => {
+    if (!preferencesMountedRef.current) { preferencesMountedRef.current = true; return }
+    if (startPoint && endPoint) void computeRoute(startPoint, endPoint, selectedProfile, waypoints)
+  }, [preferredItemNames]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function moveToPreferred(name: string) {
     setPreferredItemNames((prev) => new Set([...prev, name]))
   }
@@ -193,7 +182,8 @@ export default function App() {
     setRoute(null)
 
     try {
-      const result = await getRoute(start, end, profile, wps)
+      const costingOptions = getCostingFromPreferences(preferredItemNames, profileKey, profile)
+      const result = await getRoute(start, end, { ...profile, costingOptions }, wps)
       setRoute(result)
 
       // Enrich with profile-aware colored segments in the background
@@ -297,9 +287,8 @@ export default function App() {
             overlayEnabled={overlayEnabled}
             profileKey={selectedProfile}
             onOverlayStatusChange={setOverlayStatus}
-            hiddenLevels={hiddenLevels}
             currentLocation={currentLocation}
-            preferredSafetyClasses={preferredSafetyClasses}
+            preferredItemNames={preferredItemNames}
             showOtherPaths={showOtherPaths}
           />
         </Suspense>
@@ -383,7 +372,7 @@ export default function App() {
             <DirectionsPanel
               route={route}
               onClose={clearAll}
-              preferredClasses={preferredSafetyClasses}
+              preferredItemNames={preferredItemNames}
             />
           )}
         </div>

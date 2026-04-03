@@ -70,22 +70,46 @@ When a profile has `avoidances: ['cobblestones']`, the routing enforces `avoid_b
 
 ### Safety Classification Model
 
-Routes are displayed using a 4-level safety model (`SafetyClass`):
+Routes and overlay paths are classified into 3 levels (`SafetyClass`, a string union type matching the display color palette):
 
-| Level | Constant | Color | Meaning |
-|-------|----------|-------|---------|
-| `great` | `SAFETY_CLASS.GREAT` | Green | Car-free path / Fahrradstrasse |
-| `good` | `SAFETY_CLASS.GOOD` | Green | Shared footway / pedestrian path |
-| `ok` | `SAFETY_CLASS.OK` | Amber | Separated track / living street |
-| `bad` | `SAFETY_CLASS.BAD` | Red | Road without protection |
+| Level | Color | Meaning |
+|-------|-------|---------|
+| `'green'` | Green (#10b981) | Car-free paths, Fahrradstrasse, shared footways |
+| `'amber'` | Amber (#f97316) | Separated tracks alongside roads, living streets |
+| `'red'` | Red (#e11d48) | Painted lanes, shared roads, roads without protection |
 
-Classification is **profile-aware** — the same road can be 'ok' for a trailer but 'bad' for a toddler. See `classify.ts` and `overpass.ts` for the full logic.
+Classification is **profile-aware** — the same road can be `'amber'` for toddler but `'red'` for trailer. See `classify.ts` and `overpass.ts` for the full logic.
 
-Use `SAFETY_CLASS` constants (from `types.ts`) instead of raw string literals.
+#### Two classification paths (must stay in sync)
+
+| Path | Function | Input | Used by |
+|------|----------|-------|---------|
+| Routing | `classifyEdge()` in `classify.ts` | Valhalla `trace_attributes` edge | Route segment coloring |
+| Overlay | `classifyOsmTags()` in `overpass.ts` | Raw OSM tags from Overpass | Map background overlay |
+
+Both implement the same semantic model. `BAD_SURFACES` (cobblestone, sett, gravel, etc.) is defined once in `classify.ts` and imported by `overpass.ts`. **Any change to classification logic must be applied in both files and verified to produce consistent results.**
+
+Notable Valhalla limitation: it does not expose `cycleway:separation` or `cycleway:buffer` tags, so it cannot distinguish plain painted lanes from bollard-protected ones. The overlay (`overpass.ts`) handles this via `hasSeparation()` and upgrades the classification accordingly.
+
+#### Preferred path types
+
+`PROFILE_LEGEND` in `classify.ts` defines the per-profile list of path types, their `SafetyClass`, and whether they are preferred by default (`defaultPreferred: boolean`). This is the canonical mapping from infrastructure type → legend item → `SafetyClass`.
+
+- `getDefaultPreferredItems(profileKey)` — returns the default preferred item names for a profile
+- `getPreferredSafetyClasses(preferredNames, profileKey)` — maps preferred names → `Set<SafetyClass>`
+
+Preferred safety classes are used to:
+1. **Color route segments**: preferred → green (`PREFERRED_COLOR`), other → orange (`OTHER_COLOR`)
+2. **Filter overlay visibility**: preferred classes shown, others hidden (unless "show all" toggled)
+3. **Route quality bar**: fraction of route in preferred vs. non-preferred classes
+
+Preferred types currently affect display only. Routing costing is controlled separately by each profile's `costingOptions` in `routing.ts` and does not change when the user rearranges the legend.
 
 ### Bike Infrastructure Overlay
 
-`BikeMapOverlay` fetches OSM data via Overpass API at the current map viewport. Results are cached by tile (256px grid), so panning/zooming reuses already-fetched data. Rendering is throttled by zoom level — the overlay only activates at zoom ≥ 14.
+`BikeMapOverlay` fetches OSM data via Overpass API at the current map viewport. Results are cached by tile (0.1° grid, ~74 km² at Berlin latitude), so panning/zooming reuses already-fetched tiles. The overlay shows at all zoom levels but warns when more than 12 tiles would need loading (too zoomed out).
+
+Each overlay way is colored by its `SafetyClass` (from `SAFETY` palette in `classify.ts`). Visibility filtering uses `preferredSafetyClasses` directly — preferred classes are shown, others hidden unless "Show other paths" is toggled.
 
 ### Deployment
 
@@ -128,6 +152,20 @@ Profiles are defined in `routing.ts` as `DEFAULT_PROFILES`. Users can customise 
 - `editable` — whether the user can modify this profile
 
 ## Architecture Rules
+
+### Consistency invariants (checked before every merge)
+
+The following must always be consistent. Before declaring any feature or bug fix done, verify all of them:
+
+1. **Classification parity**: `classifyEdge()` (classify.ts) and `classifyOsmTags()` (overpass.ts) must produce the same `SafetyClass` for equivalent infrastructure. Check both when touching either. The Valhalla-vs-OSM attribute mapping is documented in the comment block above `classifyEdge()`.
+
+2. **PROFILE_LEGEND ↔ classifier alignment**: Every `safetyClass` value in `PROFILE_LEGEND` must match what `classifyEdge()` and `classifyOsmTags()` actually return for that infrastructure type on that profile. If you add a new path type or change a classifier return value, update both.
+
+3. **BAD_SURFACES single source**: `BAD_SURFACES` is defined in `classify.ts` and imported by `overpass.ts`. Never duplicate or redefine it. Changes propagate automatically.
+
+4. **SafetyClass values**: The only valid `SafetyClass` values are `'green'`, `'amber'`, and `'red'`. No legacy names (`great`, `good`, `ok`, `bad`, `avoid`) anywhere in code, tests, or comments that describe runtime behavior.
+
+5. **Color palette single source**: All colors come from `STATUS_COLOR` in `classify.ts`. Never hardcode hex values for route/overlay colors in components.
 
 ### URL State Encoding
 **All map layout state must be encoded in the URL.** This includes:

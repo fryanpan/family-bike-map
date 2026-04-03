@@ -1,9 +1,7 @@
 import L from 'leaflet'
 import { useEffect, useRef } from 'react'
 import { Marker, MapContainer, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet'
-import { SAFETY, PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
-import type { LegendLevel } from '../utils/classify'
-import type { SafetyClass } from '../utils/types'
+import { PREFERRED_COLOR, OTHER_COLOR, getLegendItem } from '../utils/classify'
 import BikeMapOverlay from './BikeMapOverlay'
 import type { Route, RouteSegment } from '../utils/types'
 
@@ -80,25 +78,27 @@ function midpoint(coords: [number, number][]): [number, number] {
 // Other segments are hidden when showOtherPaths is false.
 function RouteDisplay({
   route,
-  preferredSafetyClasses,
+  profileKey,
+  preferredItemNames,
   showOtherPaths,
 }: {
   route: Route | null
-  preferredSafetyClasses: Set<SafetyClass>
+  profileKey: string
+  preferredItemNames: Set<string>
   showOtherPaths: boolean
 }) {
   if (!route) return null
 
   if (route.segments?.length) {
     const visible = route.segments.filter(
-      (seg) => preferredSafetyClasses.has(seg.safetyClass) || showOtherPaths
+      (seg) => (seg.itemName !== null && preferredItemNames.has(seg.itemName)) || showOtherPaths
     )
     return (
       <>
         {visible.map((seg: RouteSegment, i: number) => {
-          const isPreferred = preferredSafetyClasses.has(seg.safetyClass)
+          const isPreferred = seg.itemName !== null && preferredItemNames.has(seg.itemName)
           const color = isPreferred ? PREFERRED_COLOR : OTHER_COLOR
-          const s = SAFETY[seg.safetyClass] ?? SAFETY.bad
+          const legendItem = getLegendItem(seg.itemName, profileKey)
           return (
             <Polyline
               key={i}
@@ -107,21 +107,24 @@ function RouteDisplay({
               weight={12}
               opacity={0.95}
             >
-              <Tooltip sticky direction="top" offset={[0, -6]}>
-                <span style={{ fontSize: 13 }}>{s.icon} {s.label}</span>
-              </Tooltip>
+              {legendItem && (
+                <Tooltip sticky direction="top" offset={[0, -6]}>
+                  <span style={{ fontSize: 13 }}>{legendItem.icon} {seg.itemName}</span>
+                </Tooltip>
+              )}
             </Polyline>
           )
         })}
         {visible
           .filter((seg) => seg.coordinates.length >= 4)
           .map((seg, i) => {
-            const s = SAFETY[seg.safetyClass] ?? SAFETY.bad
+            const legendItem = getLegendItem(seg.itemName, profileKey)
+            if (!legendItem) return null
             return (
               <Marker
                 key={`icon-${i}`}
                 position={midpoint(seg.coordinates)}
-                icon={makeSegmentIcon(s.icon)}
+                icon={makeSegmentIcon(legendItem.icon)}
               />
             )
           })}
@@ -155,9 +158,8 @@ interface Props {
   overlayEnabled: boolean
   profileKey: string
   onOverlayStatusChange: (status: string) => void
-  hiddenLevels: Set<LegendLevel>
   currentLocation: { lat: number; lng: number } | null
-  preferredSafetyClasses: Set<SafetyClass>
+  preferredItemNames: Set<string>
   showOtherPaths: boolean
 }
 
@@ -170,9 +172,8 @@ export default function Map({
   overlayEnabled,
   profileKey,
   onOverlayStatusChange,
-  hiddenLevels,
   currentLocation,
-  preferredSafetyClasses,
+  preferredItemNames,
   showOtherPaths,
 }: Props) {
   return (
@@ -191,13 +192,15 @@ export default function Map({
       <BikeMapOverlay
         enabled={overlayEnabled}
         profileKey={profileKey}
-        hiddenLevels={hiddenLevels}
+        preferredItemNames={preferredItemNames}
+        showOtherPaths={showOtherPaths}
         onStatusChange={onOverlayStatusChange}
       />
 
       <RouteDisplay
         route={route}
-        preferredSafetyClasses={preferredSafetyClasses}
+        profileKey={profileKey}
+        preferredItemNames={preferredItemNames}
         showOtherPaths={showOtherPaths}
       />
 

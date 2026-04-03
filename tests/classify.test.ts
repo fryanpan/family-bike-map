@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 import {
-  classifyEdge,
-  worsen,
+  classifyEdgeToItem,
   getDefaultPreferredItems,
-  getPreferredSafetyClasses,
   computeRouteQuality,
 } from '../src/utils/classify'
 import type { ValhallaEdge, RouteSegment } from '../src/utils/types'
@@ -14,256 +12,181 @@ import type { ValhallaEdge, RouteSegment } from '../src/utils/types'
 
 // ── Fahrradstrasse (bicycle_road=yes) ─────────────────────────────────────────
 
-describe('classifyEdge — Fahrradstrasse', () => {
-  it('classifies bicycle_road=yes as great for all profiles', () => {
+describe('classifyEdgeToItem — Fahrradstrasse', () => {
+  it('classifies bicycle_road=yes as Fahrradstrasse for all profiles', () => {
     const edge: ValhallaEdge = { bicycle_road: true, road_class: 'residential' }
-    expect(classifyEdge(edge, 'toddler')).toBe('great')
-    expect(classifyEdge(edge, 'trailer')).toBe('great')
-    expect(classifyEdge(edge, 'training')).toBe('great')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Fahrradstrasse')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Fahrradstrasse')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Fahrradstrasse')
   })
 })
 
 // ── Car-free paths and cycleways ──────────────────────────────────────────────
 
-describe('classifyEdge — car-free paths (use="cycleway", "path", "mountain_bike")', () => {
-  it('classifies use=cycleway as great', () => {
+describe('classifyEdgeToItem — car-free paths (use="cycleway", "path", "mountain_bike")', () => {
+  it('classifies use=cycleway as Car-free path / Radweg', () => {
     const edge: ValhallaEdge = { use: 'cycleway' }
-    expect(classifyEdge(edge, 'toddler')).toBe('great')
-    expect(classifyEdge(edge, 'trailer')).toBe('great')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Car-free path / Radweg')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Car-free path / Radweg')
   })
 
-  it('classifies use=path (trail e.g. Engeldam) as great', () => {
+  it('classifies use=path (trail e.g. Engeldam) as Car-free path / Radweg', () => {
     const edge: ValhallaEdge = { use: 'path' }
-    expect(classifyEdge(edge, 'toddler')).toBe('great')
-    expect(classifyEdge(edge, 'trailer')).toBe('great')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Car-free path / Radweg')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Car-free path / Radweg')
   })
 
-  it('classifies use=mountain_bike path as great', () => {
+  it('classifies use=mountain_bike path as Car-free path / Radweg', () => {
     const edge: ValhallaEdge = { use: 'mountain_bike' }
-    expect(classifyEdge(edge, 'toddler')).toBe('great')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Car-free path / Radweg')
   })
 
-  it('classifies dirt path (use=path, surface=dirt) as great — dirt is NOT a bad surface', () => {
-    // surface=dirt is NOT in the BAD_SURFACES set; it is a rideable park trail.
+  it('classifies dirt path (use=path, surface=dirt) as Car-free path — dirt is NOT a bad surface', () => {
     const edge: ValhallaEdge = { use: 'path', surface: 'dirt' }
-    expect(classifyEdge(edge, 'toddler')).toBe('great')
-    expect(classifyEdge(edge, 'trailer')).toBe('great')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Car-free path / Radweg')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Car-free path / Radweg')
   })
 })
 
 // ── Shared footway / pedestrian paths (park paths, Tiergarten trails) ────────
 
-describe('classifyEdge — shared footway/pedestrian paths', () => {
-  it('classifies use=footway as good for all profiles', () => {
-    // Footways shared with cyclists (e.g. Tiergarten park trails) are car-free
-    // and pleasant — good for all profiles.
+describe('classifyEdgeToItem — shared footway/pedestrian paths', () => {
+  it('classifies use=footway as Shared footway (park path) for all profiles', () => {
     const edge: ValhallaEdge = { use: 'footway' }
-    expect(classifyEdge(edge, 'toddler')).toBe('good')
-    expect(classifyEdge(edge, 'trailer')).toBe('good')
-    expect(classifyEdge(edge, 'training')).toBe('good')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Shared footway (park path)')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Shared footway (park path)')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Shared footway (park path)')
   })
 
-  it('classifies use=pedestrian as good for all profiles', () => {
+  it('classifies use=pedestrian as Shared footway (park path) for all profiles', () => {
     const edge: ValhallaEdge = { use: 'pedestrian' }
-    expect(classifyEdge(edge, 'toddler')).toBe('good')
-    expect(classifyEdge(edge, 'training')).toBe('good')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Shared footway (park path)')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Shared footway (park path)')
   })
 })
 
 // ── Separated bike track alongside road (cycleway=track) ─────────────────────
 
-describe('classifyEdge — separated track (cycle_lane="separated")', () => {
-  it('classifies separated track as ok for toddler (safe but slow)', () => {
+describe('classifyEdgeToItem — separated track (cycle_lane="separated")', () => {
+  it('classifies separated track as profile-specific item name', () => {
     const edge: ValhallaEdge = { cycle_lane: 'separated' }
-    expect(classifyEdge(edge, 'toddler')).toBe('ok')
-  })
-
-  it('classifies separated track as avoid for trailer (too narrow)', () => {
-    const edge: ValhallaEdge = { cycle_lane: 'separated' }
-    expect(classifyEdge(edge, 'trailer')).toBe('bad')
-  })
-
-  it('classifies separated track as avoid for training (too slow/interrupted)', () => {
-    const edge: ValhallaEdge = { cycle_lane: 'separated' }
-    expect(classifyEdge(edge, 'training')).toBe('bad')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Separated bike track')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Separated bike track (narrow)')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Separated bike track (slow)')
   })
 })
 
 // ── Painted road bike lane (cycleway=lane) ────────────────────────────────────
 
-describe('classifyEdge — painted road lane (cycle_lane="dedicated")', () => {
-  it('classifies painted lane as avoid for toddler', () => {
+describe('classifyEdgeToItem — painted road lane (cycle_lane="dedicated")', () => {
+  it('classifies painted lane as Painted bike lane for all profiles', () => {
     const edge: ValhallaEdge = { cycle_lane: 'dedicated' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
-  })
-
-  it('classifies painted lane as ok for trailer', () => {
-    const edge: ValhallaEdge = { cycle_lane: 'dedicated' }
-    expect(classifyEdge(edge, 'trailer')).toBe('ok')
-  })
-
-  it('classifies painted lane as good for training (on-road, fast)', () => {
-    const edge: ValhallaEdge = { cycle_lane: 'dedicated' }
-    expect(classifyEdge(edge, 'training')).toBe('good')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Painted bike lane')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Painted bike lane')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Painted bike lane')
   })
 })
 
 // ── Living street ─────────────────────────────────────────────────────────────
 
-describe('classifyEdge — living street (use="living_street")', () => {
-  it('classifies living street as ok for all profiles', () => {
+describe('classifyEdgeToItem — living street (use="living_street")', () => {
+  it('classifies living street as Living street for all profiles', () => {
     const edge: ValhallaEdge = { use: 'living_street' }
-    expect(classifyEdge(edge, 'toddler')).toBe('ok')
-    expect(classifyEdge(edge, 'trailer')).toBe('ok')
-    expect(classifyEdge(edge, 'training')).toBe('ok')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Living street')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Living street')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Living street')
   })
 })
 
 // ── Shared bus lane (cycleway=share_busway) ───────────────────────────────────
 
-describe('classifyEdge — shared bus lane (cycle_lane="share_busway")', () => {
-  it('classifies bus lane as avoid for toddler (hazardous with small child)', () => {
+describe('classifyEdgeToItem — shared bus lane (cycle_lane="share_busway")', () => {
+  it('classifies bus lane as Shared bus lane for all profiles', () => {
     const edge: ValhallaEdge = { cycle_lane: 'share_busway' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
-  })
-
-  it('classifies bus lane as good for training (wide, predictable)', () => {
-    const edge: ValhallaEdge = { cycle_lane: 'share_busway' }
-    expect(classifyEdge(edge, 'training')).toBe('good')
-  })
-
-  it('classifies bus lane as good for trailer (wide, well-maintained)', () => {
-    const edge: ValhallaEdge = { cycle_lane: 'share_busway' }
-    expect(classifyEdge(edge, 'trailer')).toBe('good')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Shared bus lane')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Shared bus lane')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Shared bus lane')
   })
 })
 
-// ── Bad surfaces (cobblestones) ───────────────────────────────────────────────
+// ── Residential road ──────────────────────────────────────────────────────────
 
-describe('classifyEdge — bad surfaces', () => {
-  it('classifies cobblestone surface as avoid for all profiles', () => {
+describe('classifyEdgeToItem — residential road', () => {
+  it('classifies residential road_class as Residential road', () => {
+    const edge: ValhallaEdge = { road_class: 'residential' }
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Residential road')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Residential road')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Residential road')
+  })
+})
+
+// ── Bad surfaces (cobblestones) → null ───────────────────────────────────────
+
+describe('classifyEdgeToItem — bad surfaces return null', () => {
+  it('returns null for cobblestone surface regardless of infra type', () => {
     const edge: ValhallaEdge = { cycle_lane: 'separated', surface: 'cobblestone' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
-    expect(classifyEdge(edge, 'trailer')).toBe('bad')
-    expect(classifyEdge(edge, 'training')).toBe('bad')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBeNull()
+    expect(classifyEdgeToItem(edge, 'trailer')).toBeNull()
+    expect(classifyEdgeToItem(edge, 'training')).toBeNull()
   })
 
-  it('classifies sett (Kopfsteinpflaster) as avoid for all profiles', () => {
+  it('returns null for sett (Kopfsteinpflaster)', () => {
     const edge: ValhallaEdge = { use: 'cycleway', surface: 'sett' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
-    expect(classifyEdge(edge, 'training')).toBe('bad')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBeNull()
+    expect(classifyEdgeToItem(edge, 'training')).toBeNull()
   })
 
   it('does NOT treat dirt or compacted as bad surfaces', () => {
-    // dirt / compacted are rideable park surfaces — should not be penalised
-    const dirt = { cycle_lane: 'separated', surface: 'dirt' }
-    const compacted = { cycle_lane: 'separated', surface: 'compacted' }
-    expect(classifyEdge(dirt, 'toddler')).toBe('ok')
-    expect(classifyEdge(compacted, 'toddler')).toBe('ok')
+    const dirt: ValhallaEdge = { cycle_lane: 'separated', surface: 'dirt' }
+    const compacted: ValhallaEdge = { cycle_lane: 'separated', surface: 'compacted' }
+    expect(classifyEdgeToItem(dirt, 'toddler')).toBe('Separated bike track')
+    expect(classifyEdgeToItem(compacted, 'toddler')).toBe('Separated bike track')
   })
 
-  it('classifies gravel and unpaved as avoid for all profiles', () => {
+  it('returns null for gravel and unpaved', () => {
     const gravel: ValhallaEdge = { cycle_lane: 'separated', surface: 'gravel' }
     const unpaved: ValhallaEdge = { cycle_lane: 'separated', surface: 'unpaved' }
-    expect(classifyEdge(gravel, 'toddler')).toBe('bad')
-    expect(classifyEdge(gravel, 'trailer')).toBe('bad')
-    expect(classifyEdge(gravel, 'training')).toBe('bad')
-    expect(classifyEdge(unpaved, 'toddler')).toBe('bad')
+    expect(classifyEdgeToItem(gravel, 'toddler')).toBeNull()
+    expect(classifyEdgeToItem(unpaved, 'toddler')).toBeNull()
   })
 })
 
-// ── Road class fallback ───────────────────────────────────────────────────────
+// ── Arterial roads → null ─────────────────────────────────────────────────────
 
-describe('classifyEdge — road class fallback', () => {
-  it('classifies residential as avoid for toddler', () => {
-    const edge: ValhallaEdge = { road_class: 'residential' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
+describe('classifyEdgeToItem — arterial roads return null', () => {
+  it('returns null for primary, secondary, tertiary roads', () => {
+    expect(classifyEdgeToItem({ road_class: 'primary' }, 'toddler')).toBeNull()
+    expect(classifyEdgeToItem({ road_class: 'secondary' }, 'toddler')).toBeNull()
+    expect(classifyEdgeToItem({ road_class: 'tertiary' }, 'toddler')).toBeNull()
   })
 
-  it('classifies residential as ok for trailer and training', () => {
-    const edge: ValhallaEdge = { road_class: 'residential' }
-    expect(classifyEdge(edge, 'trailer')).toBe('ok')
-    expect(classifyEdge(edge, 'training')).toBe('ok')
-  })
-
-  it('classifies service road as avoid for toddler', () => {
-    const edge: ValhallaEdge = { road_class: 'service_other' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
-  })
-
-  it('classifies service road as ok for trailer and training', () => {
-    const edge: ValhallaEdge = { road_class: 'service_other' }
-    expect(classifyEdge(edge, 'trailer')).toBe('ok')
-    expect(classifyEdge(edge, 'training')).toBe('ok')
-  })
-
-  it('classifies tertiary as avoid for all profiles', () => {
-    const edge: ValhallaEdge = { road_class: 'tertiary' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
-    expect(classifyEdge(edge, 'trailer')).toBe('bad')
-    expect(classifyEdge(edge, 'training')).toBe('bad')
-  })
-
-  it('classifies unclassified as avoid for all profiles', () => {
-    const edge: ValhallaEdge = { road_class: 'unclassified' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
-  })
-
-  it('classifies primary as avoid', () => {
-    const edge: ValhallaEdge = { road_class: 'primary' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
-  })
-
-  it('classifies secondary as avoid', () => {
-    const edge: ValhallaEdge = { road_class: 'secondary' }
-    expect(classifyEdge(edge, 'toddler')).toBe('bad')
-  })
-})
-
-// ── null / undefined edge ─────────────────────────────────────────────────────
-
-describe('classifyEdge — null edge', () => {
-  it('returns ok for null edge (unknown road, assume minimal safety)', () => {
-    expect(classifyEdge(null)).toBe('ok')
-    expect(classifyEdge(undefined)).toBe('ok')
-  })
-})
-
-// ── worsen helper ─────────────────────────────────────────────────────────────
-
-describe('worsen', () => {
-  it('degrades each class by one level through the 4-level system', () => {
-    expect(worsen('great')).toBe('good')
-    expect(worsen('good')).toBe('ok')
-    expect(worsen('ok')).toBe('bad')
-  })
-
-  it('cannot degrade below avoid', () => {
-    expect(worsen('bad')).toBe('bad')
+  it('returns null for null/undefined edge', () => {
+    expect(classifyEdgeToItem(null, 'toddler')).toBeNull()
+    expect(classifyEdgeToItem(undefined, 'toddler')).toBeNull()
   })
 })
 
 // ── getDefaultPreferredItems ──────────────────────────────────────────────────
 
 describe('getDefaultPreferredItems', () => {
-  it('returns good + ok items for toddler profile', () => {
+  it('returns defaultPreferred items for toddler profile', () => {
     const items = getDefaultPreferredItems('toddler')
     expect(items.has('Car-free path / Radweg')).toBe(true)
     expect(items.has('Fahrradstrasse')).toBe(true)
     expect(items.has('Shared footway (park path)')).toBe(true)
     expect(items.has('Separated bike track')).toBe(true)
     expect(items.has('Living street')).toBe(true)
-    // bad items should NOT be preferred by default
+    // non-default items should NOT be preferred by default
     expect(items.has('Painted bike lane')).toBe(false)
     expect(items.has('Residential road')).toBe(false)
   })
 
-  it('returns good + ok items for training profile', () => {
+  it('returns defaultPreferred items for training profile', () => {
     const items = getDefaultPreferredItems('training')
     expect(items.has('Car-free path / Radweg')).toBe(true)
-    expect(items.has('Painted bike lane')).toBe(true) // good for training
-    expect(items.has('Living street')).toBe(true)     // ok for training
-    expect(items.has('Separated bike track (slow)')).toBe(false) // bad for training
+    expect(items.has('Painted bike lane')).toBe(true)
+    expect(items.has('Living street')).toBe(true)
+    expect(items.has('Separated bike track (slow)')).toBe(false)
   })
 
   it('returns empty set for unknown profile', () => {
@@ -271,72 +194,47 @@ describe('getDefaultPreferredItems', () => {
   })
 })
 
-// ── getPreferredSafetyClasses ─────────────────────────────────────────────────
+// ── computeRouteQuality ───────────────────────────────────────────────────────
 
-describe('getPreferredSafetyClasses', () => {
-  it('includes great + good safetyClasses when their items are preferred', () => {
-    const preferred = new Set(['Car-free path / Radweg', 'Fahrradstrasse', 'Shared footway (park path)'])
-    const classes = getPreferredSafetyClasses(preferred, 'toddler')
-    expect(classes.has('great')).toBe(true)
-    expect(classes.has('good')).toBe(true)
-    expect(classes.has('ok')).toBe(false)
-    expect(classes.has('bad')).toBe(false)
-  })
-
-  it('includes a class if ANY of its items is preferred', () => {
-    // Only one of two 'great' items preferred — class should still be included
-    const preferred = new Set(['Fahrradstrasse'])
-    const classes = getPreferredSafetyClasses(preferred, 'toddler')
-    expect(classes.has('great')).toBe(true)
-  })
-
-  it('excludes a class when none of its items is preferred', () => {
-    const preferred = new Set(['Car-free path / Radweg'])
-    const classes = getPreferredSafetyClasses(preferred, 'toddler')
-    expect(classes.has('ok')).toBe(false)
-    expect(classes.has('bad')).toBe(false)
-  })
-
-  it('returns empty set for unknown profile', () => {
-    expect(getPreferredSafetyClasses(new Set(['anything']), 'unknown').size).toBe(0)
-  })
-})
-
-// ── computeRouteQuality with preferredClasses ─────────────────────────────────
-
-describe('computeRouteQuality — preferred/other model', () => {
-  const seg = (cls: RouteSegment['safetyClass'], len: number): RouteSegment => ({
-    safetyClass: cls,
+describe('computeRouteQuality — binary preferred/other model', () => {
+  const seg = (itemName: string | null, len: number): RouteSegment => ({
+    itemName,
     coordinates: Array.from({ length: len + 1 }, (_, i) => [i, 0] as [number, number]),
   })
 
-  it('puts preferred classes into "good" bucket and others into "bad"', () => {
+  it('splits preferred vs other by item name', () => {
     const segments: RouteSegment[] = [
-      seg('great', 3),
-      seg('ok', 1),
-      seg('bad', 1),
+      seg('Car-free path / Radweg', 3),
+      seg('Painted bike lane', 1),
+      seg(null, 1),
     ]
-    const preferred = new Set<RouteSegment['safetyClass']>(['great', 'ok'])
+    const preferred = new Set(['Car-free path / Radweg'])
     const q = computeRouteQuality(segments, preferred)
-    expect(q.ok).toBe(0)
-    expect(q.good).toBeCloseTo(4 / 5)
-    expect(q.bad).toBeCloseTo(1 / 5)
+    expect(q.preferred).toBeCloseTo(3 / 5)
+    expect(q.other).toBeCloseTo(2 / 5)
   })
 
-  it('returns all preferred when every segment is preferred', () => {
-    const segments: RouteSegment[] = [seg('great', 4), seg('good', 1)]
-    const preferred = new Set<RouteSegment['safetyClass']>(['great', 'good'])
+  it('returns all preferred when every item is in preferredItemNames', () => {
+    const segments: RouteSegment[] = [
+      seg('Car-free path / Radweg', 4),
+      seg('Fahrradstrasse', 1),
+    ]
+    const preferred = new Set(['Car-free path / Radweg', 'Fahrradstrasse'])
     const q = computeRouteQuality(segments, preferred)
-    expect(q.good).toBe(1)
-    expect(q.bad).toBe(0)
-    expect(q.ok).toBe(0)
+    expect(q.preferred).toBe(1)
+    expect(q.other).toBe(0)
   })
 
-  it('falls back to good/ok/bad model when no preferredClasses given', () => {
-    const segments: RouteSegment[] = [seg('great', 2), seg('ok', 2), seg('bad', 1)]
-    const q = computeRouteQuality(segments)
-    expect(q.good).toBeCloseTo(2 / 5)
-    expect(q.ok).toBeCloseTo(2 / 5)
-    expect(q.bad).toBeCloseTo(1 / 5)
+  it('null itemName always counts as other', () => {
+    const segments: RouteSegment[] = [seg(null, 2)]
+    const q = computeRouteQuality(segments, new Set(['Car-free path / Radweg']))
+    expect(q.preferred).toBe(0)
+    expect(q.other).toBe(1)
+  })
+
+  it('returns 0/0 fractions for empty segments', () => {
+    const q = computeRouteQuality([], new Set())
+    expect(q.preferred).toBe(0)
+    expect(q.other).toBe(0)
   })
 })

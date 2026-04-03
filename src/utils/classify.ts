@@ -1,147 +1,114 @@
-import type { SafetyClass, SafetyInfo, ValhallaEdge, RouteSegment } from './types'
+import type { ValhallaEdge, RouteSegment, BicycleCostingOptions, RiderProfile } from './types'
 
-// Three-color display palette: teal-green / orange / rose
-// Chosen for high contrast against OpenStreetMap tile backgrounds (sage park greens,
-// beige/gray roads, light-blue water). 'great' and 'good' both show teal-green.
-export const STATUS_COLOR = {
-  green: '#10b981',
-  amber: '#f97316',
-  red:   '#e11d48',
-} as const
-
-// Two-tone route display: preferred paths are green, other paths are orange.
-export const PREFERRED_COLOR = STATUS_COLOR.green  // '#10b981'
-export const OTHER_COLOR     = STATUS_COLOR.amber  // '#f97316'
-
-export const SAFETY: Record<SafetyClass, SafetyInfo> = {
-  great: { label: 'Car-free path / Fahrradstrasse', color: STATUS_COLOR.green, icon: '🚴', textColor: '#fff' },
-  good:  { label: 'Shared footway / Pedestrian path', color: STATUS_COLOR.green, icon: '🛤️', textColor: '#fff' },
-  ok:    { label: 'Separated track / Living street', color: STATUS_COLOR.amber, icon: '〰️', textColor: '#fff' },
-  bad:   { label: 'Road without protection', color: STATUS_COLOR.red, icon: '⚠️', textColor: '#fff' },
-}
+// Two-tone display palette — preferred paths green, other paths orange.
+// Chosen for high contrast against OpenStreetMap tile backgrounds.
+export const PREFERRED_COLOR = '#10b981'  // teal-green
+export const OTHER_COLOR     = '#f97316'  // orange
 
 // ── Profile-aware legend ────────────────────────────────────────────────────
-// Each profile defines how route types map to "good / ok / avoid" levels.
+// Each profile defines its path types, which are preferred by default, and
+// the Valhalla use_roads value that each type implies when preferred.
+//
+// useRoads controls how willing Valhalla is to route on car roads (0 = avoid,
+// 1 = freely use). Preferred items set the effective use_roads for the route
+// request — the max useRoads across all preferred items wins.
 
-export type LegendLevel = 'good' | 'ok' | 'bad'
-
-export interface LegendItem { icon: string; name: string; safetyClass: SafetyClass }
+export interface LegendItem {
+  icon: string
+  name: string
+  useRoads: number        // Valhalla use_roads implied when this item is preferred
+  defaultPreferred: boolean
+}
 
 export interface LegendGroup {
-  level: LegendLevel
-  label: string
+  defaultPreferred: boolean
   items: LegendItem[]
 }
 
-// Each item carries its safetyClass so the Legend can show the exact map color
-// (from the SAFETY palette) per item — keeping legend and overlay in sync.
 export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
   toddler: [
-    { level: 'good', label: 'Good', items: [
-      { icon: '🚴', name: 'Car-free path / Radweg',    safetyClass: 'great' },
-      { icon: '🚲', name: 'Fahrradstrasse',             safetyClass: 'great' },
-      { icon: '🛤️', name: 'Shared footway (park path)', safetyClass: 'good'  },
+    { defaultPreferred: true, items: [
+      { icon: '🚴', name: 'Car-free path / Radweg',    useRoads: 0.0,  defaultPreferred: true },
+      { icon: '🚲', name: 'Fahrradstrasse',             useRoads: 0.0,  defaultPreferred: true },
+      { icon: '🛤️', name: 'Shared footway (park path)', useRoads: 0.0,  defaultPreferred: true },
     ]},
-    { level: 'ok', label: 'OK', items: [
-      { icon: '🛡️', name: 'Separated bike track',       safetyClass: 'ok' },
-      { icon: '🏘️', name: 'Living street',              safetyClass: 'ok' },
+    { defaultPreferred: true, items: [
+      { icon: '🛡️', name: 'Separated bike track',       useRoads: 0.05, defaultPreferred: true },
+      { icon: '🏘️', name: 'Living street',              useRoads: 0.05, defaultPreferred: true },
     ]},
-    { level: 'bad', label: 'Avoid', items: [
-      { icon: '〰️', name: 'Painted bike lane',          safetyClass: 'bad' },
-      { icon: '🚌', name: 'Shared bus lane',            safetyClass: 'bad' },
-      { icon: '🏠', name: 'Residential road',           safetyClass: 'bad' },
+    { defaultPreferred: false, items: [
+      { icon: '〰️', name: 'Painted bike lane',          useRoads: 0.3,  defaultPreferred: false },
+      { icon: '🚌', name: 'Shared bus lane',            useRoads: 0.3,  defaultPreferred: false },
+      { icon: '🏠', name: 'Residential road',           useRoads: 0.5,  defaultPreferred: false },
     ]},
   ],
   trailer: [
-    { level: 'good', label: 'Good', items: [
-      { icon: '🚴', name: 'Car-free path / Radweg',    safetyClass: 'great' },
-      { icon: '🚲', name: 'Fahrradstrasse',             safetyClass: 'great' },
-      { icon: '🛤️', name: 'Shared footway (park path)', safetyClass: 'good'  },
-      { icon: '🚌', name: 'Shared bus lane',            safetyClass: 'good'  },
+    { defaultPreferred: true, items: [
+      { icon: '🚴', name: 'Car-free path / Radweg',    useRoads: 0.0,  defaultPreferred: true },
+      { icon: '🚲', name: 'Fahrradstrasse',             useRoads: 0.0,  defaultPreferred: true },
+      { icon: '🛤️', name: 'Shared footway (park path)', useRoads: 0.0,  defaultPreferred: true },
+      { icon: '🚌', name: 'Shared bus lane',            useRoads: 0.15, defaultPreferred: true },
     ]},
-    { level: 'ok', label: 'OK', items: [
-      { icon: '〰️', name: 'Painted bike lane',          safetyClass: 'ok' },
-      { icon: '🏘️', name: 'Living street',              safetyClass: 'ok' },
-      { icon: '🏠', name: 'Residential road',           safetyClass: 'ok' },
+    { defaultPreferred: true, items: [
+      { icon: '〰️', name: 'Painted bike lane',          useRoads: 0.15, defaultPreferred: true },
+      { icon: '🏘️', name: 'Living street',              useRoads: 0.05, defaultPreferred: true },
+      { icon: '🏠', name: 'Residential road',           useRoads: 0.15, defaultPreferred: true },
     ]},
-    { level: 'bad', label: 'Avoid', items: [
-      { icon: '🛡️', name: 'Separated bike track (narrow)', safetyClass: 'bad' },
+    { defaultPreferred: false, items: [
+      { icon: '🛡️', name: 'Separated bike track (narrow)', useRoads: 0.0, defaultPreferred: false },
     ]},
   ],
   training: [
-    { level: 'good', label: 'Good', items: [
-      { icon: '🚴', name: 'Car-free path / Radweg',    safetyClass: 'great' },
-      { icon: '🚲', name: 'Fahrradstrasse',             safetyClass: 'great' },
-      { icon: '🛤️', name: 'Shared footway (park path)', safetyClass: 'good'  },
-      { icon: '〰️', name: 'Painted bike lane',          safetyClass: 'good'  },
-      { icon: '🚌', name: 'Shared bus lane',            safetyClass: 'good'  },
+    { defaultPreferred: true, items: [
+      { icon: '🚴', name: 'Car-free path / Radweg',    useRoads: 0.0,  defaultPreferred: true },
+      { icon: '🚲', name: 'Fahrradstrasse',             useRoads: 0.0,  defaultPreferred: true },
+      { icon: '🛤️', name: 'Shared footway (park path)', useRoads: 0.0,  defaultPreferred: true },
+      { icon: '〰️', name: 'Painted bike lane',          useRoads: 0.6,  defaultPreferred: true },
+      { icon: '🚌', name: 'Shared bus lane',            useRoads: 0.6,  defaultPreferred: true },
     ]},
-    { level: 'ok', label: 'OK', items: [
-      { icon: '🏘️', name: 'Living street',              safetyClass: 'ok' },
-      { icon: '🏠', name: 'Residential road',           safetyClass: 'ok' },
+    { defaultPreferred: true, items: [
+      { icon: '🏘️', name: 'Living street',              useRoads: 0.5,  defaultPreferred: true },
+      { icon: '🏠', name: 'Residential road',           useRoads: 0.6,  defaultPreferred: true },
     ]},
-    { level: 'bad', label: 'Avoid', items: [
-      { icon: '🛡️', name: 'Separated bike track (slow)', safetyClass: 'bad' },
+    { defaultPreferred: false, items: [
+      { icon: '🛡️', name: 'Separated bike track (slow)', useRoads: 0.0, defaultPreferred: false },
     ]},
   ],
 }
 
 // ── Route quality stats ─────────────────────────────────────────────────────
-// Maps safety classes to 3 display levels for the compact route summary bar.
 
-export const SAFETY_LEVEL: Record<SafetyClass, LegendLevel> = {
-  great: 'good',
-  good:  'good',
-  ok:    'ok',
-  bad:   'bad',
-}
-
-export interface RouteQuality { good: number; ok: number; bad: number }
+export interface RouteQuality { preferred: number; other: number }
 
 /**
- * Compute the fraction of route (by coordinate count) in each quality level.
- *
- * If `preferredClasses` is provided, uses a preferred/other model:
- *   - preferred class → "good" bucket
- *   - non-preferred class → "bad" bucket
- *   - "ok" bucket is always 0 in this mode
- *
- * Without `preferredClasses`, falls back to the default good/ok/bad mapping.
+ * Fraction of route (by coordinate count) on preferred vs. other infrastructure.
  */
 export function computeRouteQuality(
   segments: RouteSegment[],
-  preferredClasses?: Set<SafetyClass>,
+  preferredItemNames: Set<string>,
 ): RouteQuality {
-  if (!segments.length) return { good: 0, ok: 0, bad: 0 }
-  let good = 0, ok = 0, bad = 0
+  if (!segments.length) return { preferred: 0, other: 0 }
+  let preferred = 0, other = 0
   for (const seg of segments) {
     const count = Math.max(1, seg.coordinates.length - 1)
-    if (preferredClasses) {
-      if (preferredClasses.has(seg.safetyClass)) good += count
-      else bad += count
-    } else {
-      const level = SAFETY_LEVEL[seg.safetyClass]
-      if (level === 'good') good += count
-      else if (level === 'ok') ok += count
-      else bad += count
-    }
+    if (seg.itemName && preferredItemNames.has(seg.itemName)) preferred += count
+    else other += count
   }
-  const total = good + ok + bad || 1
-  return { good: good / total, ok: ok / total, bad: bad / total }
+  const total = preferred + other || 1
+  return { preferred: preferred / total, other: other / total }
 }
 
 // ── Preferred item helpers ──────────────────────────────────────────────────
 
 /**
- * Returns the set of item names that are "preferred" by default for a profile.
- * Default: all items from 'good' and 'ok' legend groups.
+ * Returns the set of item names that are preferred by default for a profile.
  */
 export function getDefaultPreferredItems(profileKey: string): Set<string> {
   const groups = PROFILE_LEGEND[profileKey]
   if (!groups) return new Set()
   const names = new Set<string>()
   for (const group of groups) {
-    if (group.level === 'good' || group.level === 'ok') {
+    if (group.defaultPreferred) {
       group.items.forEach((item) => names.add(item.name))
     }
   }
@@ -149,35 +116,59 @@ export function getDefaultPreferredItems(profileKey: string): Set<string> {
 }
 
 /**
- * Returns the SafetyClasses that are "preferred" given a set of preferred item names.
- * A class is preferred if AT LEAST ONE of its items (for the profile) is preferred.
+ * Look up a legend item by name for a given profile. Used for tooltip icons.
  */
-export function getPreferredSafetyClasses(
-  preferredNames: Set<string>,
-  profileKey: string,
-): Set<SafetyClass> {
+export function getLegendItem(name: string | null, profileKey: string): LegendItem | undefined {
+  if (!name) return undefined
   const groups = PROFILE_LEGEND[profileKey]
-  if (!groups) return new Set()
-  const preferred = new Set<SafetyClass>()
+  if (!groups) return undefined
+  for (const group of groups) {
+    const item = group.items.find((i) => i.name === name)
+    if (item) return item
+  }
+  return undefined
+}
+
+/**
+ * Compute Valhalla costing options from the user's current preferred items.
+ * use_roads is the max useRoads across all preferred items; use_living_streets
+ * is boosted when 'Living street' is preferred.
+ */
+export function getCostingFromPreferences(
+  preferredItemNames: Set<string>,
+  profileKey: string,
+  baseProfile: RiderProfile,
+): BicycleCostingOptions {
+  const groups = PROFILE_LEGEND[profileKey]
+  if (!groups) return baseProfile.costingOptions
+
+  let useRoads = 0.0
+  let useLivingStreets = 0.5
+
   for (const group of groups) {
     for (const item of group.items) {
-      if (preferredNames.has(item.name)) {
-        preferred.add(item.safetyClass)
+      if (preferredItemNames.has(item.name)) {
+        useRoads = Math.max(useRoads, item.useRoads)
+        if (item.name === 'Living street') useLivingStreets = 1.0
       }
     }
   }
-  return preferred
+
+  return {
+    ...baseProfile.costingOptions,
+    use_roads: useRoads,
+    use_living_streets: useLivingStreets,
+  }
 }
 
-// Surfaces that always classify as avoid — rough/uncomfortable for family biking.
-// NOTE: This set is mirrored in overpass.ts. Both must be kept in sync.
+// Surfaces that always make a segment non-preferred — rough/uncomfortable.
+// Imported by overpass.ts (single source of truth).
 export const BAD_SURFACES = new Set([
   'cobblestone', 'paving_stones', 'sett', 'unhewn_cobblestone',
   'cobblestone:flattened', 'gravel', 'unpaved',
 ])
 
-// Maps road_class string values returned by Valhalla API to a numeric rank
-// (lower = bigger/faster road). Used for road-class fallback comparisons.
+// Maps road_class string values returned by Valhalla API to a numeric rank.
 const ROAD_CLASS_RANK: Record<string, number> = {
   motorway:     0,
   trunk:        1,
@@ -189,7 +180,7 @@ const ROAD_CLASS_RANK: Record<string, number> = {
   service_other: 7,
 }
 
-// ── Valhalla edge → OSM tag correlation ────────────────────────────────────
+// ── Valhalla edge → legend item name ───────────────────────────────────────
 // Valhalla trace_attributes returns simplified edge attributes. Here is how
 // they map to the underlying OSM tags used in overpass.ts:
 //
@@ -203,147 +194,85 @@ const ROAD_CLASS_RANK: Record<string, number> = {
 //   edge.cycle_lane=separated   ↔  cycleway=track / cycleway:*=track
 //   edge.cycle_lane=dedicated   ↔  cycleway=lane / cycleway:*=lane
 //                                   (overpass.ts also checks hasSeparation for bollards/buffer
-//                                    and upgrades to 'ok' for toddler, overriding plain lane)
+//                                    and upgrades to 'separated' tier for toddler)
 //   edge.cycle_lane=share_busway ↔ cycleway=share_busway
 //   edge.cycle_lane=shared      ↔  sharrow markings
 //   edge.road_class=residential  ↔  highway=residential
 //
 // NOTE: Valhalla does NOT expose cycleway:separation or cycleway:buffer tags in
 // edge attributes, so it cannot distinguish plain painted lanes from bollard-protected
-// ones. The overpass.ts overlay checks these directly from OSM and handles them via
-// hasSeparation(). This is a known Valhalla limitation for the classify path.
+// ones. The overpass.ts overlay checks these directly from OSM via hasSeparation().
 
 /**
- * Classify a Valhalla edge into the 4-level family safety model.
- *
- * Classification is PROFILE-AWARE. All profiles share the same top levels
- * (great/good for car-free infrastructure) but differ on road infrastructure:
- *
- * toddler (most safety-conscious):
- *   Good:  Car-free paths, Fahrradstrasse, shared footways
- *   OK:    Separated bike track, living streets
- *   Avoid: Painted road lanes, bus lanes, residential roads, bad surfaces
- *
- * trailer (more lenient, but trailers are wide):
- *   Good:  Car-free paths, Fahrradstrasse, footways, bus lanes
- *   OK:    Painted road lanes, living streets, residential roads
- *   Avoid: Separated bike tracks (too narrow for trailer), bad surfaces
- *
- * training (prioritises speed):
- *   Good:  Car-free paths, Fahrradstrasse, footways, painted lanes, bus lanes
- *   OK:    Living streets, residential roads
- *   Avoid: Separated bike tracks (too slow/interrupted), bad surfaces
+ * Returns the PROFILE_LEGEND item name for a Valhalla edge, or null if the
+ * infrastructure is not represented in the legend (e.g. cobblestones, arterial roads).
+ * The returned name can be checked directly against preferredItemNames.
  */
-export function classifyEdge(
+export function classifyEdgeToItem(
   edge: ValhallaEdge | null | undefined,
-  profileKey?: string,
-): SafetyClass {
-  if (!edge) return 'ok'
+  profileKey: string,
+): string | null {
+  if (!edge) return null
 
-  const use         = edge.use         ?? ''
-  const cycleLane   = edge.cycle_lane  ?? ''
-  const roadClass   = edge.road_class  ?? ''
+  const use         = edge.use          ?? ''
+  const cycleLane   = edge.cycle_lane   ?? ''
+  const roadClass   = edge.road_class   ?? ''
   const bicycleRoad = edge.bicycle_road ?? false
-  const surface     = edge.surface     ?? ''
+  const surface     = edge.surface      ?? ''
 
-  // Bad surfaces (cobblestones, gravel, sett) → avoid for all profiles
-  if (BAD_SURFACES.has(surface)) return 'bad'
+  // Bad surfaces override everything — not a preferred item regardless of type
+  if (BAD_SURFACES.has(surface)) return null
 
-  return classifyBase(use, cycleLane, roadClass, bicycleRoad, profileKey)
-}
+  // Fahrradstrasse must come before cycleway/path checks (bicycle_road tag wins)
+  if (bicycleRoad) return 'Fahrradstrasse'
 
-function classifyBase(
-  use: string,
-  cycleLane: string,
-  roadClass: string,
-  bicycleRoad: boolean,
-  profileKey?: string,
-): SafetyClass {
-  const rcRank = ROAD_CLASS_RANK[roadClass] ?? 5
+  if (use === 'cycleway' || use === 'path' || use === 'mountain_bike') return 'Car-free path / Radweg'
+  if (use === 'footway' || use === 'pedestrian') return 'Shared footway (park path)'
 
-  // ── Car-free dedicated cycleway or off-road path — great for all ────────
-  if (use === 'cycleway' || use === 'path' || use === 'mountain_bike') return 'great'
-  if (bicycleRoad) return 'great'
-
-  // ── Shared footway/pedestrian path (park paths, Tiergarten trails) ──────
-  // Car-free but shared with pedestrians — good for all profiles
-  if (use === 'footway' || use === 'pedestrian') return 'good'
-
-  // ── Separated/elevated bike track alongside road (cycleway=track) ───────
-  // Toddler: ok (safe but slow, interrupted at driveways)
-  // Trailer: avoid (too narrow, turns are tricky with trailer)
-  // Training: avoid (too slow and interrupted for fast riding)
   if (cycleLane === 'separated') {
-    return profileKey === 'toddler' ? 'ok' : 'bad'
+    if (profileKey === 'toddler') return 'Separated bike track'
+    if (profileKey === 'trailer') return 'Separated bike track (narrow)'
+    if (profileKey === 'training') return 'Separated bike track (slow)'
+    return null
   }
 
-  // ── Painted road bike lane (cycleway=lane) ───────────────────────────────
-  // Toddler: avoid (too close to moving cars)
-  // Trailer: ok (acceptable, wide enough)
-  // Training: good (on-road, fast, consistent)
-  if (cycleLane === 'dedicated') {
-    if (profileKey === 'toddler') return 'bad'
-    if (profileKey === 'training') return 'good'
-    return 'ok'
-  }
+  if (cycleLane === 'dedicated') return 'Painted bike lane'
+  if (use === 'living_street')   return 'Living street'
+  if (cycleLane === 'share_busway') return 'Shared bus lane'
+  if (cycleLane === 'shared') return null  // sharrow — not in legend
 
-  // ── Living street (Spielstraße / Wohnstraße) ────────────────────────────
-  if (use === 'living_street') return 'ok'
+  const rcRank = ROAD_CLASS_RANK[roadClass] ?? 5
+  if (rcRank >= 6) return 'Residential road'
 
-  // ── Shared bus lane (cycleway=share_busway) ─────────────────────────────
-  // Toddler: avoid (buses are hazardous with small children)
-  // Trailer/training: good (wide, well-maintained, predictable)
-  if (cycleLane === 'share_busway') {
-    return profileKey === 'toddler' ? 'bad' : 'good'
-  }
-
-  // ── Shared road marking (sharrow) — avoid for all ──────────────────────
-  if (cycleLane === 'shared') return 'bad'
-
-  // ── Residential / service road ──────────────────────────────────────────
-  // Toddler: avoid (cars on street with small child)
-  // Trailer/training: ok (low traffic, acceptable)
-  if (rcRank >= 6) {
-    return profileKey === 'toddler' ? 'bad' : 'ok'
-  }
-
-  // ── Everything else (tertiary, unclassified, primary, secondary, trunk) ─
-  return 'bad'
-}
-
-/** Degrade a safety class by one level. Used for display purposes. */
-export function worsen(cls: SafetyClass): SafetyClass {
-  const order: SafetyClass[] = ['great', 'good', 'ok', 'bad']
-  const idx = order.indexOf(cls)
-  return idx < order.length - 1 ? order[idx + 1] : 'bad'
+  return null  // arterial roads (primary, secondary, tertiary, etc.) not in legend
 }
 
 interface ClassifiedPoint {
-  safetyClass: SafetyClass
+  itemName: string | null
   coord: [number, number]
 }
 
 /**
- * Group an array of { safetyClass, coord } items into contiguous segments of the same class.
+ * Group an array of { itemName, coord } points into contiguous RouteSegments of the same item.
  */
 export function buildSegments(classified: ClassifiedPoint[]): RouteSegment[] {
   if (!classified.length) return []
 
   const out: RouteSegment[] = []
   let current: RouteSegment = {
-    safetyClass: classified[0].safetyClass,
+    itemName: classified[0].itemName,
     coordinates: [classified[0].coord],
   }
 
   for (let i = 1; i < classified.length; i++) {
     const item = classified[i]
-    if (item.safetyClass === current.safetyClass) {
+    if (item.itemName === current.itemName) {
       current.coordinates.push(item.coord)
     } else {
       // Carry over last coord so segments are visually connected
       const bridgeCoord = current.coordinates[current.coordinates.length - 1]
       out.push(current)
-      current = { safetyClass: item.safetyClass, coordinates: [bridgeCoord, item.coord] }
+      current = { itemName: item.itemName, coordinates: [bridgeCoord, item.coord] }
     }
   }
   out.push(current)
