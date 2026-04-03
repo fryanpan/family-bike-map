@@ -129,7 +129,8 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
           next.set(k, ways)
           return next
         })
-      } catch {
+      } catch (err) {
+        console.warn(`[BikeMapOverlay] Tile ${t.row}:${t.col} failed:`, err)
         anyError = true
       } finally {
         loadingTilesRef.current.delete(k)

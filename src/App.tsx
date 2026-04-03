@@ -258,7 +258,7 @@ export default function App() {
   const overlayStatusMsg =
     overlayStatus === 'loading' ? '⏳ Loading bike map…' :
     overlayStatus === 'zoom'    ? '🔍 Zoom in to see bike infrastructure' :
-    overlayStatus === 'error'   ? '⚠️ Could not load bike map' :
+    overlayStatus === 'error'   ? '⚠️ Could not load bike map — pan or zoom to retry' :
     null
 
   const startQuickOptions: QuickOption[] = [

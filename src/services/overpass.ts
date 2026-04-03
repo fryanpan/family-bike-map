@@ -52,11 +52,15 @@ export function getCachedTile(row: number, col: number, profileKey: string): Osm
   return _tileCache.get(tileKey(row, col, profileKey))
 }
 
+// Client-side fetch timeout (ms). Must exceed the server-side Overpass timeout so
+// we get a proper HTTP error response rather than a silent network abort.
+const FETCH_TIMEOUT_MS = 35_000
+
 function buildQuery(bbox: { south: number; west: number; north: number; east: number }): string {
   const { south, west, north, east } = bbox
   const b = `${south},${west},${north},${east}`
   return `
-[out:json][timeout:15];
+[out:json][timeout:25];
 (
   way["highway"="cycleway"](${b});
   way["bicycle_road"="yes"](${b});
@@ -159,17 +163,25 @@ interface OverpassElement {
   geometry?: Array<{ lat: number; lon: number }>
 }
 
-async function fetchWithRetry(url: string, init: RequestInit, retries = 1): Promise<Response> {
+async function fetchWithRetry(url: string, init: RequestInit, retries = 2): Promise<Response> {
+  const attempt = 3 - retries  // 0-based attempt number for logging
   try {
-    const resp = await fetch(url, init)
-    if (!resp.ok && retries > 0) {
-      await new Promise((r) => setTimeout(r, 1500))
-      return fetchWithRetry(url, init, retries - 1)
+    const resp = await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+    if (!resp.ok) {
+      console.warn(`[Overpass] HTTP ${resp.status} on attempt ${attempt + 1}`, url)
+      if (retries > 0) {
+        const delay = attempt === 0 ? 3000 : 6000  // 3s, then 6s
+        await new Promise((r) => setTimeout(r, delay))
+        return fetchWithRetry(url, init, retries - 1)
+      }
     }
     return resp
   } catch (err) {
+    const isTimeout = err instanceof DOMException && err.name === 'TimeoutError'
+    console.warn(`[Overpass] ${isTimeout ? 'Fetch timeout' : 'Network error'} on attempt ${attempt + 1}:`, err)
     if (retries > 0) {
-      await new Promise((r) => setTimeout(r, 1500))
+      const delay = attempt === 0 ? 3000 : 6000
+      await new Promise((r) => setTimeout(r, delay))
       return fetchWithRetry(url, init, retries - 1)
     }
     throw err
@@ -191,7 +203,7 @@ function parseOverpassResponse(data: { elements: OverpassElement[] }, profileKey
 
 /**
  * Fetch bike infrastructure for a single tile, returning cached data immediately
- * if available. Retries once on transient network/API errors.
+ * if available. Retries up to 2 times on transient network/API errors.
  */
 export async function fetchBikeInfraForTile(row: number, col: number, profileKey: string): Promise<OsmWay[]> {
   const key = tileKey(row, col, profileKey)
@@ -204,16 +216,33 @@ export async function fetchBikeInfraForTile(row: number, col: number, profileKey
     east: (col + 1) * TILE_DEGREES,
   }
 
+  console.debug(`[Overpass] Fetching tile ${row}:${col} (${bbox.south.toFixed(2)},${bbox.west.toFixed(2)} → ${bbox.north.toFixed(2)},${bbox.east.toFixed(2)})`)
+
   const query = buildQuery(bbox)
-  const response = await fetchWithRetry(OVERPASS_URL, {
-    method: 'POST',
-    body: `data=${encodeURIComponent(query)}`,
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  })
+  let response: Response
+  try {
+    response = await fetchWithRetry(OVERPASS_URL, {
+      method: 'POST',
+      body: `data=${encodeURIComponent(query)}`,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    })
+  } catch (err) {
+    console.error(`[Overpass] Tile ${row}:${col} failed after all retries:`, err)
+    throw err
+  }
 
-  if (!response.ok) throw new Error('Overpass query failed')
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    console.error(`[Overpass] Tile ${row}:${col} HTTP ${response.status}:`, body.slice(0, 200))
+    throw new Error(`Overpass HTTP ${response.status}`)
+  }
 
-  const data = await response.json() as { elements: OverpassElement[] }
+  const data = await response.json() as { elements: OverpassElement[]; remark?: string }
+  if (data.remark) {
+    // Overpass sometimes returns 200 with partial results and a remark (e.g. query timeout)
+    console.warn(`[Overpass] Tile ${row}:${col} remark:`, data.remark)
+  }
+  console.debug(`[Overpass] Tile ${row}:${col} → ${data.elements.length} elements`)
   const result = parseOverpassResponse(data, profileKey)
   _tileCache.set(key, result)
   return result
