@@ -15,6 +15,7 @@ import {
   getCostingFromPreferences,
 } from './utils/classify'
 import type { Place, Route, ProfileMap, RiderProfile } from './utils/types'
+import { Sentry } from './sentry'
 
 const HOME_PLACE: Place = {
   lat: 52.5016,
@@ -193,7 +194,9 @@ export default function App() {
         }
       })
     } catch (e) {
-      setError((e as Error).message ?? 'Could not find a route')
+      const msg = (e as Error).message ?? 'Could not find a route'
+      setError(msg)
+      Sentry.captureException(e, { extra: { profileKey, start: `${start.lat},${start.lng}`, end: `${end.lat},${end.lng}` } })
     } finally {
       setIsLoading(false)
     }

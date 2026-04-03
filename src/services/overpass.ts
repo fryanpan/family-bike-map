@@ -1,6 +1,7 @@
 import type { OsmWay } from '../utils/types'
 import { BAD_SURFACES } from '../utils/classify'
 import type { LatLngBounds } from 'leaflet'
+import * as Sentry from '@sentry/react'
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
 
@@ -219,6 +220,8 @@ export async function fetchBikeInfraForTile(row: number, col: number, profileKey
   console.debug(`[Overpass] Fetching tile ${row}:${col} (${bbox.south.toFixed(2)},${bbox.west.toFixed(2)} → ${bbox.north.toFixed(2)},${bbox.east.toFixed(2)})`)
 
   const query = buildQuery(bbox)
+  const tileCtx = { tile: `${row}:${col}`, bbox: `${bbox.south.toFixed(3)},${bbox.west.toFixed(3)}→${bbox.north.toFixed(3)},${bbox.east.toFixed(3)}` }
+
   let response: Response
   try {
     response = await fetchWithRetry(OVERPASS_URL, {
@@ -228,19 +231,23 @@ export async function fetchBikeInfraForTile(row: number, col: number, profileKey
     })
   } catch (err) {
     console.error(`[Overpass] Tile ${row}:${col} failed after all retries:`, err)
+    Sentry.captureException(err, { extra: { ...tileCtx, stage: 'fetch' } })
     throw err
   }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '')
     console.error(`[Overpass] Tile ${row}:${col} HTTP ${response.status}:`, body.slice(0, 200))
-    throw new Error(`Overpass HTTP ${response.status}`)
+    const err = new Error(`Overpass HTTP ${response.status}`)
+    Sentry.captureException(err, { extra: { ...tileCtx, status: response.status, body: body.slice(0, 500) } })
+    throw err
   }
 
   const data = await response.json() as { elements: OverpassElement[]; remark?: string }
   if (data.remark) {
     // Overpass sometimes returns 200 with partial results and a remark (e.g. query timeout)
     console.warn(`[Overpass] Tile ${row}:${col} remark:`, data.remark)
+    Sentry.captureMessage(`Overpass remark: ${data.remark}`, { level: 'warning', extra: tileCtx })
   }
   console.debug(`[Overpass] Tile ${row}:${col} → ${data.elements.length} elements`)
   const result = parseOverpassResponse(data, profileKey)
