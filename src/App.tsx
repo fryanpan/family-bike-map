@@ -280,13 +280,6 @@ export default function App() {
     if (startPoint) computeRoute(startPoint, place, selectedProfile, waypoints)
   }
 
-  function handleSwap() {
-    const newStart = endPoint
-    const newEnd = startPoint
-    setStartPoint(newStart)
-    setEndPoint(newEnd)
-    if (newStart && newEnd) void computeRoute(newStart, newEnd, selectedProfile, waypoints)
-  }
 
   function handleProfileChange(key: string) {
     setSelectedProfile(key)
@@ -484,8 +477,7 @@ export default function App() {
                 onEndSelect={handleEndSelect}
                 onStartClear={() => { setStartPoint(null); setRoute(null) }}
                 onEndClear={() => { setEndPoint(null); setRoute(null) }}
-                onSwap={handleSwap}
-                startQuickOptions={startQuickOptions}
+startQuickOptions={startQuickOptions}
                 endQuickOptions={endQuickOptions}
               />
             </div>

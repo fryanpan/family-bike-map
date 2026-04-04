@@ -38,10 +38,15 @@ button { font-family: inherit; cursor: pointer; }
   height: 100%;
 }
 
-/* Push Leaflet zoom controls below the floating search card */
-.leaflet-top.leaflet-left { top: 60px; }
+/* Move Leaflet zoom controls to bottom-right */
+.leaflet-top.leaflet-left {
+  top: auto;
+  left: auto;
+  bottom: 24px;
+  right: 10px;
+}
 @media (min-width: 768px) {
-  .leaflet-top.leaflet-left { left: 340px; top: 12px; }
+  .leaflet-top.leaflet-left { bottom: 80px; } /* above feedback FAB */
 }
 
 /* ── Floating cards ───────────────────────────────────── */
@@ -75,7 +80,7 @@ button { font-family: inherit; cursor: pointer; }
   top: 12px;
   left: 12px;
   right: 12px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   display: flex;
   align-items: flex-start;
   gap: 6px;
@@ -170,30 +175,12 @@ button { font-family: inherit; cursor: pointer; }
 .routing-inputs {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-.routing-inputs .search-label {
-  display: block;
-  font-size: 10px;
-  margin-bottom: 2px;
+  gap: 4px;
 }
 .routing-inputs .search-input {
   padding: 8px 10px;
   font-size: 14px;
 }
-.routing-swap-btn {
-  background: #f9fafb;
-  border: 1.5px solid #e5e7eb;
-  border-radius: 8px;
-  color: #6b7280;
-  font-size: 16px;
-  padding: 4px 8px;
-  line-height: 1;
-  flex-shrink: 0;
-  align-self: center;
-  transition: border-color .15s, color .15s, background .15s;
-}
-.routing-swap-btn:hover { border-color: #93c5fd; color: #2563eb; background: #eff6ff; }
 
 /* Desktop: floating cards are positioned as a panel on the left */
 @media (min-width: 768px) {
@@ -258,11 +245,14 @@ button { font-family: inherit; cursor: pointer; }
   margin-top: 4px;
   box-shadow: 0 1px 4px rgba(0,0,0,.1);
 }
-/* Push bike layer toggle above floating bottom cards */
+/* Push bike layer toggle and zoom controls above floating bottom cards */
 .ui-place-detail .map-bike-layer-toggle { bottom: 160px; }
+.ui-place-detail .leaflet-top.leaflet-left { bottom: 160px; }
 .ui-routing .map-bike-layer-toggle { bottom: 220px; }
+.ui-routing .leaflet-top.leaflet-left { bottom: 220px; }
 @media (min-width: 768px) {
   .ui-routing .map-bike-layer-toggle { bottom: 24px; }
+  .ui-routing .leaflet-top.leaflet-left { bottom: 80px; }
 }
 
 /* SearchBar */

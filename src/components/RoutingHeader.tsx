@@ -9,7 +9,6 @@ interface Props {
   onEndSelect: (place: Place) => void
   onStartClear: () => void
   onEndClear: () => void
-  onSwap: () => void
   startQuickOptions: QuickOption[]
   endQuickOptions: QuickOption[]
 }
@@ -21,7 +20,6 @@ export default function RoutingHeader({
   onEndSelect,
   onStartClear,
   onEndClear,
-  onSwap,
   startQuickOptions,
   endQuickOptions,
 }: Props) {
@@ -29,30 +27,23 @@ export default function RoutingHeader({
     <div className="routing-header">
       <div className="routing-inputs">
         <SearchBar
-          label="Start"
+          label=""
           value={startPoint}
           onSelect={onStartSelect}
           onClear={onStartClear}
-          placeholder="Search start location…"
+          placeholder="Start location…"
           quickOptions={startQuickOptions}
         />
         <SearchBar
-          label="End"
+          label=""
           value={endPoint}
           onSelect={onEndSelect}
           onClear={onEndClear}
-          placeholder="Search destination…"
+          placeholder="Destination…"
           quickOptions={endQuickOptions}
           biasPoint={startPoint ?? undefined}
         />
       </div>
-      <button
-        className="routing-swap-btn"
-        aria-label="Swap start and end"
-        onClick={onSwap}
-      >
-        ⇅
-      </button>
     </div>
   )
 }
