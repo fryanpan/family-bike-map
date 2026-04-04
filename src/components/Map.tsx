@@ -58,6 +58,21 @@ function MapCenterController({ currentLocation }: { currentLocation: { lat: numb
   return null
 }
 
+function StartPointController({ startPoint }: { startPoint: { lat: number; lng: number } | null }) {
+  const map = useMap()
+  const prevRef = useRef<{ lat: number; lng: number } | null>(null)
+
+  useEffect(() => {
+    if (!startPoint) return
+    // Only zoom if startPoint actually changed (not just re-render)
+    if (prevRef.current?.lat === startPoint.lat && prevRef.current?.lng === startPoint.lng) return
+    prevRef.current = startPoint
+    map.setView([startPoint.lat, startPoint.lng], 14)
+  }, [startPoint, map])
+
+  return null
+}
+
 function FitBoundsController({ route }: { route: Route | null }) {
   const map = useMap()
 
@@ -183,6 +198,7 @@ export default function Map({
       style={{ width: '100%', height: '100%' }}
     >
       <MapCenterController currentLocation={currentLocation} />
+      <StartPointController startPoint={startPoint} />
       <FitBoundsController route={route} />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'

@@ -393,6 +393,7 @@ export default function App() {
               onSelect={handleEndSelect}
               placeholder="Search destination…"
               quickOptions={endQuickOptions}
+              biasPoint={startPoint ?? undefined}
             />
           </div>
 

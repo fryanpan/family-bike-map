@@ -15,9 +15,10 @@ interface Props {
   onSelect: (place: Place) => void
   placeholder: string
   quickOptions?: QuickOption[]
+  biasPoint?: { lat: number; lng: number }
 }
 
-export default function SearchBar({ label, value, onSelect, placeholder, quickOptions }: Props) {
+export default function SearchBar({ label, value, onSelect, placeholder, quickOptions, biasPoint }: Props) {
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState<Place[]>([])
   const [open, setOpen] = useState(false)
@@ -38,7 +39,7 @@ export default function SearchBar({ label, value, onSelect, placeholder, quickOp
     if (q.length >= 2) {
       debounceRef.current = setTimeout(async () => {
         try {
-          const results = await searchPlaces(q)
+          const results = await searchPlaces(q, biasPoint)
           setSuggestions(results)
           setOpen(results.length > 0)
         } catch {
@@ -49,7 +50,7 @@ export default function SearchBar({ label, value, onSelect, placeholder, quickOp
       setSuggestions([])
       setOpen(false)
     }
-  }, [])
+  }, [biasPoint])
 
   const handleSelect = useCallback(
     (place: Place) => {

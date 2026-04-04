@@ -50,15 +50,27 @@ function mapResults(results: NominatimResult[]): Place[] {
  * For address-like queries (containing digits), tries structured search first
  * (street + city params) which Nominatim handles better than free-text for
  * house number lookups. Falls back to free-text search if no results.
+ *
+ * @param bias - Optional lat/lng point to softly bias results toward (e.g. the start location).
+ *   Adds a viewbox of ~100km around the point; bounded=0 so worldwide results still appear
+ *   if nothing is found nearby.
  */
-export async function searchPlaces(query: string): Promise<Place[]> {
+export async function searchPlaces(query: string, bias?: { lat: number; lng: number }): Promise<Place[]> {
   if (!query || query.length < 2) return []
+
+  const biasParams = bias
+    ? {
+        viewbox: `${bias.lng - 1.5},${bias.lat - 1.0},${bias.lng + 1.5},${bias.lat + 1.0}`,
+        bounded: '0',
+      }
+    : {}
 
   const baseParams = {
     format: 'json',
     limit: '5',
     'accept-language': 'en',
     addressdetails: '1',
+    ...biasParams,
   }
 
   // For address-like queries, try structured Nominatim search first.
