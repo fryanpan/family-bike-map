@@ -1,5 +1,20 @@
 # Retrospective Log
 
+## 2026-04-04 — iOS rendering performance fix (training/trailer mode stall)
+
+**What worked:**
+- Root cause was quickly identifiable by reading `BikeMapOverlay.tsx`: individual React `<Polyline>` + `<Tooltip>` per OSM way, no memoization, SVG renderer.
+- Replacing the React component loop with an imperative `L.LayerGroup` + `L.canvas()` renderer is the canonical fix for this class of problem. Canvas is 5-10x faster than SVG for many lines on mobile, and Leaflet's built-in canvas hit-testing means tooltips still work.
+- `useMemo` for `allWays` is a minimal, low-risk addition that prevents unnecessary redraws.
+- Adding `escapeHtml()` to the imperative tooltip builder matches the XSS protection React JSX previously provided automatically — easy to miss when moving from JSX to string templates.
+
+**What didn't:**
+- N/A — the fix was straightforward once the root cause was clear.
+
+**Action:** When many map elements need rendering (>50 polylines), default to imperative Leaflet layer groups with canvas renderer rather than React component loops. React's reconciliation is not designed for hundreds of map primitives — it adds overhead with no benefit for non-reactive SVG/canvas elements.
+
+---
+
 ## 2026-04-03 — BC-258: SafetyClass removal (and why it took 4 prompts)
 
 **What worked:** Once the decision was made to eliminate SafetyClass entirely, the migration was systematic and complete. `classifyEdgeToItem()`, `getCostingFromPreferences()`, binary `RouteQuality`, and preference-driven re-routing are cleaner than the 3-level system.

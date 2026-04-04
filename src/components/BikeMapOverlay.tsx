@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useMap, useMapEvents } from 'react-leaflet'
+import L from 'leaflet'
 import { fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey, classifyOsmTagsToItem } from '../services/overpass'
 import { PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
 import type { OsmWay } from '../utils/types'
@@ -7,6 +8,10 @@ import type { OsmWay } from '../utils/types'
 // Max tiles allowed in viewport. Beyond this the map is too zoomed out to be
 // useful — show the "zoom in" prompt instead of firing many parallel requests.
 const MAX_VISIBLE_TILES = 12
+
+// Canvas renderer created once at module level — shared across all polylines.
+// Canvas is 5-10x faster than SVG for many lines on mobile.
+const canvasRenderer = L.canvas({ padding: 0.5 })
 
 /** Build a compact debug string of the OSM tags relevant to classification. */
 function getDebugTags(tags: Record<string, string>): string {
@@ -24,48 +29,76 @@ function getDebugTags(tags: Record<string, string>): string {
   return parts.join(' · ')
 }
 
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function buildTooltipHtml(itemName: string | null, tags: Record<string, string>): string {
+  const debugTags = getDebugTags(tags)
+  const name = tags.name ? ` — ${escapeHtml(tags.name)}` : ''
+  return `<div style="font-size:12px;line-height:1.5;max-width:240px">
+    <div style="font-weight:700">${itemName ?? 'Unknown'}${name}</div>
+    ${debugTags ? `<div style="color:#6b7280;font-size:11px;margin-top:1px">${escapeHtml(debugTags)}</div>` : ''}
+  </div>`
+}
+
 // itemName is computed from raw OSM tags at render time using the current profileKey.
 // This keeps the Overpass tile cache profile-independent: mode switching rerenders
 // instantly without any re-fetch.
-function OverlayLines({ ways, profileKey, preferredItemNames, showOtherPaths }: {
+//
+// Uses an imperative Leaflet layer group with canvas renderer to bypass React
+// reconciliation for individual polylines — canvas is 5-10x faster than SVG on mobile.
+function OverlayRenderer({ ways, profileKey, preferredItemNames, showOtherPaths }: {
   ways: OsmWay[]
   profileKey: string
   preferredItemNames: Set<string>
   showOtherPaths: boolean
 }) {
-  return (
-    <>
-      {ways.map((way) => {
-        const itemName = classifyOsmTagsToItem(way.tags, profileKey)
-        if (!showOtherPaths && (itemName === null || !preferredItemNames.has(itemName))) return null
-        const isPreferred = itemName !== null && preferredItemNames.has(itemName)
-        const color = isPreferred ? PREFERRED_COLOR : OTHER_COLOR
-        const debugTags = getDebugTags(way.tags)
-        return (
-          <Polyline
-            key={way.osmId}
-            positions={way.coordinates}
-            color={color}
-            weight={5}
-            opacity={0.7}
-          >
-            <Tooltip sticky direction="top" offset={[0, -4]}>
-              <div style={{ fontSize: 12, lineHeight: '1.5', maxWidth: 240 }}>
-                <div style={{ fontWeight: 700 }}>
-                  {itemName ?? 'Unknown'}{way.tags.name ? ` — ${way.tags.name}` : ''}
-                </div>
-                {debugTags && (
-                  <div style={{ color: '#6b7280', fontSize: 11, marginTop: 1 }}>
-                    {debugTags}
-                  </div>
-                )}
-              </div>
-            </Tooltip>
-          </Polyline>
-        )
-      })}
-    </>
-  )
+  const map = useMap()
+  const lgRef = useRef<L.LayerGroup | null>(null)
+
+  // Mount: create layer group and add to map. Unmount: remove it.
+  useEffect(() => {
+    const lg = L.layerGroup()
+    lg.addTo(map)
+    lgRef.current = lg
+    return () => {
+      lg.remove()
+      lgRef.current = null
+    }
+  }, [map])
+
+  // Redraw whenever data or display settings change.
+  useEffect(() => {
+    const lg = lgRef.current
+    if (!lg) return
+
+    lg.clearLayers()
+
+    for (const way of ways) {
+      const itemName = classifyOsmTagsToItem(way.tags, profileKey)
+      if (!showOtherPaths && (itemName === null || !preferredItemNames.has(itemName))) continue
+      const isPreferred = itemName !== null && preferredItemNames.has(itemName)
+      const color = isPreferred ? PREFERRED_COLOR : OTHER_COLOR
+
+      const polyline = L.polyline(way.coordinates, {
+        color,
+        weight: 5,
+        opacity: 0.7,
+        renderer: canvasRenderer,
+      })
+
+      polyline.bindTooltip(buildTooltipHtml(itemName, way.tags), {
+        sticky: true,
+        direction: 'top',
+        className: 'leaflet-tooltip',
+      })
+
+      polyline.addTo(lg)
+    }
+  }, [ways, profileKey, preferredItemNames, showOtherPaths])
+
+  return null
 }
 
 interface ControllerProps {
@@ -205,13 +238,18 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
     }
   }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const allWays: OsmWay[] = []
-  for (const ways of tileData.values()) {
-    for (const w of ways) allWays.push(w)
-  }
+  // Memoized to prevent OverlayRenderer from re-running its effect when tileData
+  // reference changes but contents haven't — e.g. unrelated parent re-renders.
+  const allWays = useMemo<OsmWay[]>(() => {
+    const result: OsmWay[] = []
+    for (const ways of tileData.values()) {
+      for (const w of ways) result.push(w)
+    }
+    return result
+  }, [tileData])
 
   if (!enabled || allWays.length === 0) return null
-  return <OverlayLines ways={allWays} profileKey={profileKey} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} />
+  return <OverlayRenderer ways={allWays} profileKey={profileKey} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} />
 }
 
 interface Props {
