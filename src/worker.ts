@@ -7,8 +7,13 @@
  * Routes:
  *   /api/valhalla/*   → proxy to valhalla1.openstreetmap.de
  *   /api/nominatim/*  → proxy to nominatim.openstreetmap.org
+ *   /api/overpass     → proxy to overpass-api.de with 7-day edge cache
  *   POST /api/feedback → create a Linear issue from user feedback
  */
+
+// Cloudflare Workers extends the standard CacheStorage interface with a `default`
+// cache instance. This is not in the DOM lib types, so we declare it here.
+declare const caches: CacheStorage & { default: Cache }
 
 type Env = {
   LINEAR_API_KEY?: string
@@ -39,6 +44,70 @@ export default {
       return new Response(await resp.arrayBuffer(), {
         status: resp.status,
         headers: { 'Content-Type': resp.headers.get('Content-Type') ?? 'application/json' },
+      })
+    }
+
+    // ── Overpass proxy with Cloudflare edge cache ─────────────────────
+    // Proxying through the Worker (same-origin) avoids iOS content blockers
+    // that block direct requests to overpass-api.de (a third-party domain).
+    //
+    // The Overpass API usage policy asks public-facing apps to avoid hitting
+    // the public API on every user request. We comply by caching tile responses
+    // at the Cloudflare edge (shared across ALL users, global) for 7 days.
+    // First visitor pays the Overpass cost; everyone else gets the cached response.
+    //
+    // ?row=&col=&profile= query params identify the tile for the cache key.
+    if (path === '/api/overpass') {
+      const row = url.searchParams.get('row') ?? ''
+      const col = url.searchParams.get('col') ?? ''
+      const profile = url.searchParams.get('profile') ?? ''
+
+      // Synthetic GET URL used as Cloudflare cache key (POST responses aren't cacheable).
+      const cacheKey = new Request(
+        `https://overpass-tile-cache.internal/v1/${row}/${col}/${encodeURIComponent(profile)}`,
+      )
+
+      const cached = await caches.default.match(cacheKey)
+      if (cached) {
+        return new Response(cached.body, {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Cache': 'HIT',
+          },
+        })
+      }
+
+      const body = await request.arrayBuffer()
+      const resp = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'BerlinBikeRouteFinder/0.1 (github.com/fryanpan/bike-route-finder)',
+        },
+        body,
+      })
+
+      const respBody = await resp.arrayBuffer()
+
+      // Only cache successful responses. Non-200 (429, 504) should not be cached
+      // so the client can retry against a fresh Overpass response later.
+      if (resp.ok) {
+        const toCache = new Response(respBody, {
+          headers: {
+            'Content-Type': 'application/json',
+            // 7-day TTL: long enough to be useful, short enough for OSM edits to appear.
+            'Cache-Control': 'public, max-age=604800',
+          },
+        })
+        await caches.default.put(cacheKey, toCache)
+      }
+
+      return new Response(respBody, {
+        status: resp.status,
+        headers: {
+          'Content-Type': resp.headers.get('Content-Type') ?? 'application/json',
+          'X-Cache': 'MISS',
+        },
       })
     }
 

@@ -3,7 +3,10 @@ import { BAD_SURFACES } from '../utils/classify'
 import type { LatLngBounds } from 'leaflet'
 import * as Sentry from '@sentry/react'
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
+// Proxy through our own Cloudflare Worker (same-origin request) to avoid:
+//   - Content blockers on iOS that block third-party domains
+//   - Direct dependency on overpass-api.de being accessible from the user's network
+const OVERPASS_URL = '/api/overpass'
 
 // Tile size in degrees. At Berlin latitude (52°N):
 //   0.1° lat ≈ 11.1 km, 0.1° lng ≈ 6.7 km → ~74 km² per tile
@@ -57,30 +60,57 @@ export function getCachedTile(row: number, col: number, profileKey: string): Osm
 // we get a proper HTTP error response rather than a silent network abort.
 const FETCH_TIMEOUT_MS = 35_000
 
-function buildQuery(bbox: { south: number; west: number; north: number; east: number }): string {
+// Maximum number of concurrent Overpass tile fetches.
+// Overpass-api.de rate-limits by IP; sending 4+ parallel requests from a single
+// viewport triggers HTTP 429 across all tiles simultaneously. Capping at 2 prevents
+// the 429 storm while still allowing two tiles to load in parallel.
+const MAX_CONCURRENT_FETCHES = 2
+
+export class Semaphore {
+  private _available: number
+  private _queue: Array<() => void> = []
+
+  constructor(count: number) {
+    this._available = count
+  }
+
+  async acquire(): Promise<void> {
+    if (this._available > 0) {
+      this._available--
+      return
+    }
+    return new Promise((resolve) => this._queue.push(resolve))
+  }
+
+  release(): void {
+    const next = this._queue.shift()
+    if (next) {
+      next()
+    } else {
+      this._available++
+    }
+  }
+}
+
+const _fetchSemaphore = new Semaphore(MAX_CONCURRENT_FETCHES)
+
+export function buildQuery(bbox: { south: number; west: number; north: number; east: number }): string {
   const { south, west, north, east } = bbox
   const b = `${south},${west},${north},${east}`
+  // 6 sub-queries instead of 18 — semantically equivalent but much less load on Overpass:
+  //   - Combine residential/path/track (all need bicycle!=no) into one regex highway filter.
+  //   - Combine all cycleway/cycleway:right/cycleway:left/cycleway:both value variants into
+  //     one regex key+value filter. The key regex ^cycleway(:right|:left|:both)?$ matches
+  //     the plain "cycleway" key and all three directional variants.
   return `
 [out:json][timeout:25];
 (
   way["highway"="cycleway"](${b});
   way["bicycle_road"="yes"](${b});
-  way["cycleway"="track"](${b});
-  way["cycleway"="lane"](${b});
-  way["cycleway"="opposite_track"](${b});
-  way["cycleway"="opposite_lane"](${b});
-  way["cycleway"="share_busway"](${b});
   way["highway"="living_street"](${b});
-  way["highway"="residential"]["bicycle"!="no"](${b});
-  way["highway"="path"]["bicycle"!="no"](${b});
-  way["highway"="footway"]["bicycle"~"yes|designated"](${b});
-  way["highway"="track"]["bicycle"!="no"](${b});
-  way["cycleway:right"="track"](${b});
-  way["cycleway:left"="track"](${b});
-  way["cycleway:both"="track"](${b});
-  way["cycleway:right"="lane"](${b});
-  way["cycleway:left"="lane"](${b});
-  way["cycleway:both"="lane"](${b});
+  way["highway"~"^(residential|path|track)$"]["bicycle"!="no"](${b});
+  way["highway"="footway"]["bicycle"~"^(yes|designated)$"](${b});
+  way[~"^cycleway(:right|:left|:both)?$"~"^(track|lane|opposite_track|opposite_lane|share_busway)$"](${b});
 );
 out geom;
 `
@@ -164,8 +194,10 @@ interface OverpassElement {
   geometry?: Array<{ lat: number; lon: number }>
 }
 
-async function fetchWithRetry(url: string, init: RequestInit, retries = 2): Promise<Response> {
-  const attempt = 3 - retries  // 0-based attempt number for logging
+const MAX_RETRIES = 2
+
+async function fetchWithRetry(url: string, init: RequestInit, retries = MAX_RETRIES): Promise<Response> {
+  const attempt = MAX_RETRIES - retries  // 0-based: 0 on first call, 1 on first retry, 2 on last retry
   try {
     const resp = await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (!resp.ok) {
@@ -178,7 +210,10 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = 2): Prom
     }
     return resp
   } catch (err) {
-    const isTimeout = err instanceof DOMException && err.name === 'TimeoutError'
+    // iOS Safari throws AbortError (not TimeoutError) when AbortSignal.timeout() fires.
+    // Both names indicate our client-side timeout was reached.
+    const isTimeout =
+      err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')
     console.warn(`[Overpass] ${isTimeout ? 'Fetch timeout' : 'Network error'} on attempt ${attempt + 1}:`, err)
     if (retries > 0) {
       const delay = attempt === 0 ? 3000 : 6000
@@ -222,9 +257,14 @@ export async function fetchBikeInfraForTile(row: number, col: number, profileKey
   const query = buildQuery(bbox)
   const tileCtx = { tile: `${row}:${col}`, bbox: `${bbox.south.toFixed(3)},${bbox.west.toFixed(3)}→${bbox.north.toFixed(3)},${bbox.east.toFixed(3)}` }
 
+  // Include tile coords and profile as query params so the Worker can build a
+  // deterministic cache key without parsing the Overpass query body.
+  const fetchUrl = `${OVERPASS_URL}?row=${row}&col=${col}&profile=${encodeURIComponent(profileKey)}`
+
   let response: Response
+  await _fetchSemaphore.acquire()
   try {
-    response = await fetchWithRetry(OVERPASS_URL, {
+    response = await fetchWithRetry(fetchUrl, {
       method: 'POST',
       body: `data=${encodeURIComponent(query)}`,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -233,6 +273,8 @@ export async function fetchBikeInfraForTile(row: number, col: number, profileKey
     console.error(`[Overpass] Tile ${row}:${col} failed after all retries:`, err)
     Sentry.captureException(err, { extra: { ...tileCtx, stage: 'fetch' } })
     throw err
+  } finally {
+    _fetchSemaphore.release()
   }
 
   if (!response.ok) {
@@ -249,7 +291,8 @@ export async function fetchBikeInfraForTile(row: number, col: number, profileKey
     console.warn(`[Overpass] Tile ${row}:${col} remark:`, data.remark)
     Sentry.captureMessage(`Overpass remark: ${data.remark}`, { level: 'warning', extra: tileCtx })
   }
-  console.debug(`[Overpass] Tile ${row}:${col} → ${data.elements.length} elements`)
+  const cacheStatus = response.headers.get('X-Cache') ?? 'N/A'
+  console.debug(`[Overpass] Tile ${row}:${col} → ${data.elements.length} elements (server cache: ${cacheStatus})`)
   const result = parseOverpassResponse(data, profileKey)
   _tileCache.set(key, result)
   return result

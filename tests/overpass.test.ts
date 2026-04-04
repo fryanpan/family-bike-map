@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, getVisibleTiles, isTileCached, getCachedTile } from '../src/services/overpass'
+import { tileKey, latLngToTile, getVisibleTiles, isTileCached, getCachedTile, Semaphore, buildQuery } from '../src/services/overpass'
 
 // Minimal LatLngBounds stub
 function makeBounds(south: number, west: number, north: number, east: number) {
@@ -73,5 +73,78 @@ describe('isTileCached / getCachedTile', () => {
   it('returns false/undefined before any fetch', () => {
     expect(isTileCached(9999, 9999, 'toddler')).toBe(false)
     expect(getCachedTile(9999, 9999, 'toddler')).toBeUndefined()
+  })
+})
+
+describe('Semaphore', () => {
+  it('allows up to N concurrent acquires immediately', async () => {
+    const sem = new Semaphore(2)
+    // Both acquires should resolve immediately without queuing
+    await sem.acquire()
+    await sem.acquire()
+    // Third acquire should queue — verify by releasing and reacquiring
+    let resolved = false
+    const pending = sem.acquire().then(() => { resolved = true })
+    expect(resolved).toBe(false)  // still waiting
+    sem.release()
+    await pending
+    expect(resolved).toBe(true)
+  })
+
+  it('serializes excess acquires through releases', async () => {
+    const sem = new Semaphore(1)
+    const order: number[] = []
+
+    await sem.acquire()
+    const p1 = sem.acquire().then(() => { order.push(1); sem.release() })
+    const p2 = sem.acquire().then(() => { order.push(2); sem.release() })
+
+    sem.release()  // unblocks p1
+    await Promise.all([p1, p2])
+    expect(order).toEqual([1, 2])  // FIFO ordering
+  })
+
+  it('restores count on release when queue is empty', async () => {
+    const sem = new Semaphore(2)
+    await sem.acquire()
+    sem.release()
+    // Should be back to full capacity — both acquires below should not block
+    await sem.acquire()
+    await sem.acquire()
+    // No assertion needed — if these hang the test times out
+  })
+})
+
+describe('buildQuery', () => {
+  const bbox = { south: 52.5, west: 13.4, north: 52.6, east: 13.5 }
+
+  it('includes the bounding box', () => {
+    const q = buildQuery(bbox)
+    expect(q).toContain('52.5,13.4,52.6,13.5')
+  })
+
+  it('has exactly 6 sub-queries (down from 18)', () => {
+    const q = buildQuery(bbox)
+    // Each sub-query starts with "way["
+    const subQueryCount = (q.match(/^\s*way\[/gm) ?? []).length
+    expect(subQueryCount).toBe(6)
+  })
+
+  it('combines cycleway variants with a key regex', () => {
+    const q = buildQuery(bbox)
+    expect(q).toContain('~"^cycleway(:right|:left|:both)?$"')
+    expect(q).toContain('~"^(track|lane|opposite_track|opposite_lane|share_busway)$"')
+  })
+
+  it('combines residential/path/track with a highway regex', () => {
+    const q = buildQuery(bbox)
+    expect(q).toContain('"highway"~"^(residential|path|track)$"')
+    expect(q).toContain('"bicycle"!="no"')
+  })
+
+  it('keeps footway with bicycle filter separate', () => {
+    const q = buildQuery(bbox)
+    expect(q).toContain('"highway"="footway"')
+    expect(q).toContain('"bicycle"~"^(yes|designated)$"')
   })
 })
