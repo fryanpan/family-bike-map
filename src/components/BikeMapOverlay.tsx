@@ -214,6 +214,8 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
     },
   })
 
+  const rafRef = useRef(0)
+
   useEffect(() => {
     if (enabled) {
       // Reset tile tracking only when the overlay is enabled (not on profile change).
@@ -222,27 +224,30 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
       loadingTilesRef.current = new Set()
       loadedTilesRef.current = new Set()
 
-      // Force Leaflet to recalculate the container size before querying bounds.
-      // On initial load the map may be initialized before CSS layout is applied,
-      // causing getBounds() to return a zero or undersized viewport — which means
-      // loadVisibleTiles() fetches the wrong (or no) tiles until the user pans/zooms.
+      // Force Leaflet to recalculate container size, then wait one frame for
+      // the browser to finish CSS layout before querying bounds. Without this
+      // delay, getBounds() can return a zero/undersized viewport on initial
+      // load, causing no tiles to be fetched until the user pans or zooms.
       map.invalidateSize()
+      rafRef.current = requestAnimationFrame(() => {
+        map.invalidateSize()
 
-      // Pre-populate tileData from the in-memory Overpass cache for instant display.
-      const bounds = map.getBounds()
-      const tiles = getVisibleTiles(bounds)
-      const preloaded = new Map<string, OsmWay[]>()
-      for (const t of tiles) {
-        const cached = getCachedTile(t.row, t.col)
-        if (cached) {
-          const k = tileKey(t.row, t.col)
-          preloaded.set(k, cached)
-          loadedTilesRef.current.add(k)
+        // Pre-populate tileData from the in-memory Overpass cache for instant display.
+        const bounds = map.getBounds()
+        const tiles = getVisibleTiles(bounds)
+        const preloaded = new Map<string, OsmWay[]>()
+        for (const t of tiles) {
+          const cached = getCachedTile(t.row, t.col)
+          if (cached) {
+            const k = tileKey(t.row, t.col)
+            preloaded.set(k, cached)
+            loadedTilesRef.current.add(k)
+          }
         }
-      }
-      setTileData(preloaded)
+        setTileData(preloaded)
 
-      loadVisibleTiles()
+        loadVisibleTiles()
+      })
     } else {
       generationRef.current++
       loadingTilesRef.current = new Set()
@@ -252,6 +257,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
     }
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      cancelAnimationFrame(rafRef.current)
     }
   }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
