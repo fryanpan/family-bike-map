@@ -448,7 +448,7 @@ button { font-family: inherit; cursor: pointer; }
 .maneuver-text  { font-size: 13px; line-height: 1.4; }
 .maneuver-meta  { font-size: 11px; color: #9ca3af; margin-top: 2px; }
 
-/* ── Quick-select options (below empty search input) ──── */
+/* ── Quick-select options (Google Maps style vertical list) ── */
 .quick-options {
   position: absolute;
   top: 100%;
@@ -460,28 +460,39 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 8px 24px rgba(0,0,0,.12);
   z-index: 600;
   margin-top: 4px;
-  padding: 6px;
-  display: flex;
-  gap: 6px;
+  overflow: hidden;
 }
 .quick-option-btn {
-  flex: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1.5px solid #e5e7eb;
-  border-radius: 8px;
-  background: #f9fafb;
-  font-size: 13px;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid #f3f4f6;
+  border-radius: 0;
+  background: #fff;
+  font-size: 14px;
   font-weight: 500;
-  color: #374151;
-  transition: all .15s;
-  white-space: nowrap;
+  color: #111827;
+  text-align: left;
+  transition: background .12s;
 }
-.quick-option-btn:hover { border-color: #93c5fd; background: #eff6ff; color: #2563eb; }
-.quick-option-icon { font-size: 15px; flex-shrink: 0; }
-.quick-option-label { overflow: hidden; text-overflow: ellipsis; }
+.quick-option-btn:last-child { border-bottom: none; }
+.quick-option-btn:hover { background: #f9fafb; }
+.quick-option-icon-wrap {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #e8eaed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+.quick-option-icon-wrap.location { background: #dbeafe; }
+.quick-option-label { font-size: 14px; font-weight: 500; color: #111827; }
 
 /* ── Current location dot (map) ─────────────────────── */
 .current-location-dot {

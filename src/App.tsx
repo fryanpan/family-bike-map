@@ -225,6 +225,24 @@ export default function App() {
     )
   }
 
+  function handleSelectCurrentLocationAsEnd() {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords
+        const geocoded = await reverseGeocode(lat, lng)
+        const place: Place = {
+          lat,
+          lng,
+          label: geocoded?.label ?? 'Current Location',
+          shortLabel: geocoded?.shortLabel ?? 'Current Location',
+        }
+        handleEndSelect(place)
+      },
+      () => { /* permission denied — ignore */ },
+    )
+  }
+
   function handleEndSelect(place: Place) {
     setEndPoint(place)
     if (startPoint) computeRoute(startPoint, place, selectedProfile, waypoints)
@@ -269,11 +287,26 @@ export default function App() {
       label: 'Current Location',
       icon: '📍',
       onSelect: handleSelectCurrentLocation,
+      isLocation: true,
     },
     {
       label: 'Home',
       icon: '🏠',
       onSelect: () => handleStartSelect(HOME_PLACE),
+    },
+  ]
+
+  const endQuickOptions: QuickOption[] = [
+    {
+      label: 'Current Location',
+      icon: '📍',
+      onSelect: handleSelectCurrentLocationAsEnd,
+      isLocation: true,
+    },
+    {
+      label: 'Home',
+      icon: '🏠',
+      onSelect: () => handleEndSelect(HOME_PLACE),
     },
   ]
 
@@ -359,6 +392,7 @@ export default function App() {
               value={endPoint}
               onSelect={handleEndSelect}
               placeholder="Search destination…"
+              quickOptions={endQuickOptions}
             />
           </div>
 

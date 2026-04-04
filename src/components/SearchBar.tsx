@@ -6,6 +6,7 @@ export interface QuickOption {
   label: string
   icon: string
   onSelect: () => void
+  isLocation?: boolean
 }
 
 interface Props {
@@ -100,7 +101,9 @@ export default function SearchBar({ label, value, onSelect, placeholder, quickOp
                 setFocused(false)
               }}
             >
-              <span className="quick-option-icon">{opt.icon}</span>
+              <span className={`quick-option-icon-wrap${opt.isLocation ? ' location' : ''}`}>
+                {opt.icon}
+              </span>
               <span className="quick-option-label">{opt.label}</span>
             </button>
           ))}
