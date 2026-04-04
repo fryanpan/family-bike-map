@@ -456,6 +456,7 @@ export default function App() {
               onSelect={handlePlaceSelect}
               placeholder="Search a place…"
               quickOptions={searchQuickOptions}
+              biasPoint={currentLocation ?? undefined}
             />
           </div>
         )}
