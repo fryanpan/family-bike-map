@@ -56,15 +56,16 @@ export default {
     // at the Cloudflare edge (shared across ALL users, global) for 7 days.
     // First visitor pays the Overpass cost; everyone else gets the cached response.
     //
-    // ?row=&col=&profile= query params identify the tile for the cache key.
+    // ?row=&col= query params identify the tile for the cache key.
+    // Profile is intentionally excluded — the Overpass query is profile-independent
+    // so one cache entry serves all modes.
     if (path === '/api/overpass') {
       const row = url.searchParams.get('row') ?? ''
       const col = url.searchParams.get('col') ?? ''
-      const profile = url.searchParams.get('profile') ?? ''
 
       // Synthetic GET URL used as Cloudflare cache key (POST responses aren't cacheable).
       const cacheKey = new Request(
-        `https://overpass-tile-cache.internal/v1/${row}/${col}/${encodeURIComponent(profile)}`,
+        `https://overpass-tile-cache.internal/v1/${row}/${col}`,
       )
 
       const cached = await caches.default.match(cacheKey)

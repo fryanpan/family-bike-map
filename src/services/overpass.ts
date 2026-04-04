@@ -14,13 +14,15 @@ const OVERPASS_URL = '/api/overpass'
 // already-loaded tiles rather than refetching the whole viewport.
 const TILE_DEGREES = 0.1
 
-// In-memory cache keyed by tile coords + profile.
+// In-memory cache keyed by tile coords only — profile-independent.
+// The Overpass query is identical for all profiles; itemName is computed
+// from raw tags at render time so mode switching is instant without re-fetching.
 // Tiles are never evicted — memory stays small for typical usage.
 const _tileCache = new Map<string, OsmWay[]>()
 
-/** Canonical key for a tile. */
-export function tileKey(row: number, col: number, profileKey: string): string {
-  return `${row}:${col}:${profileKey}`
+/** Canonical key for a tile (profile-independent). */
+export function tileKey(row: number, col: number): string {
+  return `${row}:${col}`
 }
 
 /** Tile row/col for a given latitude/longitude. */
@@ -47,13 +49,13 @@ export function getVisibleTiles(bounds: LatLngBounds): Array<{ row: number; col:
 }
 
 /** True if the tile data for this key is already cached. */
-export function isTileCached(row: number, col: number, profileKey: string): boolean {
-  return _tileCache.has(tileKey(row, col, profileKey))
+export function isTileCached(row: number, col: number): boolean {
+  return _tileCache.has(tileKey(row, col))
 }
 
 /** Return cached tile data, or undefined if not cached. */
-export function getCachedTile(row: number, col: number, profileKey: string): OsmWay[] | undefined {
-  return _tileCache.get(tileKey(row, col, profileKey))
+export function getCachedTile(row: number, col: number): OsmWay[] | undefined {
+  return _tileCache.get(tileKey(row, col))
 }
 
 // Client-side fetch timeout (ms). Must exceed the server-side Overpass timeout so
@@ -122,6 +124,10 @@ out geom;
  * Map raw OSM tags to a PROFILE_LEGEND item name, or null if not representable.
  * Must stay in sync with classifyEdgeToItem() in classify.ts.
  *
+ * Exported so BikeMapOverlay can call this at render time with the current
+ * profileKey — that way the cache is profile-independent and mode switching
+ * is instant (no re-fetch needed).
+ *
  * Valhalla↔OSM mapping: see classify.ts comment block for the full correlation.
  *
  * Physical separation (bollards/buffer on a painted lane) upgrades the classification
@@ -144,7 +150,7 @@ function hasSeparation(tags: Record<string, string>): boolean {
   return false
 }
 
-function classifyOsmTagsToItem(tags: Record<string, string>, profileKey: string): string | null {
+export function classifyOsmTagsToItem(tags: Record<string, string>, profileKey: string): string | null {
   if (BAD_SURFACES.has(tags.surface ?? '')) return null
 
   const highway     = tags.highway ?? ''
@@ -224,13 +230,15 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = MAX_RETR
   }
 }
 
-function parseOverpassResponse(data: { elements: OverpassElement[] }, profileKey: string): OsmWay[] {
+// Stored OsmWay objects have itemName: null — classification is deferred to render
+// time via classifyOsmTagsToItem() so the cache is profile-independent.
+function parseOverpassResponse(data: { elements: OverpassElement[] }): OsmWay[] {
   return data.elements
     .filter((el): el is OverpassElement & { geometry: NonNullable<OverpassElement['geometry']> } =>
       el.type === 'way' && el.geometry != null,
     )
     .map((el) => ({
-      itemName: classifyOsmTagsToItem(el.tags ?? {}, profileKey),
+      itemName: null,
       coordinates: el.geometry.map((pt): [number, number] => [pt.lat, pt.lon]),
       osmId: el.id,
       tags: el.tags ?? {},
@@ -240,9 +248,13 @@ function parseOverpassResponse(data: { elements: OverpassElement[] }, profileKey
 /**
  * Fetch bike infrastructure for a single tile, returning cached data immediately
  * if available. Retries up to 2 times on transient network/API errors.
+ *
+ * The returned OsmWay objects have itemName: null — call classifyOsmTagsToItem()
+ * with the current profileKey at render time to get the profile-specific name.
+ * This keeps the cache profile-independent so mode switching is instant.
  */
-export async function fetchBikeInfraForTile(row: number, col: number, profileKey: string): Promise<OsmWay[]> {
-  const key = tileKey(row, col, profileKey)
+export async function fetchBikeInfraForTile(row: number, col: number): Promise<OsmWay[]> {
+  const key = tileKey(row, col)
   if (_tileCache.has(key)) return _tileCache.get(key)!
 
   const bbox = {
@@ -257,9 +269,9 @@ export async function fetchBikeInfraForTile(row: number, col: number, profileKey
   const query = buildQuery(bbox)
   const tileCtx = { tile: `${row}:${col}`, bbox: `${bbox.south.toFixed(3)},${bbox.west.toFixed(3)}→${bbox.north.toFixed(3)},${bbox.east.toFixed(3)}` }
 
-  // Include tile coords and profile as query params so the Worker can build a
-  // deterministic cache key without parsing the Overpass query body.
-  const fetchUrl = `${OVERPASS_URL}?row=${row}&col=${col}&profile=${encodeURIComponent(profileKey)}`
+  // Include tile coords as query params so the Worker builds a deterministic
+  // cache key without parsing the Overpass query body.
+  const fetchUrl = `${OVERPASS_URL}?row=${row}&col=${col}`
 
   let response: Response
   await _fetchSemaphore.acquire()
@@ -293,7 +305,7 @@ export async function fetchBikeInfraForTile(row: number, col: number, profileKey
   }
   const cacheStatus = response.headers.get('X-Cache') ?? 'N/A'
   console.debug(`[Overpass] Tile ${row}:${col} → ${data.elements.length} elements (server cache: ${cacheStatus})`)
-  const result = parseOverpassResponse(data, profileKey)
+  const result = parseOverpassResponse(data)
   _tileCache.set(key, result)
   return result
 }
@@ -304,7 +316,7 @@ export async function fetchBikeInfraForTile(row: number, col: number, profileKey
  * Legacy single-viewport fetch kept for reference. Tiles are more efficient
  * because they are cached individually across pans.
  */
-export async function fetchBikeInfra(bounds: LatLngBounds, profileKey?: string): Promise<OsmWay[] | null> {
+export async function fetchBikeInfra(bounds: LatLngBounds): Promise<OsmWay[] | null> {
   const bbox = {
     south: bounds.getSouth(),
     west: bounds.getWest(),
@@ -318,7 +330,7 @@ export async function fetchBikeInfra(bounds: LatLngBounds, profileKey?: string):
 
   const tiles = getVisibleTiles(bounds)
   const results = await Promise.all(
-    tiles.map((t) => fetchBikeInfraForTile(t.row, t.col, profileKey ?? ''))
+    tiles.map((t) => fetchBikeInfraForTile(t.row, t.col))
   )
   return results.flat()
 }

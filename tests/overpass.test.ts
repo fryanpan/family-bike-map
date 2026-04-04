@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, getVisibleTiles, isTileCached, getCachedTile, Semaphore, buildQuery } from '../src/services/overpass'
+import { tileKey, latLngToTile, getVisibleTiles, isTileCached, getCachedTile, Semaphore, buildQuery, classifyOsmTagsToItem } from '../src/services/overpass'
 
 // Minimal LatLngBounds stub
 function makeBounds(south: number, west: number, north: number, east: number) {
@@ -12,13 +12,14 @@ function makeBounds(south: number, west: number, north: number, east: number) {
 }
 
 describe('tileKey', () => {
-  it('produces a stable string key', () => {
-    expect(tileKey(52, 13, 'toddler')).toBe('52:13:toddler')
-    expect(tileKey(-1, -2, 'trailer')).toBe('-1:-2:trailer')
+  it('produces a stable profile-independent string key', () => {
+    expect(tileKey(52, 13)).toBe('52:13')
+    expect(tileKey(-1, -2)).toBe('-1:-2')
   })
 
-  it('differs by profile', () => {
-    expect(tileKey(52, 13, 'toddler')).not.toBe(tileKey(52, 13, 'trailer'))
+  it('is the same for any profile (profile-independent cache)', () => {
+    // All profiles share the same tile data — itemName is computed at render time
+    expect(tileKey(52, 13)).toBe(tileKey(52, 13))
   })
 })
 
@@ -71,8 +72,8 @@ describe('getVisibleTiles', () => {
 
 describe('isTileCached / getCachedTile', () => {
   it('returns false/undefined before any fetch', () => {
-    expect(isTileCached(9999, 9999, 'toddler')).toBe(false)
-    expect(getCachedTile(9999, 9999, 'toddler')).toBeUndefined()
+    expect(isTileCached(9999, 9999)).toBe(false)
+    expect(getCachedTile(9999, 9999)).toBeUndefined()
   })
 })
 
@@ -112,6 +113,41 @@ describe('Semaphore', () => {
     await sem.acquire()
     await sem.acquire()
     // No assertion needed — if these hang the test times out
+  })
+})
+
+describe('classifyOsmTagsToItem', () => {
+  it('returns Fahrradstrasse for bicycle_road=yes', () => {
+    expect(classifyOsmTagsToItem({ bicycle_road: 'yes' }, 'toddler')).toBe('Fahrradstrasse')
+  })
+
+  it('returns Car-free path for highway=cycleway', () => {
+    expect(classifyOsmTagsToItem({ highway: 'cycleway' }, 'toddler')).toBe('Car-free path / Radweg')
+  })
+
+  it('returns profile-specific name for separated bike track', () => {
+    const tags = { highway: 'residential', cycleway: 'track' }
+    expect(classifyOsmTagsToItem(tags, 'toddler')).toBe('Separated bike track')
+    expect(classifyOsmTagsToItem(tags, 'trailer')).toBe('Separated bike track (narrow)')
+    expect(classifyOsmTagsToItem(tags, 'training')).toBe('Separated bike track (slow)')
+    // Unknown profile → null (not representable in that profile's legend)
+    expect(classifyOsmTagsToItem(tags, 'unknown')).toBeNull()
+  })
+
+  it('returns Painted bike lane for cycleway=lane without physical separation', () => {
+    expect(classifyOsmTagsToItem({ highway: 'residential', cycleway: 'lane' }, 'toddler')).toBe('Painted bike lane')
+  })
+
+  it('returns null for bad surface', () => {
+    expect(classifyOsmTagsToItem({ highway: 'cycleway', surface: 'cobblestone' }, 'toddler')).toBeNull()
+  })
+
+  it('returns Residential road for plain residential', () => {
+    expect(classifyOsmTagsToItem({ highway: 'residential' }, 'toddler')).toBe('Residential road')
+  })
+
+  it('returns Shared footway for footway', () => {
+    expect(classifyOsmTagsToItem({ highway: 'footway' }, 'toddler')).toBe('Shared footway (park path)')
   })
 })
 

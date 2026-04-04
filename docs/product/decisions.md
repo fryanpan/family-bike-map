@@ -1,5 +1,22 @@
 # Architecture & Product Decisions
 
+## 2026-04-04: Profile-independent Overpass tile cache
+
+**Context**: The Overpass query is identical for all rider profiles — `buildQuery()` has no profile-specific logic. But the tile cache key included `profileKey` (e.g. `525:134:toddler`), and `classifyOsmTagsToItem()` baked profile-specific `itemName` values into stored `OsmWay` objects at fetch time. Switching modes discarded all cached tiles and re-fetched everything.
+
+**Decision**: Make the tile cache profile-independent.
+- `tileKey(row, col)` — no profileKey in the key
+- `fetchBikeInfraForTile(row, col)` — no profileKey param; stores `itemName: null`
+- `classifyOsmTagsToItem(tags, profileKey)` — exported; called at render time in `BikeMapOverlay`
+- `OverlayController` — `useEffect` deps reduced to `[enabled]`; no reset on profile change
+- Cloudflare edge cache key drops profile too — one entry per tile shared across all modes and users
+
+**Result**: Mode switching is instant (just a re-render). Cloudflare cache is 3× more efficient (one entry per tile instead of one per tile-per-profile).
+
+**Status**: Implemented. 89 tests pass.
+
+---
+
 ## 2026-04-02: Tile-based bike map caching (BC-249)
 
 **Context**: The bike infrastructure overlay fetched the entire visible viewport as a single Overpass request on every pan/zoom. This caused visible blank areas during the 1–2s Overpass round-trip. Cache key used exact bbox coordinates so any pan produced a cache miss.

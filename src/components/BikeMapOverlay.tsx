@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet'
-import { fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey } from '../services/overpass'
+import { fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey, classifyOsmTagsToItem } from '../services/overpass'
 import { PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
 import type { OsmWay } from '../utils/types'
 
@@ -24,16 +24,21 @@ function getDebugTags(tags: Record<string, string>): string {
   return parts.join(' · ')
 }
 
-function OverlayLines({ ways, preferredItemNames, showOtherPaths }: {
+// itemName is computed from raw OSM tags at render time using the current profileKey.
+// This keeps the Overpass tile cache profile-independent: mode switching rerenders
+// instantly without any re-fetch.
+function OverlayLines({ ways, profileKey, preferredItemNames, showOtherPaths }: {
   ways: OsmWay[]
+  profileKey: string
   preferredItemNames: Set<string>
   showOtherPaths: boolean
 }) {
-  const visible = ways.filter((w) => showOtherPaths || (w.itemName !== null && preferredItemNames.has(w.itemName)))
   return (
     <>
-      {visible.map((way) => {
-        const isPreferred = way.itemName !== null && preferredItemNames.has(way.itemName)
+      {ways.map((way) => {
+        const itemName = classifyOsmTagsToItem(way.tags, profileKey)
+        if (!showOtherPaths && (itemName === null || !preferredItemNames.has(itemName))) return null
+        const isPreferred = itemName !== null && preferredItemNames.has(itemName)
         const color = isPreferred ? PREFERRED_COLOR : OTHER_COLOR
         const debugTags = getDebugTags(way.tags)
         return (
@@ -47,7 +52,7 @@ function OverlayLines({ ways, preferredItemNames, showOtherPaths }: {
             <Tooltip sticky direction="top" offset={[0, -4]}>
               <div style={{ fontSize: 12, lineHeight: '1.5', maxWidth: 240 }}>
                 <div style={{ fontWeight: 700 }}>
-                  {way.itemName ?? 'Unknown'}{way.tags.name ? ` — ${way.tags.name}` : ''}
+                  {itemName ?? 'Unknown'}{way.tags.name ? ` — ${way.tags.name}` : ''}
                 </div>
                 {debugTags && (
                   <div style={{ color: '#6b7280', fontSize: 11, marginTop: 1 }}>
@@ -76,6 +81,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
 
   // Per-tile way data. Tiles accumulate as the user pans — previously loaded
   // tiles remain visible so there's no blank-then-reload on pan/zoom.
+  // Keys are profile-independent tile keys (row:col).
   const [tileData, setTileData] = useState<Map<string, OsmWay[]>>(new Map())
 
   // Track which tiles are currently being fetched (avoids duplicate requests).
@@ -99,7 +105,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
 
     // Determine which tiles still need fetching.
     const toLoad = tiles.filter((t) => {
-      const k = tileKey(t.row, t.col, profileKey)
+      const k = tileKey(t.row, t.col)
       return !loadedTilesRef.current.has(k) && !loadingTilesRef.current.has(k)
     })
 
@@ -113,15 +119,15 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
 
     // Mark all as in-flight before launching requests (prevents double-fetch).
     for (const t of toLoad) {
-      loadingTilesRef.current.add(tileKey(t.row, t.col, profileKey))
+      loadingTilesRef.current.add(tileKey(t.row, t.col))
     }
 
     let anyError = false
 
     await Promise.all(toLoad.map(async (t) => {
-      const k = tileKey(t.row, t.col, profileKey)
+      const k = tileKey(t.row, t.col)
       try {
-        const ways = await fetchBikeInfraForTile(t.row, t.col, profileKey)
+        const ways = await fetchBikeInfraForTile(t.row, t.col)
         if (generationRef.current !== generation) return  // reset happened — discard
         loadedTilesRef.current.add(k)
         setTileData((prev) => {
@@ -141,15 +147,15 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
 
     // Only report error if we have no data at all for the visible area.
     const hasAnyVisibleData = tiles.some((t) =>
-      loadedTilesRef.current.has(tileKey(t.row, t.col, profileKey)) ||
-      isTileCached(t.row, t.col, profileKey)
+      loadedTilesRef.current.has(tileKey(t.row, t.col)) ||
+      isTileCached(t.row, t.col)
     )
     if (anyError && !hasAnyVisibleData) {
       onStatusChange('error')
     } else {
       onStatusChange('ok')
     }
-  }, [enabled, profileKey, map, onStatusChange])
+  }, [enabled, map, onStatusChange])
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -166,9 +172,8 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
 
   useEffect(() => {
     if (enabled) {
-      // Reset tile tracking when profile changes or overlay is re-enabled.
-      // Cached tile data in overpass.ts is still valid — only reset in-memory
-      // tracking so we re-populate tileData for the current viewport.
+      // Reset tile tracking only when the overlay is enabled (not on profile change).
+      // Tile data is profile-independent — mode switching just rerenders with new itemNames.
       generationRef.current++
       loadingTilesRef.current = new Set()
       loadedTilesRef.current = new Set()
@@ -178,9 +183,9 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
       const tiles = getVisibleTiles(bounds)
       const preloaded = new Map<string, OsmWay[]>()
       for (const t of tiles) {
-        const cached = getCachedTile(t.row, t.col, profileKey)
+        const cached = getCachedTile(t.row, t.col)
         if (cached) {
-          const k = tileKey(t.row, t.col, profileKey)
+          const k = tileKey(t.row, t.col)
           preloaded.set(k, cached)
           loadedTilesRef.current.add(k)
         }
@@ -198,7 +203,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [enabled, profileKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const allWays: OsmWay[] = []
   for (const ways of tileData.values()) {
@@ -206,7 +211,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
   }
 
   if (!enabled || allWays.length === 0) return null
-  return <OverlayLines ways={allWays} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} />
+  return <OverlayLines ways={allWays} profileKey={profileKey} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} />
 }
 
 interface Props {
