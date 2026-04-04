@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { searchPlaces } from '../services/geocoding'
+import { getPlaceDetail } from '../utils/types'
 import type { Place } from '../utils/types'
 
 export interface QuickOption {
@@ -132,7 +133,7 @@ export default function SearchBar({ label, value, onSelect, onClear, placeholder
             <li key={i} className="suggestion-item" onMouseDown={() => handleSelect(s)}>
               <span className="suggestion-name">{s.shortLabel}</span>
               <span className="suggestion-detail">
-                {s.label.split(', ').slice(1, 3).join(', ')}
+                {getPlaceDetail(s.label)}
               </span>
             </li>
           ))}

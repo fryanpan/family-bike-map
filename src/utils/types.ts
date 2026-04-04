@@ -10,6 +10,11 @@ export interface Place extends LatLng {
   shortLabel: string
 }
 
+/** Extract city/district from a Nominatim display_name (e.g. "Kreuzberg, Berlin"). */
+export function getPlaceDetail(label: string): string {
+  return label.split(', ').slice(1, 3).join(', ')
+}
+
 export type BicycleType = 'Hybrid' | 'Road' | 'Cross' | 'Mountain'
 
 export interface BicycleCostingOptions {

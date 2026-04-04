@@ -304,8 +304,6 @@ button { font-family: inherit; cursor: pointer; }
 }
 .search-clear-btn:hover { color: #374151; background: #f3f4f6; }
 
-/* (Swap button styles moved to .routing-swap-btn above) */
-
 .suggestions {
   position: absolute;
   top: 100%;

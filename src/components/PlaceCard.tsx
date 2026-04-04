@@ -1,3 +1,4 @@
+import { getPlaceDetail } from '../utils/types'
 import type { Place } from '../utils/types'
 
 interface Props {
@@ -7,8 +8,7 @@ interface Props {
 }
 
 export default function PlaceCard({ place, onDirections, onBack }: Props) {
-  // Extract city/district from the full label (comma-separated parts after the first)
-  const detail = place.label.split(', ').slice(1, 3).join(', ')
+  const detail = getPlaceDetail(place.label)
 
   return (
     <div className="place-card">

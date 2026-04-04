@@ -3,7 +3,6 @@ import {
   classifyEdgeToItem,
   getDefaultPreferredItems,
   computeRouteQuality,
-  filterVisibleSegments,
 } from '../src/utils/classify'
 import type { ValhallaEdge, RouteSegment } from '../src/utils/types'
 
@@ -240,46 +239,3 @@ describe('computeRouteQuality — binary preferred/other model', () => {
   })
 })
 
-// ── filterVisibleSegments — regression for BC-268 ────────────────────────────
-//
-// Bug: RouteDisplay filtered out non-preferred segments, so only green (preferred)
-// segments appeared on the route. ALL route segments must always be visible so
-// the user sees the complete path. Non-preferred segments render orange.
-//
-// If this test breaks, someone has re-introduced preference-based filtering in
-// the route rendering path — which is the regression we're guarding against.
-
-describe('filterVisibleSegments — all route segments always visible', () => {
-  const seg = (itemName: string | null): RouteSegment => ({
-    itemName,
-    coordinates: [[0, 0], [1, 1]],
-  })
-
-  it('returns all segments unchanged (preferred, non-preferred, and null)', () => {
-    const preferred = seg('Car-free path / Radweg')
-    const nonPreferred = seg('Painted bike lane')
-    const nullSeg = seg(null)
-    const segments = [preferred, nonPreferred, nullSeg]
-    const result = filterVisibleSegments(segments)
-    expect(result).toEqual(segments)
-    expect(result.length).toBe(3)
-  })
-
-  it('returns non-preferred segments even when they are not in preferred set', () => {
-    const segments = [seg('Residential road'), seg('Shared bus lane')]
-    const result = filterVisibleSegments(segments)
-    expect(result.length).toBe(2)
-    expect(result[0].itemName).toBe('Residential road')
-    expect(result[1].itemName).toBe('Shared bus lane')
-  })
-
-  it('returns segments with null itemName (cobblestone, arterial) — still part of the route', () => {
-    const segments = [seg(null), seg(null)]
-    const result = filterVisibleSegments(segments)
-    expect(result.length).toBe(2)
-  })
-
-  it('returns empty array for empty input', () => {
-    expect(filterVisibleSegments([])).toEqual([])
-  })
-})

@@ -263,13 +263,6 @@ interface ClassifiedPoint {
  * The showOtherPaths toggle (in the Legend) controls the OVERLAY (background
  * infrastructure tiles), NOT the route segments returned here.
  *
- * This function is extracted as a pure function for regression-test coverage.
- * Do NOT add preference-based filtering here — that broke display before.
- */
-export function filterVisibleSegments(segments: RouteSegment[]): RouteSegment[] {
-  return segments
-}
-
 /**
  * Group an array of { itemName, coord } points into contiguous RouteSegments of the same item.
  */
