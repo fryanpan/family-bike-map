@@ -146,7 +146,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError]         = useState<string | null>(null)
 
-  const [overlayEnabled, setOverlayEnabled] = useState(true)
+  const overlayEnabled = true
   const [overlayStatus, setOverlayStatus]   = useState('idle')
 
   // Derived: has the user customized their travel mode's preferred path types?
@@ -426,17 +426,12 @@ export default function App() {
           />
         </div>
 
-        {/* Bike layer toggle */}
-        <div className="map-bike-layer-toggle">
-          <button
-            className={`bike-layer-btn${overlayEnabled ? ' active' : ''}`}
-            onClick={() => setOverlayEnabled((v) => !v)}
-            title="Toggle bike infrastructure layer"
-          >
-            🗺️ Bike Layer
-          </button>
-          {overlayStatusMsg && <p className="bike-layer-status">{overlayStatusMsg}</p>}
-        </div>
+        {/* Bike layer status */}
+        {overlayStatusMsg && (
+          <div className="map-bike-layer-toggle">
+            <p className="bike-layer-status">{overlayStatusMsg}</p>
+          </div>
+        )}
 
         {/* --- Floating UI card (changes per uiState) --- */}
 
