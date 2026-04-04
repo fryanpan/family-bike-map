@@ -58,7 +58,7 @@ function mapResults(results: NominatimResult[]): Place[] {
 export async function searchPlaces(query: string, bias?: { lat: number; lng: number }): Promise<Place[]> {
   if (!query || query.length < 2) return []
 
-  const biasParams = bias
+  const biasParams: Record<string, string> = bias
     ? {
         viewbox: `${bias.lng - 1.5},${bias.lat - 1.0},${bias.lng + 1.5},${bias.lat + 1.0}`,
         bounded: '0',
