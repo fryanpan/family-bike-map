@@ -35,7 +35,7 @@ button { font-family: inherit; cursor: pointer; }
 .map-wrap {
   flex: 1 1 auto;
   position: relative;
-  padding-bottom: 108px; /* space for collapsed panel handle + search strip */
+  padding-bottom: 130px; /* space for collapsed panel handle + search strip (incl. route summary) */
 }
 .map-wrap > .leaflet-container {
   width: 100%;
@@ -58,7 +58,7 @@ button { font-family: inherit; cursor: pointer; }
   transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .panel-open  { transform: translateY(0); }
-.panel-closed { transform: translateY(calc(100% - 108px)); }
+.panel-closed { transform: translateY(calc(100% - 130px)); }
 
 .panel-handle {
   display: flex;
@@ -98,10 +98,15 @@ button { font-family: inherit; cursor: pointer; }
 .panel-open .collapsed-strip { display: none; }
 .panel-closed .collapsed-strip {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
   padding: 4px 12px 10px;
   cursor: pointer;
+}
+.cs-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .cs-endpoint {
   flex: 1;
@@ -136,11 +141,18 @@ button { font-family: inherit; cursor: pointer; }
   flex-shrink: 0;
   line-height: 1;
 }
+.cs-route-summary {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+  padding: 0 2px;
+  text-align: center;
+}
 
 /* ── On-map bike layer toggle ──────────────────────────── */
 .map-bike-layer-toggle {
   position: absolute;
-  bottom: 122px; /* above panel handle + search strip on mobile */
+  bottom: 144px; /* above panel handle + search strip on mobile */
   left: 10px;
   z-index: 450;
 }
@@ -202,6 +214,11 @@ button { font-family: inherit; cursor: pointer; }
   color: #6b7280;
   margin-bottom: 4px;
 }
+.search-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
 .search-input {
   width: 100%;
   padding: 10px 12px;
@@ -212,7 +229,42 @@ button { font-family: inherit; cursor: pointer; }
   background: #f9fafb;
   transition: border-color .15s, background .15s;
 }
+.search-input.search-input-clearable { padding-right: 36px; }
 .search-input:focus { border-color: #2563eb; background: #fff; }
+.search-clear-btn {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .12s, background .12s;
+}
+.search-clear-btn:hover { color: #374151; background: #f3f4f6; }
+
+/* Swap button */
+.swap-btn-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: -2px 0;
+}
+.swap-btn {
+  background: #f9fafb;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 8px;
+  color: #6b7280;
+  font-size: 16px;
+  padding: 4px 10px;
+  line-height: 1;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.swap-btn:hover { border-color: #93c5fd; color: #2563eb; background: #eff6ff; }
 
 .suggestions {
   position: absolute;

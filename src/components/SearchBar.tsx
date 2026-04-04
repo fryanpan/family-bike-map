@@ -13,12 +13,13 @@ interface Props {
   label: string
   value: Place | null
   onSelect: (place: Place) => void
+  onClear?: () => void
   placeholder: string
   quickOptions?: QuickOption[]
   biasPoint?: { lat: number; lng: number }
 }
 
-export default function SearchBar({ label, value, onSelect, placeholder, quickOptions, biasPoint }: Props) {
+export default function SearchBar({ label, value, onSelect, onClear, placeholder, quickOptions, biasPoint }: Props) {
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState<Place[]>([])
   const [open, setOpen] = useState(false)
@@ -78,18 +79,33 @@ export default function SearchBar({ label, value, onSelect, placeholder, quickOp
   return (
     <div className="search-bar" ref={containerRef}>
       <label className="search-label">{label}</label>
-      <input
-        type="text"
-        className="search-input"
-        value={query}
-        onChange={handleChange}
-        placeholder={placeholder}
-        onFocus={() => {
-          setFocused(true)
-          if (suggestions.length > 0) setOpen(true)
-        }}
-        onBlur={() => setFocused(false)}
-      />
+      <div className="search-input-wrap">
+        <input
+          type="text"
+          className={`search-input${value && onClear ? ' search-input-clearable' : ''}`}
+          value={query}
+          onChange={handleChange}
+          placeholder={placeholder}
+          onFocus={() => {
+            setFocused(true)
+            if (suggestions.length > 0) setOpen(true)
+          }}
+          onBlur={() => setFocused(false)}
+        />
+        {value && onClear && (
+          <button
+            className="search-clear-btn"
+            aria-label="Clear"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setQuery('')
+              onClear()
+            }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
       {showQuickOptions && (
         <div className="quick-options">
           {quickOptions.map((opt, i) => (
