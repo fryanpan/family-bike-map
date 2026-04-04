@@ -16,10 +16,7 @@ alwaysApply: true
 - Coverage target: ~80% of new code
 - Test key interfaces, nontrivial logic, and data transformations
 - Do NOT test: simple pass-throughs, configuration/constants, third-party library behavior
-- Run ALL tests (new + existing) before declaring done: `bun test`
-- **Routing integration tests** are skipped by default (external API, CI-unreliable). Run them locally with `RUN_INTEGRATION=1 bun test` whenever changing:
-  - `src/utils/classify.ts` (classifyEdge, computeRouteQuality, safety classification logic)
-  - `src/services/routing.ts` (routing profiles, costing options, Valhalla API calls)
+- Run ALL tests (new + existing) before declaring done
 - Stay focused on the task — do not refactor unrelated code
 
 ## Commit Discipline
