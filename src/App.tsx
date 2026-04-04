@@ -245,7 +245,20 @@ export default function App() {
     setEndPoint(destination)
     setUiState('routing')
 
-    const loc = await resolveCurrentLocation()
+    // Use the already-tracked location if available (instant, no extra prompt),
+    // otherwise fall back to a one-shot geolocation request.
+    let loc: Place | null = null
+    if (currentLocation) {
+      const geocoded = await reverseGeocode(currentLocation.lat, currentLocation.lng)
+      loc = {
+        ...currentLocation,
+        label: geocoded?.label ?? 'Current Location',
+        shortLabel: geocoded?.shortLabel ?? 'Current Location',
+      }
+    } else {
+      loc = await resolveCurrentLocation()
+    }
+
     if (loc) {
       setStartPoint(loc)
       void computeRoute(loc, destination, selectedProfile, waypoints)
@@ -443,6 +456,7 @@ export default function App() {
               onSelect={handlePlaceSelect}
               placeholder="Search a place…"
               quickOptions={searchQuickOptions}
+              biasPoint={currentLocation ?? undefined}
             />
           </div>
         )}

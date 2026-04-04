@@ -38,6 +38,12 @@ button { font-family: inherit; cursor: pointer; }
   height: 100%;
 }
 
+/* Push Leaflet zoom controls below the floating search card */
+.leaflet-top.leaflet-left { top: 60px; }
+@media (min-width: 768px) {
+  .leaflet-top.leaflet-left { left: 340px; top: 12px; }
+}
+
 /* ── Floating cards ───────────────────────────────────── */
 .floating-card {
   position: absolute;
