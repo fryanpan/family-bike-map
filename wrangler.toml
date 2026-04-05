@@ -12,5 +12,10 @@ not_found_handling = "single-page-application"
 pattern = "bike-map.fryanpan.com"
 custom_domain = true
 
+[[kv_namespaces]]
+binding = "CLASSIFICATION_RULES"
+id = "TBD_CREATE_WITH_wrangler_kv_namespace_create"
+preview_id = "TBD_CREATE_WITH_wrangler_kv_namespace_create_preview"
+
 [observability]
 enabled = true
