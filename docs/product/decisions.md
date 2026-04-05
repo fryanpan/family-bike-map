@@ -1,5 +1,19 @@
 # Architecture & Product Decisions
 
+## 2026-04-05: Classification audit tool with per-region rules
+
+**Context**: OSM cycling tags vary in meaning across cities — the same `cycleway=track` tag represents world-class infrastructure in Copenhagen but often a narrow bumpy sidewalk in Berlin. Our hardcoded classifier can't handle regional variations.
+
+**Decision**: Build an admin audit tool with server-side classification rules.
+- Audit panel scans cities via Overpass, groups ways by tag pattern, shows Mapillary imagery
+- Reviewers can override classifications per region
+- Rules stored in Cloudflare KV, fetched on app load, checked before hardcoded logic
+- Entry point: subtle gear icon on the map (admin-only by obscurity)
+
+**Result**: Regional classification quality can improve without code deploys.
+
+---
+
 ## 2026-04-04: Profile-independent Overpass tile cache
 
 **Context**: The Overpass query is identical for all rider profiles — `buildQuery()` has no profile-specific logic. But the tile cache key included `profileKey` (e.g. `525:134:toddler`), and `classifyOsmTagsToItem()` baked profile-specific `itemName` values into stored `OsmWay` objects at fetch time. Switching travel modes discarded all cached tiles and re-fetched everything.

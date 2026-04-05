@@ -15,11 +15,20 @@
 // cache instance. This is not in the DOM lib types, so we declare it here.
 declare const caches: CacheStorage & { default: Cache }
 
+// Minimal KV type — the full @cloudflare/workers-types package isn't in the
+// tsconfig `types` array (this is a Vite-managed project), so we declare the
+// subset we actually use.
+interface KVNamespace {
+  get(key: string): Promise<string | null>
+  put(key: string, value: string): Promise<void>
+}
+
 type Env = {
   LINEAR_API_KEY?: string
   LINEAR_TEAM_ID?: string
   LINEAR_PROJECT_ID?: string
   LINEAR_ASSIGNEE_ID?: string
+  CLASSIFICATION_RULES: KVNamespace
   ASSETS: { fetch: (request: Request) => Promise<Response> }
 }
 
@@ -134,6 +143,47 @@ export default {
     // ── Feedback → Linear ─────────────────────────────────────────────
     if (path === '/api/feedback' && request.method === 'POST') {
       return handleFeedback(request, env)
+    }
+
+    // ── Classification rules (KV-backed) ──────────────────────────────
+    const rulesMatch = path.match(/^\/api\/rules\/([a-zA-Z0-9_-]+)$/)
+    if (rulesMatch) {
+      const region = rulesMatch[1]
+      const kvKey = `rules:${region}`
+
+      if (request.method === 'GET') {
+        const value = await env.CLASSIFICATION_RULES.get(kvKey)
+        const body = value ?? JSON.stringify({ rules: [], legendItems: [] })
+        return new Response(body, {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      if (request.method === 'PUT') {
+        let body: unknown
+        try {
+          body = await request.json()
+        } catch {
+          return Response.json({ error: 'Invalid JSON' }, { status: 400 })
+        }
+
+        if (
+          typeof body !== 'object' ||
+          body === null ||
+          !Array.isArray((body as Record<string, unknown>).rules) ||
+          !Array.isArray((body as Record<string, unknown>).legendItems)
+        ) {
+          return Response.json(
+            { error: 'Body must contain "rules" (array) and "legendItems" (array)' },
+            { status: 400 },
+          )
+        }
+
+        await env.CLASSIFICATION_RULES.put(kvKey, JSON.stringify(body))
+        return Response.json({ ok: true })
+      }
+
+      return Response.json({ error: 'Method not allowed' }, { status: 405 })
     }
 
     // ── All other paths: serve static assets via [assets] binding ─────

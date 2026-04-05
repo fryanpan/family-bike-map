@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { Marker, MapContainer, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet'
 import { PREFERRED_COLOR, OTHER_COLOR, getLegendItem } from '../utils/classify'
 import BikeMapOverlay from './BikeMapOverlay'
+import type { ClassificationRule } from '../services/rules'
 import type { Place, Route, RouteSegment } from '../utils/types'
 
 // Fix Leaflet default icons broken by Vite's asset bundling
@@ -182,6 +183,7 @@ interface Props {
   preferredItemNames: Set<string>
   showOtherPaths: boolean
   flyToPlace?: Place | null
+  regionRules?: ClassificationRule[]
 }
 
 export default function Map({
@@ -197,6 +199,7 @@ export default function Map({
   preferredItemNames,
   showOtherPaths,
   flyToPlace,
+  regionRules,
 }: Props) {
   return (
     <MapContainer
@@ -220,6 +223,7 @@ export default function Map({
         showOtherPaths={showOtherPaths}
         hasRoute={!!route}
         onStatusChange={onOverlayStatusChange}
+        regionRules={regionRules}
       />
 
       <RouteDisplay

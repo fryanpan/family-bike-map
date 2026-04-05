@@ -3,6 +3,7 @@ import { useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import { fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey, classifyOsmTagsToItem } from '../services/overpass'
 import { PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
+import type { ClassificationRule } from '../services/rules'
 import type { OsmWay } from '../utils/types'
 
 // Max tiles allowed in viewport. Beyond this the map is too zoomed out to be
@@ -48,12 +49,13 @@ function buildTooltipHtml(itemName: string | null, tags: Record<string, string>)
 //
 // Uses an imperative Leaflet layer group with canvas renderer to bypass React
 // reconciliation for individual polylines — canvas is 5-10x faster than SVG on mobile.
-function OverlayRenderer({ ways, profileKey, preferredItemNames, showOtherPaths, hasRoute }: {
+function OverlayRenderer({ ways, profileKey, preferredItemNames, showOtherPaths, hasRoute, regionRules }: {
   ways: OsmWay[]
   profileKey: string
   preferredItemNames: Set<string>
   showOtherPaths: boolean
   hasRoute: boolean
+  regionRules?: ClassificationRule[]
 }) {
   const map = useMap()
   const lgRef = useRef<L.LayerGroup | null>(null)
@@ -80,7 +82,7 @@ function OverlayRenderer({ ways, profileKey, preferredItemNames, showOtherPaths,
     const overlayWeight = hasRoute ? 3 : 5
 
     for (const way of ways) {
-      const itemName = classifyOsmTagsToItem(way.tags, profileKey)
+      const itemName = classifyOsmTagsToItem(way.tags, profileKey, regionRules)
       if (!showOtherPaths && (itemName === null || !preferredItemNames.has(itemName))) continue
       const isPreferred = itemName !== null && preferredItemNames.has(itemName)
       const color = isPreferred ? PREFERRED_COLOR : OTHER_COLOR
@@ -100,7 +102,7 @@ function OverlayRenderer({ ways, profileKey, preferredItemNames, showOtherPaths,
 
       polyline.addTo(lg)
     }
-  }, [ways, profileKey, preferredItemNames, showOtherPaths, hasRoute])
+  }, [ways, profileKey, preferredItemNames, showOtherPaths, hasRoute, regionRules])
 
   return null
 }
@@ -112,9 +114,10 @@ interface ControllerProps {
   showOtherPaths: boolean
   hasRoute: boolean
   onStatusChange: (status: string) => void
+  regionRules?: ClassificationRule[]
 }
 
-function OverlayController({ enabled, profileKey, preferredItemNames, showOtherPaths, hasRoute, onStatusChange }: ControllerProps) {
+function OverlayController({ enabled, profileKey, preferredItemNames, showOtherPaths, hasRoute, onStatusChange, regionRules }: ControllerProps) {
   const map = useMap()
 
   // Per-tile way data. Tiles accumulate as the user pans — previously loaded
@@ -272,7 +275,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, showOtherP
   }, [tileData])
 
   if (!enabled || allWays.length === 0) return null
-  return <OverlayRenderer ways={allWays} profileKey={profileKey} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} hasRoute={hasRoute} />
+  return <OverlayRenderer ways={allWays} profileKey={profileKey} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} hasRoute={hasRoute} regionRules={regionRules} />
 }
 
 interface Props {
@@ -282,8 +285,9 @@ interface Props {
   showOtherPaths: boolean
   hasRoute: boolean
   onStatusChange: (status: string) => void
+  regionRules?: ClassificationRule[]
 }
 
-export default function BikeMapOverlay({ enabled, profileKey, preferredItemNames, showOtherPaths, hasRoute, onStatusChange }: Props) {
-  return <OverlayController enabled={enabled} profileKey={profileKey} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} hasRoute={hasRoute} onStatusChange={onStatusChange} />
+export default function BikeMapOverlay({ enabled, profileKey, preferredItemNames, showOtherPaths, hasRoute, onStatusChange, regionRules }: Props) {
+  return <OverlayController enabled={enabled} profileKey={profileKey} preferredItemNames={preferredItemNames} showOtherPaths={showOtherPaths} hasRoute={hasRoute} onStatusChange={onStatusChange} regionRules={regionRules} />
 }

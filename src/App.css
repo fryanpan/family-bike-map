@@ -306,7 +306,7 @@ button { font-family: inherit; cursor: pointer; }
 /* ── Travel mode selector map overlay ─────────────────── */
 .map-travel-mode {
   position: absolute;
-  bottom: 20px;
+  top: 60px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 450;
@@ -663,15 +663,14 @@ button { font-family: inherit; cursor: pointer; }
 }
 /* When routing, push map-top-right controls below the routing header */
 .ui-routing .map-top-right { top: 140px; }
+.ui-routing .map-travel-mode { top: 120px; }
 @media (min-width: 768px) {
   .map-top-right {
     top: 12px;
   }
   .ui-routing .map-top-right { top: 12px; right: 10px; }
-  /* Desktop: restore travel mode to top, reset mobile bottom offsets */
-  .map-travel-mode { top: 12px; bottom: auto; }
-  .ui-place-detail .map-travel-mode { bottom: auto; top: 12px; }
-  .ui-routing .map-travel-mode { top: 12px; bottom: auto; }
+  .map-travel-mode { top: 12px; }
+  .ui-routing .map-travel-mode { top: 12px; }
 }
 
 /* ── Map legend ─────────────────────────────────────── */
@@ -1053,6 +1052,464 @@ button { font-family: inherit; cursor: pointer; }
 }
 .feedback-done-icon { font-size: 40px; margin-bottom: 8px; }
 .feedback-done-msg  { font-size: 16px; font-weight: 600; color: #111827; }
+
+/* ── Audit panel overlay ──────────────────────────────── */
+.audit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+.audit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.audit-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #111827;
+}
+.audit-close-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #9ca3af;
+  padding: 4px 6px;
+  line-height: 1;
+  border-radius: 6px;
+}
+.audit-close-btn:hover { color: #dc2626; background: #fef2f2; }
+
+.audit-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #f3f4f6;
+}
+.audit-select {
+  padding: 7px 10px;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #f9fafb;
+  outline: none;
+}
+.audit-select:focus { border-color: #2563eb; }
+.audit-scan-btn {
+  padding: 7px 18px;
+  font-size: 13px;
+  border-radius: 8px;
+  width: auto;
+}
+.audit-meta {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.audit-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.audit-search-input {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  background: #f9fafb;
+}
+.audit-search-input:focus { border-color: #2563eb; background: #fff; }
+
+.audit-groups {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.audit-empty {
+  text-align: center;
+  color: #9ca3af;
+  font-size: 14px;
+  padding: 32px 0;
+}
+.audit-group-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.audit-group-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}
+.audit-group-sig {
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #374151;
+  word-break: break-all;
+  line-height: 1.4;
+}
+.audit-group-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.audit-group-count {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 600;
+}
+.audit-cls-known {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #d1fae5;
+  color: #065f46;
+}
+.audit-cls-null {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.audit-group-card-expanded {
+  border-color: #3b82f6;
+  box-shadow: 0 2px 8px rgba(59,130,246,.15);
+}
+
+/* ── Audit detail (expanded card) ──────────────────────── */
+.audit-detail {
+  border: 1px solid #e5e7eb;
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  padding: 10px 12px;
+  margin-top: -8px;
+  margin-bottom: 8px;
+  background: #f9fafb;
+}
+
+.audit-mini-map {
+  height: 200px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.audit-mini-map .leaflet-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* Mapillary images */
+.audit-images {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+.audit-thumb {
+  width: 120px;
+  min-width: 120px;
+  height: 80px;
+  border-radius: 6px;
+  object-fit: cover;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.audit-thumb-loading {
+  background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+  background-size: 200% 100%;
+  animation: audit-skeleton 1.2s ease-in-out infinite;
+}
+@keyframes audit-skeleton {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.audit-thumb-none {
+  background: #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #9ca3af;
+  cursor: default;
+}
+.audit-image-expanded {
+  width: 100%;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+/* Sample tags */
+.audit-samples {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.audit-sample {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #fff;
+}
+.audit-sample-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 4px;
+}
+.audit-sample-coords {
+  font-weight: 400;
+  color: #9ca3af;
+  margin-left: 8px;
+  font-size: 11px;
+}
+.audit-sample-tags {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: #4b5563;
+  line-height: 1.6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.audit-tag b {
+  color: #111827;
+}
+
+/* Review action buttons */
+.audit-actions {
+  display: flex;
+  gap: 8px;
+}
+.audit-action-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font-weight: 500;
+}
+.audit-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Tab navigation */
+.audit-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e5e7eb;
+  margin-bottom: 10px;
+}
+.audit-tab {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.audit-tab:hover { color: #374151; }
+.audit-tab-active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+/* Rules tab */
+.audit-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+.audit-rule-card {
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.audit-rule-match {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.audit-rule-tag {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #374151;
+}
+.audit-rule-classification {
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+}
+.audit-rule-modes {
+  display: flex;
+  gap: 4px;
+}
+.audit-rule-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+.audit-badge-preferred {
+  background: #dcfce7;
+  color: #166534;
+}
+.audit-badge-other {
+  background: #ffedd5;
+  color: #9a3412;
+}
+.audit-rule-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.audit-rule-move-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+}
+.audit-rule-move-btn:hover { background: #f3f4f6; }
+.audit-rule-move-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.audit-rule-delete-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #dc2626;
+}
+.audit-rule-delete-btn:hover { background: #fef2f2; }
+
+/* Legend tab */
+.audit-legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  flex: 1;
+}
+.audit-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+}
+.audit-legend-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.audit-legend-name {
+  flex: 1;
+  color: #111827;
+}
+.audit-badge-builtin {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-weight: 500;
+}
+.audit-badge-custom {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 500;
+}
+.audit-legend-add {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+  margin-top: 4px;
+}
+.audit-legend-edit-input {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  flex: 1;
+}
+.audit-legend-edit-input:focus {
+  border-color: #2563eb;
+  outline: none;
+}
+
+/* Gear button to open audit panel */
+.audit-gear-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid #d1d5db;
+  background: rgba(255, 255, 255, 0.96);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,.15);
+  transition: all .15s;
+  color: #374151;
+}
+.audit-gear-btn:hover {
+  border-color: #93c5fd;
+  background: rgba(239,246,255,.98);
+}
 
 /* ── Desktop layout ────────────────────────────────────── */
 @media (min-width: 768px) {

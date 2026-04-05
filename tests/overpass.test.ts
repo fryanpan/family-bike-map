@@ -151,6 +151,40 @@ describe('classifyOsmTagsToItem', () => {
   })
 })
 
+describe('classifyOsmTagsToItem with rules', () => {
+  it('rule match overrides hardcoded classification', () => {
+    const rules = [{ match: { highway: 'tertiary' }, classification: 'Low-speed side street', travelModes: {} }]
+    expect(classifyOsmTagsToItem({ highway: 'tertiary' }, 'toddler', rules)).toBe('Low-speed side street')
+  })
+
+  it('falls through to hardcoded when no rule matches', () => {
+    const rules = [{ match: { highway: 'motorway' }, classification: 'Highway', travelModes: {} }]
+    expect(classifyOsmTagsToItem({ highway: 'cycleway' }, 'toddler', rules)).toBe('Car-free path / Radweg')
+  })
+
+  it('first matching rule wins', () => {
+    const rules = [
+      { match: { highway: 'tertiary' }, classification: 'First', travelModes: {} },
+      { match: { highway: 'tertiary' }, classification: 'Second', travelModes: {} },
+    ]
+    expect(classifyOsmTagsToItem({ highway: 'tertiary' }, 'toddler', rules)).toBe('First')
+  })
+
+  it('rule with multiple match keys requires all to match', () => {
+    const rules = [{ match: { highway: 'residential', surface: 'asphalt' }, classification: 'Smooth residential', travelModes: {} }]
+    // Only one key matches — should fall through
+    expect(classifyOsmTagsToItem({ highway: 'residential' }, 'toddler', rules)).toBe('Residential road')
+    // Both keys match — rule applies
+    expect(classifyOsmTagsToItem({ highway: 'residential', surface: 'asphalt' }, 'toddler', rules)).toBe('Smooth residential')
+  })
+
+  it('rules bypass bad-surface filter', () => {
+    // Hardcoded logic would return null for cobblestone, but a rule match takes priority
+    const rules = [{ match: { highway: 'cycleway', surface: 'cobblestone' }, classification: 'Historic cycleway', travelModes: {} }]
+    expect(classifyOsmTagsToItem({ highway: 'cycleway', surface: 'cobblestone' }, 'toddler', rules)).toBe('Historic cycleway')
+  })
+})
+
 describe('buildQuery', () => {
   const bbox = { south: 52.5, west: 13.4, north: 52.6, east: 13.5 }
 

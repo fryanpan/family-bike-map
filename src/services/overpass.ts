@@ -1,5 +1,6 @@
 import type { OsmWay } from '../utils/types'
 import { BAD_SURFACES } from '../utils/classify'
+import type { ClassificationRule } from './rules'
 import type { LatLngBounds } from 'leaflet'
 import * as Sentry from '@sentry/react'
 
@@ -150,7 +151,20 @@ function hasSeparation(tags: Record<string, string>): boolean {
   return false
 }
 
-export function classifyOsmTagsToItem(tags: Record<string, string>, profileKey: string): string | null {
+export function classifyOsmTagsToItem(
+  tags: Record<string, string>,
+  profileKey: string,
+  regionRules?: ClassificationRule[],
+): string | null {
+  // Server-side rules take priority over hardcoded logic
+  if (regionRules) {
+    for (const rule of regionRules) {
+      if (Object.entries(rule.match).every(([k, v]) => tags[k] === v)) {
+        return rule.classification
+      }
+    }
+  }
+
   if (BAD_SURFACES.has(tags.surface ?? '')) return null
 
   const highway     = tags.highway ?? ''
