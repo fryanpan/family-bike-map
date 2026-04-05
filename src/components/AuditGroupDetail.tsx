@@ -1,9 +1,12 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { getStreetImage } from '../services/mapillary'
 import type { MapillaryImage } from '../services/mapillary'
 import type { AuditGroup, AuditWay } from '../services/audit'
+import { PROFILE_LEGEND } from '../utils/classify'
+import { saveRules } from '../services/rules'
+import type { RegionRules, ClassificationRule } from '../services/rules'
 
 // Re-use Leaflet default icon fix from Map.tsx
 import markerIconUrl from 'leaflet/dist/images/marker-icon.png'
@@ -37,13 +40,34 @@ function FitSampleBounds({ samples }: { samples: AuditWay[] }) {
 
 type ImageState = { loading: true } | { loading: false; image: MapillaryImage | null }
 
-interface Props {
-  group: AuditGroup
+/** Collect all unique legend item names across all profiles. */
+function getAllLegendItemNames(): string[] {
+  const names = new Set<string>()
+  for (const groups of Object.values(PROFILE_LEGEND)) {
+    for (const group of groups) {
+      for (const item of group.items) {
+        names.add(item.name)
+      }
+    }
+  }
+  return [...names].sort()
 }
 
-export default function AuditGroupDetail({ group }: Props) {
+const LEGEND_ITEM_NAMES = getAllLegendItemNames()
+
+interface Props {
+  group: AuditGroup
+  region: string
+  rules: RegionRules
+  onRulesChange: (rules: RegionRules) => void
+}
+
+export default function AuditGroupDetail({ group, region, rules, onRulesChange }: Props) {
   const [images, setImages] = useState<Map<number, ImageState>>(new Map())
   const [expandedImage, setExpandedImage] = useState<string | null>(null)
+  const [reviewed, setReviewed] = useState(false)
+  const [overrideOpen, setOverrideOpen] = useState(false)
+  const overrideRef = useRef<HTMLDivElement>(null)
 
   const samplesWithCenter = useMemo(
     () => group.samples.filter((s) => s.center),
@@ -72,6 +96,45 @@ export default function AuditGroupDetail({ group }: Props) {
     }
     return () => { cancelled = true }
   }, [samplesWithCenter])
+
+  // Close override dropdown on outside click
+  useEffect(() => {
+    if (!overrideOpen) return
+    function handleClick(e: MouseEvent) {
+      if (overrideRef.current && !overrideRef.current.contains(e.target as Node)) {
+        setOverrideOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [overrideOpen])
+
+  /** Build a match object from the group's tag signature (e.g. "highway=cycleway surface=asphalt"). */
+  function buildMatchFromSignature(): Record<string, string> {
+    const match: Record<string, string> = {}
+    for (const part of group.signature.split(/\s+/)) {
+      const eq = part.indexOf('=')
+      if (eq > 0) {
+        match[part.slice(0, eq)] = part.slice(eq + 1)
+      }
+    }
+    return match
+  }
+
+  async function handleOverride(classification: string) {
+    setOverrideOpen(false)
+    const newRule: ClassificationRule = {
+      match: buildMatchFromSignature(),
+      classification,
+      travelModes: {},
+    }
+    const updated: RegionRules = {
+      ...rules,
+      rules: [...rules.rules, newRule],
+    }
+    await saveRules(region, updated)
+    onRulesChange(updated)
+  }
 
   const defaultCenter: [number, number] = samplesWithCenter.length > 0
     ? [samplesWithCenter[0].center!.lat, samplesWithCenter[0].center!.lon]
@@ -157,10 +220,36 @@ export default function AuditGroupDetail({ group }: Props) {
         ))}
       </div>
 
-      {/* Placeholder review actions */}
+      {/* Review actions */}
       <div className="audit-actions">
-        <button disabled className="audit-action-btn audit-action-correct">Correct</button>
-        <button disabled className="audit-action-btn audit-action-override">Override &#x25BE;</button>
+        <button
+          className={`audit-action-btn audit-action-correct${reviewed ? ' audit-action-reviewed' : ''}`}
+          onClick={() => setReviewed(true)}
+        >
+          {reviewed ? '\u2714 Correct' : 'Correct'}
+        </button>
+        <div className="audit-override-wrap" ref={overrideRef}>
+          <button
+            className="audit-action-btn audit-action-override"
+            onClick={() => setOverrideOpen((v) => !v)}
+          >
+            Override &#x25BE;
+          </button>
+          {overrideOpen && (
+            <ul className="audit-override-menu">
+              {LEGEND_ITEM_NAMES.map((name) => (
+                <li key={name}>
+                  <button
+                    className="audit-override-option"
+                    onClick={() => handleOverride(name)}
+                  >
+                    {name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <button disabled className="audit-action-btn audit-action-flag">Flag</button>
       </div>
     </div>

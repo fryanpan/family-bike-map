@@ -3,6 +3,8 @@ import { CITY_PRESETS, scanCity } from '../services/audit'
 import { saveScan, loadScan } from '../services/auditCache'
 import AuditGroupDetail from './AuditGroupDetail'
 import type { CityScan, AuditGroup } from '../services/audit'
+import { fetchRules } from '../services/rules'
+import type { RegionRules } from '../services/rules'
 
 type FilterStatus = 'all' | 'classified' | 'unclassified'
 
@@ -23,11 +25,17 @@ export default function AuditPanel({ onClose }: Props) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const [filterText, setFilterText] = useState('')
 
-  // Load cached scan on mount and when city changes
+  // Region rules (KV-backed)
+  const [rules, setRules] = useState<RegionRules>({ rules: [], legendItems: [] })
+
+  // Load cached scan and rules on mount and when city changes
   useEffect(() => {
     let cancelled = false
     loadScan(selectedCity).then((cached) => {
       if (!cancelled && cached) setScan(cached)
+    })
+    fetchRules(selectedCity.toLowerCase()).then((r) => {
+      if (!cancelled) setRules(r)
     })
     return () => { cancelled = true }
   }, [selectedCity])
@@ -37,6 +45,7 @@ export default function AuditPanel({ onClose }: Props) {
     setSelectedCity(city)
     setScan(null)
     setProgress(null)
+    setRules({ rules: [], legendItems: [] })
   }, [])
 
   async function handleScan() {
@@ -161,7 +170,14 @@ export default function AuditPanel({ onClose }: Props) {
                 </span>
               </div>
             </div>
-            {expandedGroup === i && <AuditGroupDetail group={g} />}
+            {expandedGroup === i && (
+              <AuditGroupDetail
+                group={g}
+                region={selectedCity.toLowerCase()}
+                rules={rules}
+                onRulesChange={setRules}
+              />
+            )}
           </div>
         ))}
       </div>
