@@ -39,6 +39,10 @@ export const CITY_PRESETS: CityPreset[] = [
     bbox: { south: 55.61, west: 12.45, north: 55.73, east: 12.65 },
   },
   {
+    name: 'Hamburg',
+    bbox: { south: 53.4, west: 9.8, north: 53.65, east: 10.2 },
+  },
+  {
     name: 'SF Bay Area',
     bbox: { south: 37.25, west: -122.52, north: 37.81, east: -121.81 },
   },
