@@ -138,8 +138,13 @@ describe('classifyOsmTagsToItem', () => {
     expect(classifyOsmTagsToItem({ highway: 'residential', cycleway: 'lane' }, 'toddler')).toBe('Painted bike lane')
   })
 
-  it('returns null for bad surface', () => {
-    expect(classifyOsmTagsToItem({ highway: 'cycleway', surface: 'cobblestone' }, 'toddler')).toBeNull()
+  it('returns rough road for bad surface', () => {
+    expect(classifyOsmTagsToItem({ highway: 'cycleway', surface: 'cobblestone' }, 'toddler')).toBe('Rough road (e.g. cobblestone)')
+  })
+
+  it('returns rough road for bad smoothness', () => {
+    expect(classifyOsmTagsToItem({ highway: 'cycleway', smoothness: 'bad' }, 'toddler')).toBe('Rough road (e.g. cobblestone)')
+    expect(classifyOsmTagsToItem({ highway: 'residential', smoothness: 'very_bad' }, 'toddler')).toBe('Rough road (e.g. cobblestone)')
   })
 
   it('returns Residential road for plain residential', () => {

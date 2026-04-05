@@ -167,12 +167,19 @@ export function getCostingFromPreferences(
   }
 }
 
-// Surfaces that always make a segment non-preferred — rough/uncomfortable.
+// Surfaces that are rough/uncomfortable for family cycling.
 // Imported by overpass.ts (single source of truth).
 export const BAD_SURFACES = new Set([
   'cobblestone', 'paving_stones', 'sett', 'unhewn_cobblestone',
   'cobblestone:flattened', 'gravel', 'unpaved',
 ])
+
+// Smoothness values that indicate a rough road regardless of surface tag.
+export const BAD_SMOOTHNESS = new Set([
+  'bad', 'very_bad', 'horrible', 'very_horrible', 'impassable',
+])
+
+export const ROUGH_ROAD_ITEM = 'Rough road (e.g. cobblestone)'
 
 // Maps road_class string values returned by Valhalla API to a numeric rank.
 const ROAD_CLASS_RANK: Record<string, number> = {
@@ -226,8 +233,8 @@ export function classifyEdgeToItem(
   const bicycleRoad = edge.bicycle_road ?? false
   const surface     = edge.surface      ?? ''
 
-  // Bad surfaces override everything — not a preferred item regardless of type
-  if (BAD_SURFACES.has(surface)) return null
+  // Bad surfaces → classified as rough road (visible on map, not preferred)
+  if (BAD_SURFACES.has(surface)) return ROUGH_ROAD_ITEM
 
   // Fahrradstrasse must come before cycleway/path checks (bicycle_road tag wins)
   if (bicycleRoad) return 'Fahrradstrasse'

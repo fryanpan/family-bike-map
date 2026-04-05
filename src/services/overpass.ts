@@ -1,5 +1,5 @@
 import type { OsmWay } from '../utils/types'
-import { BAD_SURFACES } from '../utils/classify'
+import { BAD_SURFACES, BAD_SMOOTHNESS, ROUGH_ROAD_ITEM } from '../utils/classify'
 import type { ClassificationRule } from './rules'
 import type { LatLngBounds } from 'leaflet'
 import * as Sentry from '@sentry/react'
@@ -165,7 +165,9 @@ export function classifyOsmTagsToItem(
     }
   }
 
-  if (BAD_SURFACES.has(tags.surface ?? '')) return null
+  // Bad smoothness or surface → rough road
+  if (BAD_SMOOTHNESS.has(tags.smoothness ?? '')) return ROUGH_ROAD_ITEM
+  if (BAD_SURFACES.has(tags.surface ?? '')) return ROUGH_ROAD_ITEM
 
   const highway     = tags.highway ?? ''
   const cycleway    = tags.cycleway ?? ''

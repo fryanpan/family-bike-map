@@ -120,20 +120,22 @@ describe('classifyEdgeToItem — residential road', () => {
   })
 })
 
-// ── Bad surfaces (cobblestones) → null ───────────────────────────────────────
+// ── Bad surfaces (cobblestones) → 'Rough road (e.g. cobblestone)' ────────────
 
-describe('classifyEdgeToItem — bad surfaces return null', () => {
-  it('returns null for cobblestone surface regardless of infra type', () => {
+describe('classifyEdgeToItem — bad surfaces return rough road', () => {
+  const ROUGH = 'Rough road (e.g. cobblestone)'
+
+  it('returns rough road for cobblestone surface regardless of infra type', () => {
     const edge: ValhallaEdge = { cycle_lane: 'separated', surface: 'cobblestone' }
-    expect(classifyEdgeToItem(edge, 'toddler')).toBeNull()
-    expect(classifyEdgeToItem(edge, 'trailer')).toBeNull()
-    expect(classifyEdgeToItem(edge, 'training')).toBeNull()
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe(ROUGH)
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe(ROUGH)
+    expect(classifyEdgeToItem(edge, 'training')).toBe(ROUGH)
   })
 
-  it('returns null for sett (Kopfsteinpflaster)', () => {
+  it('returns rough road for sett (Kopfsteinpflaster)', () => {
     const edge: ValhallaEdge = { use: 'cycleway', surface: 'sett' }
-    expect(classifyEdgeToItem(edge, 'toddler')).toBeNull()
-    expect(classifyEdgeToItem(edge, 'training')).toBeNull()
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe(ROUGH)
+    expect(classifyEdgeToItem(edge, 'training')).toBe(ROUGH)
   })
 
   it('does NOT treat dirt or compacted as bad surfaces', () => {
@@ -143,11 +145,11 @@ describe('classifyEdgeToItem — bad surfaces return null', () => {
     expect(classifyEdgeToItem(compacted, 'toddler')).toBe('Separated bike track')
   })
 
-  it('returns null for gravel and unpaved', () => {
+  it('returns rough road for gravel and unpaved', () => {
     const gravel: ValhallaEdge = { cycle_lane: 'separated', surface: 'gravel' }
     const unpaved: ValhallaEdge = { cycle_lane: 'separated', surface: 'unpaved' }
-    expect(classifyEdgeToItem(gravel, 'toddler')).toBeNull()
-    expect(classifyEdgeToItem(unpaved, 'toddler')).toBeNull()
+    expect(classifyEdgeToItem(gravel, 'toddler')).toBe(ROUGH)
+    expect(classifyEdgeToItem(unpaved, 'toddler')).toBe(ROUGH)
   })
 })
 
