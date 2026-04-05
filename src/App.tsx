@@ -17,6 +17,7 @@ import {
   getDefaultPreferredItems,
   getCostingFromPreferences,
 } from './utils/classify'
+import { CITY_PRESETS } from './services/audit'
 import { fetchRules } from './services/rules'
 import type { ClassificationRule } from './services/rules'
 import type { Place, Route, ProfileMap, RiderProfile } from './utils/types'
@@ -153,16 +154,24 @@ export default function App() {
   const [overlayStatus, setOverlayStatus]   = useState('idle')
   const [auditOpen, setAuditOpen]           = useState(false)
 
-  // Region classification rules (fetched from KV on mount)
+  // Region classification rules (fetched from KV based on map viewport)
   const [regionRules, setRegionRules] = useState<ClassificationRule[]>([])
+  const [activeRegion, setActiveRegion] = useState<string | null>(null)
 
+  // Detect which city preset the map center falls within
   useEffect(() => {
-    let cancelled = false
-    fetchRules('berlin').then((r) => {
-      if (!cancelled) setRegionRules(r.rules)
-    }).catch(() => { /* ignore fetch errors on load */ })
-    return () => { cancelled = true }
-  }, [])
+    const loc = currentLocation ?? { lat: 52.52, lng: 13.405 } // default Berlin
+    const match = CITY_PRESETS.find((c) =>
+      loc.lat >= c.bbox.south && loc.lat <= c.bbox.north &&
+      loc.lng >= c.bbox.west && loc.lng <= c.bbox.east
+    )
+    const region = match ? match.name.toLowerCase() : null
+    if (region && region !== activeRegion) {
+      setActiveRegion(region)
+      fetchRules(region).then((r) => setRegionRules(r.rules))
+        .catch(() => { /* ignore */ })
+    }
+  }, [currentLocation, activeRegion])
 
   // Derived: has the user customized their travel mode's preferred path types?
   const isCustomTravelMode = !setsEqual(preferredItemNames, getDefaultPreferredItems(selectedProfile))
