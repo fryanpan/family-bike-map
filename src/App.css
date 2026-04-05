@@ -1072,6 +1072,162 @@ button { font-family: inherit; cursor: pointer; }
 .feedback-done-icon { font-size: 40px; margin-bottom: 8px; }
 .feedback-done-msg  { font-size: 16px; font-weight: 600; color: #111827; }
 
+/* ── Audit panel overlay ──────────────────────────────── */
+.audit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+.audit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.audit-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #111827;
+}
+.audit-close-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #9ca3af;
+  padding: 4px 6px;
+  line-height: 1;
+  border-radius: 6px;
+}
+.audit-close-btn:hover { color: #dc2626; background: #fef2f2; }
+
+.audit-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #f3f4f6;
+}
+.audit-select {
+  padding: 7px 10px;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #f9fafb;
+  outline: none;
+}
+.audit-select:focus { border-color: #2563eb; }
+.audit-scan-btn {
+  padding: 7px 18px;
+  font-size: 13px;
+  border-radius: 8px;
+  width: auto;
+}
+.audit-meta {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.audit-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.audit-search-input {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  background: #f9fafb;
+}
+.audit-search-input:focus { border-color: #2563eb; background: #fff; }
+
+.audit-groups {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.audit-empty {
+  text-align: center;
+  color: #9ca3af;
+  font-size: 14px;
+  padding: 32px 0;
+}
+.audit-group-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.audit-group-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}
+.audit-group-sig {
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #374151;
+  word-break: break-all;
+  line-height: 1.4;
+}
+.audit-group-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.audit-group-count {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 600;
+}
+.audit-cls-known {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #d1fae5;
+  color: #065f46;
+}
+.audit-cls-null {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* Gear button to open audit panel */
+.audit-gear-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid #d1d5db;
+  background: rgba(255, 255, 255, 0.96);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,.15);
+  transition: all .15s;
+  color: #374151;
+}
+.audit-gear-btn:hover {
+  border-color: #93c5fd;
+  background: rgba(239,246,255,.98);
+}
+
 /* ── Desktop layout ────────────────────────────────────── */
 @media (min-width: 768px) {
   .maneuvers-list { max-height: 320px; overflow-y: auto; }

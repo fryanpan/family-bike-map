@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { useGeolocation } from './hooks/useGeolocation'
 const Map = lazy(() => import('./components/Map'))
 const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
+const AuditPanel = lazy(() => import('./components/AuditPanel'))
 import Legend from './components/Legend'
 import SearchBar from './components/SearchBar'
 import type { QuickOption } from './components/SearchBar'
@@ -148,6 +149,7 @@ export default function App() {
 
   const [overlayEnabled, setOverlayEnabled] = useState(true)
   const [overlayStatus, setOverlayStatus]   = useState('idle')
+  const [auditOpen, setAuditOpen]           = useState(false)
 
   // Derived: has the user customized their travel mode's preferred path types?
   const isCustomTravelMode = !setsEqual(preferredItemNames, getDefaultPreferredItems(selectedProfile))
@@ -435,6 +437,13 @@ export default function App() {
           >
             🗺️ Bike Layer
           </button>
+          <button
+            className="audit-gear-btn"
+            onClick={() => setAuditOpen(true)}
+            title="Classification audit"
+          >
+            ⚙️
+          </button>
           {overlayStatusMsg && <p className="bike-layer-status">{overlayStatusMsg}</p>}
         </div>
 
@@ -514,6 +523,12 @@ startQuickOptions={startQuickOptions}
             }}
             onClose={() => handleProfileSave(profiles[editingProfile])}
           />
+        </Suspense>
+      )}
+
+      {auditOpen && (
+        <Suspense fallback={null}>
+          <AuditPanel onClose={() => setAuditOpen(false)} />
         </Suspense>
       )}
     </div>
