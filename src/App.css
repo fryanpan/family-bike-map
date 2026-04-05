@@ -1208,6 +1208,90 @@ button { font-family: inherit; cursor: pointer; }
   color: #92400e;
 }
 
+.audit-group-card-expanded {
+  border-color: #3b82f6;
+  box-shadow: 0 2px 8px rgba(59,130,246,.15);
+}
+
+/* ── Audit detail (expanded card) ──────────────────────── */
+.audit-detail {
+  border: 1px solid #e5e7eb;
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  padding: 10px 12px;
+  margin-top: -8px;
+  margin-bottom: 8px;
+  background: #f9fafb;
+}
+
+.audit-mini-map {
+  height: 200px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.audit-mini-map .leaflet-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* Sample tags */
+.audit-samples {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.audit-sample {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #fff;
+}
+.audit-sample-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 4px;
+}
+.audit-sample-coords {
+  font-weight: 400;
+  color: #9ca3af;
+  margin-left: 8px;
+  font-size: 11px;
+}
+.audit-sample-tags {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: #4b5563;
+  line-height: 1.6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.audit-tag b {
+  color: #111827;
+}
+
+/* Review action buttons */
+.audit-actions {
+  display: flex;
+  gap: 8px;
+}
+.audit-action-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font-weight: 500;
+}
+.audit-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Gear button to open audit panel */
 .audit-gear-btn {
   width: 34px;

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { CITY_PRESETS, scanCity } from '../services/audit'
 import { saveScan, loadScan } from '../services/auditCache'
+import AuditGroupDetail from './AuditGroupDetail'
 import type { CityScan, AuditGroup } from '../services/audit'
 
 type FilterStatus = 'all' | 'classified' | 'unclassified'
@@ -14,6 +15,9 @@ export default function AuditPanel({ onClose }: Props) {
   const [scan, setScan] = useState<CityScan | null>(null)
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+
+  // Expansion
+  const [expandedGroup, setExpandedGroup] = useState<number | null>(null)
 
   // Filters
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
@@ -136,14 +140,28 @@ export default function AuditPanel({ onClose }: Props) {
           <p className="audit-empty">Select a city and press Scan to start.</p>
         )}
         {filteredGroups.map((g, i) => (
-          <div key={i} className="audit-group-card">
-            <div className="audit-group-sig">{g.signature || '(no tags)'}</div>
-            <div className="audit-group-meta">
-              <span className="audit-group-count">{g.wayCount} ways</span>
-              <span className={g.classification ? 'audit-cls-known' : 'audit-cls-null'}>
-                {g.classification ?? 'unclassified'}
-              </span>
+          <div key={i}>
+            <div
+              className={`audit-group-card${expandedGroup === i ? ' audit-group-card-expanded' : ''}`}
+              onClick={() => setExpandedGroup(expandedGroup === i ? null : i)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setExpandedGroup(expandedGroup === i ? null : i)
+                }
+              }}
+            >
+              <div className="audit-group-sig">{g.signature || '(no tags)'}</div>
+              <div className="audit-group-meta">
+                <span className="audit-group-count">{g.wayCount} ways</span>
+                <span className={g.classification ? 'audit-cls-known' : 'audit-cls-null'}>
+                  {g.classification ?? 'unclassified'}
+                </span>
+              </div>
             </div>
+            {expandedGroup === i && <AuditGroupDetail group={g} />}
           </div>
         ))}
       </div>
