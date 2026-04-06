@@ -108,7 +108,7 @@ export function buildAuditQuery(bbox: { south: number; west: number; north: numb
   way["highway"="footway"]["bicycle"~"^(yes|designated)$"](${b});
   way[~"^cycleway(:right|:left|:both)?$"~"^(track|lane|opposite_track|opposite_lane|share_busway)$"](${b});
 );
-out geom center;
+out geom;
 `
 }
 
@@ -201,11 +201,14 @@ export async function scanCity(
         for (const el of data.elements) {
           if (el.type === 'way' && !seen.has(el.id)) {
             seen.add(el.id)
+            // Derive center from geometry midpoint when center isn't provided
+            const geom = el.geometry ?? []
+            const mid = geom.length > 0 ? geom[Math.floor(geom.length / 2)] : null
             allWays.push({
               osmId: el.id,
               tags: el.tags ?? {},
-              center: el.center,
-              lengthKm: el.geometry ? wayLengthKm(el.geometry) : 0,
+              center: el.center ?? (mid ? { lat: mid.lat, lon: mid.lon } : undefined),
+              lengthKm: geom.length > 1 ? wayLengthKm(geom) : 0,
             })
           }
         }
