@@ -1499,6 +1499,21 @@ button { font-family: inherit; cursor: pointer; }
   background: rgba(239,246,255,.98);
 }
 
+/* ── Bike segment hover tooltip ────────────────────────── */
+.bike-segment-tooltip {
+  /* Override Leaflet's default min-width so the fixed 220px width set inline is respected */
+  min-width: 0;
+  /* Remove extra padding that Leaflet adds — the inner div handles its own spacing */
+  padding: 6px 8px;
+  white-space: normal;
+  word-break: break-word;
+}
+.bike-segment-tooltip img {
+  /* Prevent the image from stretching the tooltip past its fixed width */
+  max-width: 100%;
+  height: auto;
+}
+
 /* ── Desktop layout ────────────────────────────────────── */
 @media (min-width: 768px) {
   .maneuvers-list { max-height: 320px; overflow-y: auto; }

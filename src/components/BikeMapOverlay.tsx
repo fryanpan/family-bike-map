@@ -3,6 +3,7 @@ import { useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import { fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey, classifyOsmTagsToItem } from '../services/overpass'
 import { PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
+import { getStreetImage } from '../services/mapillary'
 import type { ClassificationRule } from '../services/rules'
 import type { OsmWay } from '../utils/types'
 
@@ -14,8 +15,8 @@ const MAX_VISIBLE_TILES = 12
 // Canvas is 5-10x faster than SVG for many lines on mobile.
 const canvasRenderer = L.canvas({ padding: 0.5 })
 
-/** Build a compact debug string of the OSM tags relevant to classification. */
-function getDebugTags(tags: Record<string, string>): string {
+/** Build an array of the OSM tags relevant to classification (one per line). */
+function getDebugTags(tags: Record<string, string>): string[] {
   const parts: string[] = []
   if (tags.highway)                   parts.push(`highway=${tags.highway}`)
   if (tags.bicycle_road === 'yes')    parts.push('bicycle_road=yes')
@@ -27,19 +28,35 @@ function getDebugTags(tags: Record<string, string>): string {
   if (tags['cycleway:right:separation']) parts.push(`separation=${tags['cycleway:right:separation']}`)
   if (tags['cycleway:buffer'])        parts.push('buffer=yes')
   if (tags.surface)                   parts.push(`surface=${tags.surface}`)
-  return parts.join(' · ')
+  return parts
 }
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-function buildTooltipHtml(itemName: string | null, tags: Record<string, string>): string {
+function buildTooltipHtml(
+  itemName: string | null,
+  tags: Record<string, string>,
+  isPreferred: boolean,
+  imageUrl?: string | null,
+): string {
   const debugTags = getDebugTags(tags)
   const name = tags.name ? ` — ${escapeHtml(tags.name)}` : ''
-  return `<div style="font-size:12px;line-height:1.5;max-width:240px">
-    <div style="font-weight:700">${itemName ?? 'Unknown'}${name}</div>
-    ${debugTags ? `<div style="color:#6b7280;font-size:11px;margin-top:1px">${escapeHtml(debugTags)}</div>` : ''}
+  const preferredLabel = isPreferred
+    ? `<span style="color:#10b981;font-weight:600">Preferred</span>`
+    : `<span style="color:#f97316;font-weight:600">Not preferred</span>`
+  const tagsHtml = debugTags
+    .map((t) => `<div>${escapeHtml(t)}</div>`)
+    .join('')
+  const imageHtml = imageUrl
+    ? `<img src="${escapeHtml(imageUrl)}" alt="Street view" style="width:100%;border-radius:4px;margin-top:6px;display:block" loading="lazy" />`
+    : ''
+  return `<div style="font-size:12px;line-height:1.5;width:220px">
+    <div style="font-weight:700;white-space:normal;word-break:break-word">${itemName ?? 'Unknown'}${name}</div>
+    <div style="margin-top:2px">${preferredLabel}</div>
+    ${tagsHtml ? `<div style="color:#6b7280;font-size:11px;margin-top:4px">${tagsHtml}</div>` : ''}
+    ${imageHtml}
   </div>`
 }
 
@@ -94,10 +111,23 @@ function OverlayRenderer({ ways, profileKey, preferredItemNames, showOtherPaths,
         renderer: canvasRenderer,
       })
 
-      polyline.bindTooltip(buildTooltipHtml(itemName, way.tags), {
+      // Bind tooltip without image initially so it appears immediately on hover.
+      polyline.bindTooltip(buildTooltipHtml(itemName, way.tags, isPreferred, null), {
         sticky: true,
         direction: 'top',
-        className: 'leaflet-tooltip',
+        className: 'bike-segment-tooltip',
+      })
+
+      // Fetch one Mapillary image near the midpoint of the segment, then update the tooltip.
+      const coords = way.coordinates
+      const mid = coords[Math.floor(coords.length / 2)]
+      const [midLat, midLng] = mid
+      getStreetImage(midLat, midLng).then((img) => {
+        if (!img) return
+        // Only update if the tooltip is still bound (polyline not removed).
+        const tip = polyline.getTooltip()
+        if (!tip) return
+        polyline.setTooltipContent(buildTooltipHtml(itemName, way.tags, isPreferred, img.thumbUrl))
       })
 
       polyline.addTo(lg)
