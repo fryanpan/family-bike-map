@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { useGeolocation } from './hooks/useGeolocation'
 const Map = lazy(() => import('./components/Map'))
-const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
 const AuditPanel = lazy(() => import('./components/AuditPanel'))
 import Legend from './components/Legend'
 import SearchBar from './components/SearchBar'
@@ -20,7 +19,7 @@ import {
 import { CITY_PRESETS } from './services/audit'
 import { fetchRules } from './services/rules'
 import type { ClassificationRule } from './services/rules'
-import type { Place, Route, ProfileMap, RiderProfile } from './utils/types'
+import type { Place, Route, ProfileMap } from './utils/types'
 import { Sentry } from './sentry'
 
 type UiState = 'search' | 'place-detail' | 'routing'
@@ -134,7 +133,7 @@ export default function App() {
   )
   const [showOtherPaths, setShowOtherPaths] = useState(initialState.showOtherPaths)
 
-  const [editingProfile, setEditingProfile] = useState<string | null>(null)
+
 
   // --- UI state machine ---
   const [uiState, setUiState] = useState<UiState>('search')
@@ -327,14 +326,7 @@ export default function App() {
     setUiState('search')
   }
 
-  function handleProfileSave(updatedProfile: RiderProfile) {
-    if (!editingProfile) return
-    setProfiles((prev) => ({ ...prev, [editingProfile]: updatedProfile }))
-    setEditingProfile(null)
-    if (startPoint && endPoint && editingProfile === selectedProfile) {
-      setTimeout(() => computeRoute(startPoint, endPoint, editingProfile, waypoints), 0)
-    }
-  }
+
 
   const overlayStatusMsg =
     overlayStatus === 'loading' ? '⏳ Loading bike map…' :
@@ -431,7 +423,6 @@ export default function App() {
             profiles={profiles}
             selected={selectedProfile}
             onSelect={handleProfileChange}
-            onEdit={(key) => setEditingProfile(key)}
             isCustomTravelMode={isCustomTravelMode}
           />
         </div>
@@ -528,19 +519,6 @@ startQuickOptions={startQuickOptions}
           </>
         )}
       </div>
-
-      {editingProfile && (
-        <Suspense fallback={null}>
-          <ProfileEditor
-            profileKey={editingProfile}
-            profile={profiles[editingProfile]}
-            onChange={(updated) => {
-              setProfiles((prev) => ({ ...prev, [editingProfile]: updated }))
-            }}
-            onClose={() => handleProfileSave(profiles[editingProfile])}
-          />
-        </Suspense>
-      )}
 
       {auditOpen && (
         <Suspense fallback={null}>

@@ -104,11 +104,10 @@ interface Props {
   profiles: ProfileMap
   selected: string
   onSelect: (key: string) => void
-  onEdit: (key: string) => void
   isCustomTravelMode: boolean
 }
 
-export default function ProfileSelector({ profiles, selected, onSelect, onEdit, isCustomTravelMode }: Props) {
+export default function ProfileSelector({ profiles, selected, onSelect, isCustomTravelMode }: Props) {
   return (
     <div className="profile-selector">
       <div className="profile-chips">
@@ -137,13 +136,6 @@ export default function ProfileSelector({ profiles, selected, onSelect, onEdit, 
             </span>
           </button>
         )}
-        <button
-          className="profile-edit-icon"
-          onClick={() => onEdit(selected)}
-          title="Customise profile"
-        >
-          ✏️
-        </button>
       </div>
     </div>
   )
