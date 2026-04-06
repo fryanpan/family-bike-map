@@ -44,13 +44,15 @@ export default function AuditPanel({ onClose }: Props) {
   // Reclassify scan groups once both are available.
   useEffect(() => {
     let cancelled = false
+    // TODO: add a schema version to CityScan so we can detect stale cache cleanly
     Promise.all([
-      loadScan(selectedCity),
-      fetchRules(selectedCity.toLowerCase()),
+      loadScan(selectedCity).catch(() => null),
+      fetchRules(selectedCity.toLowerCase()).catch(() => ({ rules: [], legendItems: [] } as RegionRules)),
     ]).then(([cached, r]) => {
       if (cancelled) return
       setRulesRaw(r)
-      if (cached) {
+      // Discard cached scans from old schema (missing totalDistanceKm)
+      if (cached && Array.isArray(cached.groups) && cached.groups.every((g: AuditGroup) => typeof g.totalDistanceKm === 'number')) {
         setScan(r.rules.length > 0 ? reclassifyGroups(cached, r.rules) : cached)
       }
     })
@@ -204,7 +206,7 @@ export default function AuditPanel({ onClose }: Props) {
                 >
                   <div className="audit-group-sig">{g.signature || '(no tags)'}</div>
                   <div className="audit-group-meta">
-                    <span className="audit-group-count">{g.wayCount} ways · {g.totalDistanceKm < 1 ? `${Math.round(g.totalDistanceKm * 1000)}m` : `${g.totalDistanceKm.toFixed(1)}km`}</span>
+                    <span className="audit-group-count">{g.wayCount} ways{g.totalDistanceKm != null ? ` · ${g.totalDistanceKm < 1 ? `${Math.round(g.totalDistanceKm * 1000)}m` : `${g.totalDistanceKm.toFixed(1)}km`}` : ''}</span>
                     <span className={g.classification ? 'audit-cls-known' : 'audit-cls-null'}>
                       {g.classification ?? 'unclassified'}
                     </span>
