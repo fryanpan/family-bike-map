@@ -46,8 +46,20 @@ export const CITY_PRESETS: CityPreset[] = [
     bbox: { south: 53.4, west: 9.8, north: 53.65, east: 10.2 },
   },
   {
-    name: 'SF Bay Area',
-    bbox: { south: 37.25, west: -122.52, north: 37.81, east: -121.81 },
+    name: 'San Francisco',
+    bbox: { south: 37.70, west: -122.52, north: 37.81, east: -122.35 },
+  },
+  {
+    name: 'Oakland',
+    bbox: { south: 37.73, west: -122.33, north: 37.85, east: -122.16 },
+  },
+  {
+    name: 'Berkeley',
+    bbox: { south: 37.85, west: -122.32, north: 37.92, east: -122.23 },
+  },
+  {
+    name: 'Marin',
+    bbox: { south: 37.83, west: -122.60, north: 38.08, east: -122.40 },
   },
 ]
 
