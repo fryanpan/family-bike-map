@@ -89,7 +89,7 @@ export function sampleTiles(
 }
 
 // ---------------------------------------------------------------------------
-// Overpass query for audit (tags + center only, no geometry)
+// Overpass query for audit (full geometry for distance calculation)
 // ---------------------------------------------------------------------------
 
 export function buildAuditQuery(bbox: { south: number; west: number; north: number; east: number }): string {
@@ -190,7 +190,9 @@ export async function scanCity(
     const query = buildAuditQuery(tile)
 
     try {
-      const resp = await fetch(OVERPASS_URL, {
+      // Pass audit-prefixed row/col so the Worker cache key doesn't collide
+      // with the overlay tile cache (which uses a different query format).
+      const resp = await fetch(`${OVERPASS_URL}?row=audit-${Math.floor(tile.south / TILE_SIZE)}&col=${Math.floor(tile.west / TILE_SIZE)}`, {
         method: 'POST',
         body: `data=${encodeURIComponent(query)}`,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
