@@ -73,9 +73,8 @@ describe('buildAuditQuery', () => {
     expect(query).toContain('"service"!="parking_aisle"')
   })
 
-  it('uses out tags center instead of out geom', () => {
-    expect(query).toContain('out tags center;')
-    expect(query).not.toContain('out geom;')
+  it('uses out geom center for geometry-based length calculation', () => {
+    expect(query).toContain('out geom center;')
   })
 
   it('sets a 25s timeout', () => {

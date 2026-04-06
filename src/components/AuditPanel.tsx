@@ -204,7 +204,7 @@ export default function AuditPanel({ onClose }: Props) {
                 >
                   <div className="audit-group-sig">{g.signature || '(no tags)'}</div>
                   <div className="audit-group-meta">
-                    <span className="audit-group-count">{g.wayCount} ways</span>
+                    <span className="audit-group-count">{g.wayCount} ways · {g.totalDistanceKm < 1 ? `${Math.round(g.totalDistanceKm * 1000)}m` : `${g.totalDistanceKm.toFixed(1)}km`}</span>
                     <span className={g.classification ? 'audit-cls-known' : 'audit-cls-null'}>
                       {g.classification ?? 'unclassified'}
                     </span>

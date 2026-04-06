@@ -9,12 +9,14 @@ export interface AuditWay {
   osmId: number
   tags: Record<string, string>
   center?: { lat: number; lon: number }
+  lengthKm: number
 }
 
 export interface AuditGroup {
   signature: string
   classification: string | null
   wayCount: number
+  totalDistanceKm: number
   samples: AuditWay[]
 }
 
@@ -106,7 +108,7 @@ export function buildAuditQuery(bbox: { south: number; west: number; north: numb
   way["highway"="footway"]["bicycle"~"^(yes|designated)$"](${b});
   way[~"^cycleway(:right|:left|:both)?$"~"^(track|lane|opposite_track|opposite_lane|share_busway)$"](${b});
 );
-out tags center;
+out geom center;
 `
 }
 
@@ -146,11 +148,32 @@ const TILES_PER_SCAN = 20
 const SAMPLES_PER_GROUP = 5
 const INTER_TILE_PAUSE_MS = 2000
 
+/** Haversine distance in km between two lat/lng points. */
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+/** Compute total length of a way geometry in km. */
+function wayLengthKm(geometry: Array<{ lat: number; lon: number }>): number {
+  let total = 0
+  for (let i = 1; i < geometry.length; i++) {
+    total += haversineKm(geometry[i - 1].lat, geometry[i - 1].lon, geometry[i].lat, geometry[i].lon)
+  }
+  return total
+}
+
 interface OverpassAuditElement {
   type: string
   id: number
   tags?: Record<string, string>
   center?: { lat: number; lon: number }
+  geometry?: Array<{ lat: number; lon: number }>
 }
 
 export async function scanCity(
@@ -182,6 +205,7 @@ export async function scanCity(
               osmId: el.id,
               tags: el.tags ?? {},
               center: el.center,
+              lengthKm: el.geometry ? wayLengthKm(el.geometry) : 0,
             })
           }
         }
@@ -207,16 +231,17 @@ export async function scanCity(
 
     let group = groupMap.get(key)
     if (!group) {
-      group = { signature: sig, classification, wayCount: 0, samples: [] }
+      group = { signature: sig, classification, wayCount: 0, totalDistanceKm: 0, samples: [] }
       groupMap.set(key, group)
     }
     group.wayCount++
+    group.totalDistanceKm += way.lengthKm
     if (group.samples.length < SAMPLES_PER_GROUP) {
       group.samples.push(way)
     }
   }
 
-  const groups = Array.from(groupMap.values()).sort((a, b) => b.wayCount - a.wayCount)
+  const groups = Array.from(groupMap.values()).sort((a, b) => b.totalDistanceKm - a.totalDistanceKm)
 
   return {
     city,
