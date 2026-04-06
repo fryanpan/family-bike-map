@@ -40,14 +40,19 @@ export default function AuditPanel({ onClose }: Props) {
     setScan((prev) => prev ? reclassifyGroups(prev, newRules.rules) : prev)
   }, [])
 
-  // Load cached scan and rules on mount and when city changes
+  // Load cached scan and rules on mount and when city changes.
+  // Reclassify scan groups once both are available.
   useEffect(() => {
     let cancelled = false
-    loadScan(selectedCity).then((cached) => {
-      if (!cancelled && cached) setScan(cached)
-    })
-    fetchRules(selectedCity.toLowerCase()).then((r) => {
-      if (!cancelled) setRulesRaw(r)
+    Promise.all([
+      loadScan(selectedCity),
+      fetchRules(selectedCity.toLowerCase()),
+    ]).then(([cached, r]) => {
+      if (cancelled) return
+      setRulesRaw(r)
+      if (cached) {
+        setScan(r.rules.length > 0 ? reclassifyGroups(cached, r.rules) : cached)
+      }
     })
     return () => { cancelled = true }
   }, [selectedCity])
