@@ -114,9 +114,9 @@ describe('classifyEdgeToItem — shared bus lane (cycle_lane="share_busway")', (
 describe('classifyEdgeToItem — residential road', () => {
   it('classifies residential road_class as Residential road', () => {
     const edge: ValhallaEdge = { road_class: 'residential' }
-    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Residential road')
-    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Residential road')
-    expect(classifyEdgeToItem(edge, 'training')).toBe('Residential road')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Residential & local road')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Residential & local road')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Residential & local road')
   })
 })
 
@@ -156,10 +156,14 @@ describe('classifyEdgeToItem — bad surfaces return rough road', () => {
 // ── Arterial roads → null ─────────────────────────────────────────────────────
 
 describe('classifyEdgeToItem — arterial roads return null', () => {
-  it('returns null for primary, secondary, tertiary roads', () => {
+  it('returns null for primary and secondary roads', () => {
     expect(classifyEdgeToItem({ road_class: 'primary' }, 'toddler')).toBeNull()
     expect(classifyEdgeToItem({ road_class: 'secondary' }, 'toddler')).toBeNull()
-    expect(classifyEdgeToItem({ road_class: 'tertiary' }, 'toddler')).toBeNull()
+  })
+
+  it('returns Residential & local road for tertiary and unclassified', () => {
+    expect(classifyEdgeToItem({ road_class: 'tertiary' }, 'toddler')).toBe('Residential & local road')
+    expect(classifyEdgeToItem({ road_class: 'unclassified' }, 'toddler')).toBe('Residential & local road')
   })
 
   it('returns null for null/undefined edge', () => {
@@ -180,7 +184,7 @@ describe('getDefaultPreferredItems', () => {
     expect(items.has('Living street')).toBe(true)
     // non-default items should NOT be preferred by default
     expect(items.has('Painted bike lane')).toBe(false)
-    expect(items.has('Residential road')).toBe(false)
+    expect(items.has('Residential & local road')).toBe(false)
   })
 
   it('returns defaultPreferred items for training profile', () => {

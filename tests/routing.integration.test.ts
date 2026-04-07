@@ -332,8 +332,8 @@ describe('classifyEdgeToItem — uses Valhalla string API values (not legacy num
     expect(classifyEdgeToItem({ cycle_lane: 'share_busway' }, 'training')).toBe('Shared bus lane')
   })
 
-  it('residential road ("road_class"="residential") → Residential road', () => {
-    expect(classifyEdgeToItem({ road_class: 'residential' }, 'toddler')).toBe('Residential road')
+  it('residential road ("road_class"="residential") → Residential & local road', () => {
+    expect(classifyEdgeToItem({ road_class: 'residential' }, 'toddler')).toBe('Residential & local road')
   })
 
   it('secondary road ("road_class"="secondary") → null (arterial, not in legend)', () => {
