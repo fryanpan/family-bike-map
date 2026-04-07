@@ -204,7 +204,8 @@ export function classifyOsmTagsToItem(
 
   if (cycleway === 'share_busway') return 'Shared bus lane'
   if (highway === 'living_street') return 'Living street'
-  if (highway === 'residential')   return 'Residential road'
+  if (highway === 'residential' || highway === 'tertiary' || highway === 'unclassified' || highway === 'service')
+    return 'Residential & local road'
 
   return null
 }

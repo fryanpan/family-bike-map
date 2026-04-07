@@ -148,7 +148,7 @@ describe('classifyOsmTagsToItem', () => {
   })
 
   it('returns Residential road for plain residential', () => {
-    expect(classifyOsmTagsToItem({ highway: 'residential' }, 'toddler')).toBe('Residential road')
+    expect(classifyOsmTagsToItem({ highway: 'residential' }, 'toddler')).toBe('Residential & local road')
   })
 
   it('returns Shared footway for footway', () => {
@@ -178,7 +178,7 @@ describe('classifyOsmTagsToItem with rules', () => {
   it('rule with multiple match keys requires all to match', () => {
     const rules = [{ match: { highway: 'residential', surface: 'asphalt' }, classification: 'Smooth residential', travelModes: {} }]
     // Only one key matches — should fall through
-    expect(classifyOsmTagsToItem({ highway: 'residential' }, 'toddler', rules)).toBe('Residential road')
+    expect(classifyOsmTagsToItem({ highway: 'residential' }, 'toddler', rules)).toBe('Residential & local road')
     // Both keys match — rule applies
     expect(classifyOsmTagsToItem({ highway: 'residential', surface: 'asphalt' }, 'toddler', rules)).toBe('Smooth residential')
   })

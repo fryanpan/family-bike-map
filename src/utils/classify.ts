@@ -39,8 +39,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
     { defaultPreferred: false, items: [
       { icon: '〰️', name: 'Painted bike lane',          useRoads: 0.3,  defaultPreferred: false },
       { icon: '🚌', name: 'Shared bus lane',            useRoads: 0.3,  defaultPreferred: false },
-      { icon: '🏠', name: 'Residential road',           useRoads: 0.5,  defaultPreferred: false },
-      { icon: '🔧', name: 'Service road',               useRoads: 0.5,  defaultPreferred: false },
+      { icon: '🏠', name: 'Residential & local road',           useRoads: 0.5,  defaultPreferred: false },
       { icon: '⚠️', name: 'Rough road (e.g. cobblestone)', useRoads: 0.5, defaultPreferred: false },
     ]},
   ],
@@ -54,11 +53,10 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
     { defaultPreferred: true, items: [
       { icon: '〰️', name: 'Painted bike lane',          useRoads: 0.15, defaultPreferred: true },
       { icon: '🏘️', name: 'Living street',              useRoads: 0.05, defaultPreferred: true },
-      { icon: '🏠', name: 'Residential road',           useRoads: 0.15, defaultPreferred: true },
+      { icon: '🏠', name: 'Residential & local road',           useRoads: 0.15, defaultPreferred: true },
     ]},
     { defaultPreferred: false, items: [
       { icon: '🛡️', name: 'Separated bike track (narrow)', useRoads: 0.0, defaultPreferred: false },
-      { icon: '🔧', name: 'Service road',               useRoads: 0.15, defaultPreferred: false },
       { icon: '⚠️', name: 'Rough road (e.g. cobblestone)', useRoads: 0.15, defaultPreferred: false },
     ]},
   ],
@@ -72,11 +70,10 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
     ]},
     { defaultPreferred: true, items: [
       { icon: '🏘️', name: 'Living street',              useRoads: 0.5,  defaultPreferred: true },
-      { icon: '🏠', name: 'Residential road',           useRoads: 0.6,  defaultPreferred: true },
+      { icon: '🏠', name: 'Residential & local road',           useRoads: 0.6,  defaultPreferred: true },
     ]},
     { defaultPreferred: false, items: [
       { icon: '🛡️', name: 'Separated bike track (slow)', useRoads: 0.0, defaultPreferred: false },
-      { icon: '🔧', name: 'Service road',               useRoads: 0.6,  defaultPreferred: false },
       { icon: '⚠️', name: 'Rough road (e.g. cobblestone)', useRoads: 0.6, defaultPreferred: false },
     ]},
   ],
@@ -255,9 +252,9 @@ export function classifyEdgeToItem(
   if (cycleLane === 'shared') return null  // sharrow — not in legend
 
   const rcRank = ROAD_CLASS_RANK[roadClass] ?? 5
-  if (rcRank >= 6) return 'Residential road'
+  if (rcRank >= 4) return 'Residential & local road'
 
-  return null  // arterial roads (primary, secondary, tertiary, etc.) not in legend
+  return null  // arterial roads (primary, secondary) not in legend
 }
 
 interface ClassifiedPoint {
