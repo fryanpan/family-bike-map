@@ -111,23 +111,25 @@ function OverlayRenderer({ ways, profileKey, preferredItemNames, showOtherPaths,
         renderer: canvasRenderer,
       })
 
-      // Bind tooltip without image initially so it appears immediately on hover.
+      // Bind tooltip without image — fetch Mapillary image lazily on first hover.
       polyline.bindTooltip(buildTooltipHtml(itemName, way.tags, isPreferred, null), {
         sticky: true,
         direction: 'top',
         className: 'bike-segment-tooltip',
       })
 
-      // Fetch one Mapillary image near the midpoint of the segment, then update the tooltip.
-      const coords = way.coordinates
-      const mid = coords[Math.floor(coords.length / 2)]
-      const [midLat, midLng] = mid
-      getStreetImage(midLat, midLng).then((img) => {
-        if (!img) return
-        // Only update if the tooltip is still bound (polyline not removed).
-        const tip = polyline.getTooltip()
-        if (!tip) return
-        polyline.setTooltipContent(buildTooltipHtml(itemName, way.tags, isPreferred, img.thumbUrl))
+      let imageFetched = false
+      polyline.on('tooltipopen', () => {
+        if (imageFetched) return
+        imageFetched = true
+        const coords = way.coordinates
+        const mid = coords[Math.floor(coords.length / 2)]
+        getStreetImage(mid[0], mid[1]).then((img) => {
+          if (!img) return
+          const tip = polyline.getTooltip()
+          if (!tip) return
+          polyline.setTooltipContent(buildTooltipHtml(itemName, way.tags, isPreferred, img.thumbUrl))
+        })
       })
 
       polyline.addTo(lg)
