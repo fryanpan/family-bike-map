@@ -3,13 +3,14 @@ import { CITY_PRESETS, scanCity, reclassifyGroups } from '../services/audit'
 import { saveScan, loadScan } from '../services/auditCache'
 import AuditGroupDetail from './AuditGroupDetail'
 import AuditRulesTab from './AuditRulesTab'
+import AuditSamplesTab from './AuditSamplesTab'
 import AuditLegendTab from './AuditLegendTab'
 import type { CityScan, AuditGroup } from '../services/audit'
 import { fetchRules } from '../services/rules'
 import type { RegionRules } from '../services/rules'
 
 type FilterStatus = 'all' | 'classified' | 'unclassified'
-type ActiveTab = 'groups' | 'rules' | 'legend'
+type ActiveTab = 'groups' | 'rules' | 'legend' | 'samples'
 
 interface Props {
   onClose: () => void
@@ -159,6 +160,12 @@ export default function AuditPanel({ onClose }: Props) {
         >
           Legend Items
         </button>
+        <button
+          className={`audit-tab${activeTab === 'samples' ? ' audit-tab-active' : ''}`}
+          onClick={() => setActiveTab('samples')}
+        >
+          Samples
+        </button>
       </div>
 
       {activeTab === 'groups' && (
@@ -240,6 +247,10 @@ export default function AuditPanel({ onClose }: Props) {
           region={selectedCity.toLowerCase()}
           onRulesChange={setRules}
         />
+      )}
+
+      {activeTab === 'samples' && (
+        <AuditSamplesTab scan={scan} />
       )}
     </div>
   )
