@@ -202,7 +202,8 @@ export function classifyOsmTagsToItem(
     return 'Painted bike lane'
   }
 
-  if (cycleway === 'share_busway') return 'Shared bus lane'
+  if (cycleway === 'share_busway' || cRight === 'share_busway' || cLeft === 'share_busway' || cBoth === 'share_busway')
+    return 'Shared bus lane'
   if (highway === 'living_street') return 'Living street'
   if (highway === 'residential' || highway === 'tertiary' || highway === 'unclassified' || highway === 'service')
     return 'Residential & local road'
