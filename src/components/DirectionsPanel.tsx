@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { formatDistance, formatDuration } from '../services/routing'
 import { computeRouteQuality } from '../utils/classify'
+import SegmentFeedback from './SegmentFeedback'
 import type { Route, ValhallaManeuver, LatLng } from '../utils/types'
 
 // Valhalla maneuver type → direction icon
@@ -60,9 +61,10 @@ interface Props {
   onClose: () => void
   preferredItemNames: Set<string>
   currentLocation?: LatLng | null
+  travelMode?: string
 }
 
-export default function DirectionsPanel({ route, onClose, preferredItemNames, currentLocation }: Props) {
+export default function DirectionsPanel({ route, onClose, preferredItemNames, currentLocation, travelMode }: Props) {
   const [navigating, setNavigating] = useState(false)
   const [step, setStep] = useState(0)
   const [turnsExpanded, setTurnsExpanded] = useState(false)
@@ -235,6 +237,11 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
           <button className="stop-nav-btn" onClick={stopNav}>
             Stop Navigation
           </button>
+
+          <SegmentFeedback
+            currentLocation={currentLocation ?? null}
+            travelMode={travelMode ?? 'unknown'}
+          />
         </div>
       ) : (
         <>

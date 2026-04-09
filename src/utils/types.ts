@@ -101,6 +101,23 @@ export interface ValhallaManeuver {
   begin_shape_index?: number
 }
 
+export interface LtsSegmentInfo {
+  name: string
+  lts: 1 | 2 | 3 | 4
+  lengthM: number
+}
+
+export interface RouteLtsBreakdown {
+  lts1Pct: number
+  lts2Pct: number
+  lts3Pct: number
+  lts4Pct: number
+  worstLts: 1 | 2 | 3 | 4
+  familySafetyScore: number
+  /** The single worst segment by LTS level (for callout display). */
+  worstSegment: LtsSegmentInfo | null
+}
+
 export interface Route {
   coordinates: [number, number][]
   maneuvers: ValhallaManeuver[]
@@ -111,6 +128,8 @@ export interface Route {
   segments?: RouteSegment[]
   /** Which routing engine produced this route (e.g. 'valhalla', 'brouter'). */
   engine?: string
+  /** LTS breakdown, available when the route has per-segment OSM tags (BRouter). */
+  ltsBreakdown?: RouteLtsBreakdown
 }
 
 export interface OsmWay {

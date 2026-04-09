@@ -1,6 +1,7 @@
 import { formatDistance, formatDuration } from '../services/routing'
 import { computeRouteQuality } from '../utils/classify'
 import { PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
+import SafetyScore from './SafetyScore'
 import type { Route } from '../utils/types'
 
 interface Props {
@@ -71,6 +72,13 @@ export default function RouteList({ routes, selectedIndex, onSelect, preferredIt
                   <span className="route-card-pct">{preferredPct}% preferred</span>
                 )}
               </div>
+            )}
+
+            {r.ltsBreakdown && (
+              <SafetyScore
+                score={r.ltsBreakdown.familySafetyScore}
+                worstSegment={r.ltsBreakdown.worstSegment}
+              />
             )}
           </button>
         )
