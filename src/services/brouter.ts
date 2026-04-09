@@ -235,9 +235,17 @@ function parseFeature(feature: BRouterGeoJSON['features'][0]): Route {
  * Returns up to 2 routes (primary + one alternate) by requesting alternativeidx 0 and 1.
  * If the alternate request fails (not all routes have alternates), only the primary is returned.
  */
-export async function getBRouterRoutes(start: Place, end: Place): Promise<Route[]> {
+// Map our travel modes to the closest BRouter profiles
+const BROUTER_PROFILES: Record<string, string> = {
+  toddler: 'safety',               // most road-avoiding, supports dismount fallback
+  trailer: 'safety',               // same — avoids busy roads, penalizes bad surfaces
+  training: 'fastbike-lowtraffic', // faster but still avoids high-traffic roads
+}
+
+export async function getBRouterRoutes(start: Place, end: Place, travelMode?: string): Promise<Route[]> {
   const lonlats = `${start.lng},${start.lat}|${end.lng},${end.lat}`
-  const baseParams = `lonlats=${lonlats}&profile=trekking&format=geojson`
+  const profile = BROUTER_PROFILES[travelMode ?? 'toddler'] ?? 'safety'
+  const baseParams = `lonlats=${lonlats}&profile=${profile}&format=geojson`
 
   // Fetch primary and alternate in parallel
   const [primaryResp, altResp] = await Promise.all([
