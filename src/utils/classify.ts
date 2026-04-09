@@ -164,12 +164,34 @@ export function getCostingFromPreferences(
   }
 }
 
-// Surfaces that are rough/uncomfortable for family cycling.
-// Imported by overpass.ts (single source of truth).
-export const BAD_SURFACES = new Set([
-  'cobblestone', 'paving_stones', 'sett', 'unhewn_cobblestone',
-  'cobblestone:flattened', 'gravel', 'unpaved',
+// Surfaces that are always rough regardless of travel mode.
+const ALWAYS_BAD_SURFACES = new Set([
+  'cobblestone', 'sett', 'unhewn_cobblestone', 'cobblestone:flattened',
+  'gravel', 'unpaved', 'dirt', 'earth', 'ground', 'mud', 'sand',
+  'grass', 'fine_gravel', 'pebblestone', 'woodchips',
 ])
+
+// Surfaces that are rough only at higher speeds (trailer pulling, training ride).
+// Paving stones are the standard Berlin bike path material — fine for a toddler
+// at low speed, but bumpy at trailer/training speed.
+const SPEED_SENSITIVE_SURFACES = new Set([
+  'paving_stones', 'paving_stones:lanes',
+])
+
+/**
+ * Check if a surface is bad for a given travel mode.
+ * - Toddler: only universally bad surfaces (paving_stones are OK at low speed)
+ * - Trailer/training: universally bad + speed-sensitive surfaces
+ */
+export function isBadSurface(surface: string, profileKey: string): boolean {
+  if (ALWAYS_BAD_SURFACES.has(surface)) return true
+  if (profileKey !== 'toddler' && SPEED_SENSITIVE_SURFACES.has(surface)) return true
+  return false
+}
+
+// Kept for backwards compat with overpass.ts import (used in Overpass query filter).
+// This is the union of all bad surfaces across all modes.
+export const BAD_SURFACES = new Set([...ALWAYS_BAD_SURFACES, ...SPEED_SENSITIVE_SURFACES])
 
 // Smoothness values that indicate a rough road regardless of surface tag.
 export const BAD_SMOOTHNESS = new Set([
@@ -230,8 +252,8 @@ export function classifyEdgeToItem(
   const bicycleRoad = edge.bicycle_road ?? false
   const surface     = edge.surface      ?? ''
 
-  // Bad surfaces → classified as rough road (visible on map, not preferred)
-  if (BAD_SURFACES.has(surface)) return ROUGH_ROAD_ITEM
+  // Bad surfaces → classified as rough road (travel-mode-aware)
+  if (surface && isBadSurface(surface, profileKey)) return ROUGH_ROAD_ITEM
 
   // Fahrradstrasse must come before cycleway/path checks (bicycle_road tag wins)
   if (bicycleRoad) return 'Fahrradstrasse'

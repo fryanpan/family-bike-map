@@ -41,10 +41,10 @@ describe('classifyEdgeToItem — car-free paths (use="cycleway", "path", "mounta
     expect(classifyEdgeToItem(edge, 'toddler')).toBe('Car-free path / Radweg')
   })
 
-  it('classifies dirt path (use=path, surface=dirt) as Car-free path — dirt is NOT a bad surface', () => {
+  it('classifies dirt path as Rough road — dirt is a bad surface for all modes', () => {
     const edge: ValhallaEdge = { use: 'path', surface: 'dirt' }
-    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Car-free path / Radweg')
-    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Car-free path / Radweg')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Rough road (e.g. cobblestone)')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Rough road (e.g. cobblestone)')
   })
 })
 
@@ -138,11 +138,20 @@ describe('classifyEdgeToItem — bad surfaces return rough road', () => {
     expect(classifyEdgeToItem(edge, 'training')).toBe(ROUGH)
   })
 
-  it('does NOT treat dirt or compacted as bad surfaces', () => {
+  it('treats dirt as rough road but compacted as OK for all modes', () => {
     const dirt: ValhallaEdge = { cycle_lane: 'separated', surface: 'dirt' }
     const compacted: ValhallaEdge = { cycle_lane: 'separated', surface: 'compacted' }
-    expect(classifyEdgeToItem(dirt, 'toddler')).toBe('Separated bike track')
+    expect(classifyEdgeToItem(dirt, 'toddler')).toBe('Rough road (e.g. cobblestone)')
     expect(classifyEdgeToItem(compacted, 'toddler')).toBe('Separated bike track')
+    expect(classifyEdgeToItem(compacted, 'trailer')).toBe('Separated bike track (narrow)')
+    expect(classifyEdgeToItem(compacted, 'training')).toBe('Separated bike track (slow)')
+  })
+
+  it('paving_stones is OK for toddler but rough for trailer/training', () => {
+    const edge: ValhallaEdge = { use: 'cycleway', surface: 'paving_stones' }
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Car-free path / Radweg')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Rough road (e.g. cobblestone)')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Rough road (e.g. cobblestone)')
   })
 
   it('returns rough road for gravel and unpaved', () => {
