@@ -574,6 +574,7 @@ startQuickOptions={startQuickOptions}
                   onClose={backToSearch}
                   preferredItemNames={preferredItemNames}
                   currentLocation={currentLocation}
+                  travelMode={selectedProfile}
                 />
               </div>
             )}

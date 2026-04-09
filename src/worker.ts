@@ -156,6 +156,11 @@ export default {
       })
     }
 
+    // ── Segment feedback ────────────────────────────────────────────
+    if (path === '/api/segment-feedback' && request.method === 'POST') {
+      return handleSegmentFeedback(request)
+    }
+
     // ── Feedback → Linear ─────────────────────────────────────────────
     if (path === '/api/feedback' && request.method === 'POST') {
       return handleFeedback(request, env)
@@ -309,4 +314,30 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
     console.error('[Feedback] Error:', err)
     return Response.json({ error: 'Failed to create Linear ticket' }, { status: 500 })
   }
+}
+
+/**
+ * Handle segment feedback submitted during navigation.
+ * For now, logs to console. In production this would persist to D1/KV.
+ */
+async function handleSegmentFeedback(request: Request): Promise<Response> {
+  let body: Record<string, unknown>
+  try {
+    body = await request.json()
+  } catch {
+    return Response.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  const { lat, lng, feedbackType, detail, travelMode, routeLogId } = body
+
+  if (typeof lat !== 'number' || typeof lng !== 'number') {
+    return Response.json({ error: 'lat and lng are required numbers' }, { status: 400 })
+  }
+  if (typeof feedbackType !== 'string') {
+    return Response.json({ error: 'feedbackType is required' }, { status: 400 })
+  }
+
+  console.log('[SegmentFeedback]', { lat, lng, feedbackType, detail, travelMode, routeLogId })
+
+  return Response.json({ status: 'recorded' }, { status: 201 })
 }
