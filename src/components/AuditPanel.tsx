@@ -5,12 +5,13 @@ import AuditGroupDetail from './AuditGroupDetail'
 import AuditRulesTab from './AuditRulesTab'
 import AuditSamplesTab from './AuditSamplesTab'
 import AuditLegendTab from './AuditLegendTab'
+import AuditEvalTab from './AuditEvalTab'
 import type { CityScan, AuditGroup } from '../services/audit'
 import { fetchRules } from '../services/rules'
 import type { RegionRules } from '../services/rules'
 
 type FilterStatus = 'all' | 'classified' | 'unclassified'
-type ActiveTab = 'groups' | 'rules' | 'legend' | 'samples'
+type ActiveTab = 'groups' | 'rules' | 'legend' | 'samples' | 'eval'
 
 interface Props {
   onClose: () => void
@@ -166,6 +167,12 @@ export default function AuditPanel({ onClose }: Props) {
         >
           Samples
         </button>
+        <button
+          className={`audit-tab${activeTab === 'eval' ? ' audit-tab-active' : ''}`}
+          onClick={() => setActiveTab('eval')}
+        >
+          Eval
+        </button>
       </div>
 
       {activeTab === 'groups' && (
@@ -251,6 +258,10 @@ export default function AuditPanel({ onClose }: Props) {
 
       {activeTab === 'samples' && (
         <AuditSamplesTab scan={scan} regionRules={rules.rules} />
+      )}
+
+      {activeTab === 'eval' && (
+        <AuditEvalTab />
       )}
     </div>
   )
