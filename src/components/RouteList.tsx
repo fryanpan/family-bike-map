@@ -1,7 +1,6 @@
 import { formatDistance, formatDuration } from '../services/routing'
 import { computeRouteQuality } from '../utils/classify'
 import { PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
-import SafetyScore from './SafetyScore'
 import type { Route } from '../utils/types'
 
 interface Props {
@@ -11,10 +10,8 @@ interface Props {
   preferredItemNames: Set<string>
 }
 
-function routeLabel(index: number, engine?: string): string {
-  const engineLabel = engine === 'brouter' ? 'BRouter' : 'Valhalla'
-  if (index === 0) return `Route 1 (fastest) - ${engineLabel}`
-  return `Route ${index + 1} - ${engineLabel}`
+function engineTag(engine?: string): string {
+  return engine === 'brouter' ? 'B' : 'V'
 }
 
 export default function RouteList({ routes, selectedIndex, onSelect, preferredItemNames }: Props) {
@@ -36,49 +33,24 @@ export default function RouteList({ routes, selectedIndex, onSelect, preferredIt
             className={`route-card ${isSelected ? 'route-card--selected' : ''} ${isBRouter ? 'route-card--brouter' : ''}`}
             onClick={() => onSelect(i)}
           >
-            <div className="route-card-header">
-              <span className="route-card-label">{routeLabel(i, r.engine)}</span>
-            </div>
-
-            <div className="route-card-stats">
+            <div className="route-card-row">
+              <span className="route-card-engine">{engineTag(r.engine)}</span>
               <span className="route-card-distance">{formatDistance(r.summary.distance)}</span>
               <span className="route-card-sep">&middot;</span>
               <span className="route-card-time">{formatDuration(r.summary.duration)}</span>
+              {preferredPct !== null && (
+                <span className="route-card-pct">{preferredPct}%</span>
+              )}
             </div>
-
             {quality && (
-              <div className="route-card-quality">
-                <div className="route-card-bar">
-                  {quality.preferred > 0 && (
-                    <div
-                      className="route-card-bar-seg"
-                      style={{
-                        flex: quality.preferred,
-                        backgroundColor: PREFERRED_COLOR,
-                      }}
-                    />
-                  )}
-                  {quality.other > 0 && (
-                    <div
-                      className="route-card-bar-seg"
-                      style={{
-                        flex: quality.other,
-                        backgroundColor: OTHER_COLOR,
-                      }}
-                    />
-                  )}
-                </div>
-                {preferredPct !== null && (
-                  <span className="route-card-pct">{preferredPct}% preferred</span>
+              <div className="route-card-bar">
+                {quality.preferred > 0 && (
+                  <div className="route-card-bar-seg" style={{ flex: quality.preferred, backgroundColor: PREFERRED_COLOR }} />
+                )}
+                {quality.other > 0 && (
+                  <div className="route-card-bar-seg" style={{ flex: quality.other, backgroundColor: OTHER_COLOR }} />
                 )}
               </div>
-            )}
-
-            {r.ltsBreakdown && (
-              <SafetyScore
-                score={r.ltsBreakdown.familySafetyScore}
-                worstSegment={r.ltsBreakdown.worstSegment}
-              />
             )}
           </button>
         )
