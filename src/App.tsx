@@ -10,7 +10,8 @@ import RoutingHeader from './components/RoutingHeader'
 import ProfileSelector from './components/ProfileSelector'
 import DirectionsPanel from './components/DirectionsPanel'
 import FeedbackWidget from './components/FeedbackWidget'
-import { getRoute, getRouteSegments, DEFAULT_PROFILES } from './services/routing'
+import { getRoute, DEFAULT_PROFILES } from './services/routing'
+import { scoreRoute } from './services/routeScorer'
 import { getBRouterRoutes } from './services/brouter'
 import { logRoute } from './services/routeLog'
 import { reverseGeocode } from './services/geocoding'
@@ -268,12 +269,12 @@ export default function App() {
         })
       }
 
-      // Enrich each Valhalla route with profile-aware colored segments in the background.
-      // Match by coordinates reference (not index) since BRouter routes may append to the array.
+      // Enrich each route with segments using the unified Overpass-based scorer.
+      // Same classifier as the map overlay — consistent quality display for all engines.
       taggedValhalla.forEach((result) => {
         const coords = result.coordinates
-        getRouteSegments(coords, profileKey).then((segments) => {
-          if (segments) {
+        scoreRoute(coords, profileKey, regionRules).then((segments) => {
+          if (segments.length) {
             setRoutes((prev) => prev.map((r) => r.coordinates === coords ? { ...r, segments } : r))
           }
         })
@@ -297,6 +298,15 @@ export default function App() {
           })
         }
         setRoutes((prev) => [...prev, ...brouterResults])
+        // Score BRouter routes with the unified scorer too
+        for (const result of brouterResults) {
+          const coords = result.coordinates
+          scoreRoute(coords, profileKey, regionRules).then((segments) => {
+            if (segments.length) {
+              setRoutes((prev) => prev.map((r) => r.coordinates === coords ? { ...r, segments } : r))
+            }
+          })
+        }
       }).catch(() => {
         // BRouter failure is non-critical — Valhalla routes still available
       })
