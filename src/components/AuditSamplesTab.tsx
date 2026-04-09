@@ -73,10 +73,11 @@ function ClassSection({ classification, ways }: { classification: string; ways: 
       <div className="audit-class-grid">
         {found.map((s, i) => {
           const isExpanded = expanded === i
-          const tags = TAG_KEYS
+          const allTags = TAG_KEYS
             .filter((k) => s.way.tags[k])
-            .slice(0, 3)
             .map((k) => `${k}=${s.way.tags[k]}`)
+          const visibleTags = isExpanded ? allTags : allTags.slice(0, 3)
+          const hiddenCount = allTags.length - 3
           return (
             <div
               key={i}
@@ -91,9 +92,12 @@ function ClassSection({ classification, ways }: { classification: string; ways: 
               />
               <div className="audit-class-card-meta">
                 {s.way.tags.name && <span className="audit-class-name">{s.way.tags.name}</span>}
-                {tags.map((t, ti) => (
+                {visibleTags.map((t, ti) => (
                   <span key={ti} className="audit-class-tag">{t}</span>
                 ))}
+                {!isExpanded && hiddenCount > 0 && (
+                  <span className="audit-class-more">+{hiddenCount} more</span>
+                )}
               </div>
             </div>
           )

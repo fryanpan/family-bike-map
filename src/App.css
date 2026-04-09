@@ -848,6 +848,11 @@ button { font-family: inherit; cursor: pointer; }
   color: #6b7280;
   font-family: monospace;
 }
+.audit-class-more {
+  font-size: 10px;
+  color: #2563eb;
+  font-weight: 500;
+}
 .audit-class-loading {
   font-size: 13px;
   color: #6b7280;
