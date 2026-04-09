@@ -281,7 +281,7 @@ export default function App() {
       })
 
       // Fetch BRouter routes in parallel (non-blocking — appended when ready)
-      getBRouterRoutes(start, end).then((brouterResults) => {
+      getBRouterRoutes(start, end, profileKey).then((brouterResults) => {
         // Log BRouter routes
         for (const result of brouterResults) {
           logRoute({
