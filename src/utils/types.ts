@@ -98,6 +98,7 @@ export interface ValhallaManeuver {
   instruction: string
   length: number
   time: number
+  begin_shape_index?: number
 }
 
 export interface Route {
@@ -108,6 +109,8 @@ export interface Route {
     duration: number // seconds
   }
   segments?: RouteSegment[]
+  /** Which routing engine produced this route (e.g. 'valhalla', 'brouter'). */
+  engine?: string
 }
 
 export interface OsmWay {

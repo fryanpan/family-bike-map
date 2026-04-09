@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { formatDistance, formatDuration } from '../services/routing'
 import { computeRouteQuality } from '../utils/classify'
-import type { Route, ValhallaManeuver } from '../utils/types'
+import type { Route, ValhallaManeuver, LatLng } from '../utils/types'
 
 // Valhalla maneuver type → direction icon
 const ICONS: Record<number, string> = {
@@ -37,23 +37,104 @@ function speak(text: string): void {
   window.speechSynthesis.speak(utt)
 }
 
+/** Haversine distance in meters. */
+function distanceM(a: LatLng, b: { lat: number; lng: number }): number {
+  const R = 6371000
+  const dLat = (b.lat - a.lat) * Math.PI / 180
+  const dLng = (b.lng - a.lng) * Math.PI / 180
+  const x = Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
+}
+
+/** Get the coordinate for a maneuver from the route coordinates. */
+function maneuverCoord(m: ValhallaManeuver, coords: [number, number][]): { lat: number; lng: number } | null {
+  const idx = m.begin_shape_index ?? 0
+  const c = coords[idx]
+  return c ? { lat: c[0], lng: c[1] } : null
+}
+
 interface Props {
   route: Route
   onClose: () => void
   preferredItemNames: Set<string>
+  currentLocation?: LatLng | null
 }
 
-export default function DirectionsPanel({ route, onClose, preferredItemNames }: Props) {
+export default function DirectionsPanel({ route, onClose, preferredItemNames, currentLocation }: Props) {
   const [navigating, setNavigating] = useState(false)
   const [step, setStep] = useState(0)
   const [turnsExpanded, setTurnsExpanded] = useState(false)
 
-  const { summary, maneuvers, segments } = route
+  const { summary, maneuvers, segments, coordinates } = route
   const quality = segments ? computeRouteQuality(segments, preferredItemNames) : null
+
+  // Compute maneuver coordinates once
+  const maneuverCoords = useMemo(() =>
+    (maneuvers as ValhallaManeuver[]).map((m) => maneuverCoord(m, coordinates)),
+    [maneuvers, coordinates],
+  )
+
+  // Track which speech triggers have fired for the current step
+  const speechRef = useRef<{ step: number; spoke200: boolean; spoke50: boolean }>({ step: -1, spoke200: false, spoke50: false })
 
   useEffect(() => {
     return () => window.speechSynthesis?.cancel()
   }, [])
+
+  // GPS-based auto-advance and distance-based speech
+  useEffect(() => {
+    if (!navigating || !currentLocation || maneuvers.length === 0) return
+
+    const nextCoord = maneuverCoords[step + 1]
+    if (!nextCoord) return
+
+    const dist = distanceM(currentLocation, nextCoord)
+
+    // Reset speech triggers when step changes
+    if (speechRef.current.step !== step) {
+      speechRef.current = { step, spoke200: false, spoke50: false }
+    }
+
+    const nextManeuver = maneuvers[step + 1] as ValhallaManeuver | undefined
+    if (!nextManeuver) return
+
+    // Speak at 200m
+    if (dist <= 200 && !speechRef.current.spoke200) {
+      speechRef.current.spoke200 = true
+      speak(`In ${Math.round(dist)} meters, ${nextManeuver.instruction}`)
+    }
+
+    // Speak at 50m (shortened)
+    if (dist <= 50 && !speechRef.current.spoke50) {
+      speechRef.current.spoke50 = true
+      const short = nextManeuver.instruction.replace(/ onto .+$/, '')
+      speak(short)
+    }
+
+    // Auto-advance at 30m
+    if (dist <= 30 && step < maneuvers.length - 1) {
+      setStep(step + 1)
+    }
+  }, [navigating, currentLocation, step, maneuverCoords, maneuvers])
+
+  // Find current segment for preferred/other indicator
+  const currentSegmentInfo = useMemo(() => {
+    if (!navigating || !currentLocation || !segments?.length) return null
+    let nearest = { dist: Infinity, itemName: null as string | null }
+    for (const seg of segments) {
+      for (const coord of seg.coordinates) {
+        const d = distanceM(currentLocation, { lat: coord[0], lng: coord[1] })
+        if (d < nearest.dist) {
+          nearest = { dist: d, itemName: seg.itemName }
+        }
+      }
+    }
+    if (nearest.dist > 100) return null // too far from route
+    const isPreferred = nearest.itemName !== null && preferredItemNames.has(nearest.itemName)
+    return { itemName: nearest.itemName, isPreferred }
+  }, [navigating, currentLocation, segments, preferredItemNames])
 
   function startNav() {
     setNavigating(true)
@@ -74,6 +155,8 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames }: 
   }
 
   const currentStep = maneuvers[step] as ValhallaManeuver | undefined
+  const nextCoord = maneuverCoords[step + 1]
+  const distToNext = currentLocation && nextCoord ? distanceM(currentLocation, nextCoord) : null
 
   return (
     <div className="directions-panel">
@@ -111,13 +194,25 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames }: 
 
       {navigating ? (
         <div className="nav-active">
+          {/* Current segment indicator */}
+          {currentSegmentInfo && (
+            <div className={`nav-segment-badge ${currentSegmentInfo.isPreferred ? 'nav-segment-preferred' : 'nav-segment-other'}`}>
+              {currentSegmentInfo.isPreferred ? '● On preferred path' : '● On other path'}
+              {currentSegmentInfo.itemName === null && (
+                <span className="nav-walk-badge">🚶 Walk your bike</span>
+              )}
+            </div>
+          )}
+
           <div className="nav-step-row">
             <span className="nav-icon">{icon(currentStep?.type ?? 0)}</span>
             <p className="nav-instruction">{currentStep?.instruction}</p>
           </div>
-          {currentStep?.length != null && (
+          {distToNext != null ? (
+            <p className="nav-dist">Next turn in {distToNext < 1000 ? `${Math.round(distToNext)}m` : `${(distToNext / 1000).toFixed(1)}km`}</p>
+          ) : currentStep?.length != null ? (
             <p className="nav-dist">in {formatDistance(currentStep.length)}</p>
-          )}
+          ) : null}
           <div className="nav-controls">
             <button
               className="nav-btn"

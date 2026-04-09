@@ -115,6 +115,7 @@ interface ValhallaManeuverRaw {
   instruction: string
   length: number
   time: number
+  begin_shape_index?: number
 }
 
 interface ValhallaTrip {

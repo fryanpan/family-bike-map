@@ -56,6 +56,22 @@ export default {
       })
     }
 
+    // ── BRouter proxy ──────────────────────────────────────────────────
+    if (path === '/api/brouter') {
+      const target = `https://brouter.de/brouter${url.search}`
+      const resp = await fetch(target, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'BerlinBikeRouteFinder/0.1 (github.com/fryanpan/bike-route-finder)',
+          'Accept': 'application/json',
+        },
+      })
+      return new Response(await resp.arrayBuffer(), {
+        status: resp.status,
+        headers: { 'Content-Type': resp.headers.get('Content-Type') ?? 'application/json' },
+      })
+    }
+
     // ── Overpass proxy with Cloudflare edge cache ─────────────────────
     // Proxying through the Worker (same-origin) avoids iOS content blockers
     // that block direct requests to overpass-api.de (a third-party domain).

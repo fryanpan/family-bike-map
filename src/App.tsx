@@ -11,6 +11,7 @@ import ProfileSelector from './components/ProfileSelector'
 import DirectionsPanel from './components/DirectionsPanel'
 import FeedbackWidget from './components/FeedbackWidget'
 import { getRoute, getRouteSegments, DEFAULT_PROFILES } from './services/routing'
+import { getBRouterRoutes } from './services/brouter'
 import { logRoute } from './services/routeLog'
 import { reverseGeocode } from './services/geocoding'
 import {
@@ -246,11 +247,13 @@ export default function App() {
 
     try {
       const costingOptions = getCostingFromPreferences(preferredItemNames, profileKey, profile)
-      const results = await getRoute(start, end, { ...profile, costingOptions }, wps, 2)
-      setRoutes(results)
+      const valhallaResults = await getRoute(start, end, { ...profile, costingOptions }, wps, 2)
+      // Tag Valhalla routes with engine
+      const taggedValhalla = valhallaResults.map((r) => ({ ...r, engine: 'valhalla' }))
+      setRoutes(taggedValhalla)
 
-      // Fire-and-forget route log for each route
-      for (const result of results) {
+      // Fire-and-forget route log for each Valhalla route
+      for (const result of taggedValhalla) {
         logRoute({
           startLat: start.lat,
           startLng: start.lng,
@@ -265,13 +268,35 @@ export default function App() {
         })
       }
 
-      // Enrich each route with profile-aware colored segments in the background
-      results.forEach((result, i) => {
+      // Enrich each Valhalla route with profile-aware colored segments in the background
+      taggedValhalla.forEach((result, i) => {
         getRouteSegments(result.coordinates, profileKey).then((segments) => {
           if (segments) {
             setRoutes((prev) => prev.map((r, j) => j === i ? { ...r, segments } : r))
           }
         })
+      })
+
+      // Fetch BRouter routes in parallel (non-blocking — appended when ready)
+      getBRouterRoutes(start, end).then((brouterResults) => {
+        // Log BRouter routes
+        for (const result of brouterResults) {
+          logRoute({
+            startLat: start.lat,
+            startLng: start.lng,
+            startLabel: start.label,
+            endLat: end.lat,
+            endLng: end.lng,
+            endLabel: end.label,
+            travelMode: profileKey,
+            engine: 'brouter',
+            distanceM: Math.round(result.summary.distance * 1000),
+            durationS: Math.round(result.summary.duration),
+          })
+        }
+        setRoutes((prev) => [...prev, ...brouterResults])
+      }).catch(() => {
+        // BRouter failure is non-critical — Valhalla routes still available
       })
     } catch (e) {
       const msg = (e as Error).message ?? 'Could not find a route'
@@ -548,6 +573,7 @@ startQuickOptions={startQuickOptions}
                   route={route}
                   onClose={backToSearch}
                   preferredItemNames={preferredItemNames}
+                  currentLocation={currentLocation}
                 />
               </div>
             )}

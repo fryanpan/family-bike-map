@@ -429,6 +429,14 @@ button { font-family: inherit; cursor: pointer; }
   font-weight: 600;
   margin-top: 3px;
 }
+.route-card--brouter {
+  border-color: #93c5fd;
+  background: #f0f7ff;
+}
+.route-card--brouter.route-card--selected {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
 
 /* ── Directions panel ──────────────────────────────────── */
 .directions-panel { padding: 12px 16px 16px; }
@@ -554,6 +562,24 @@ button { font-family: inherit; cursor: pointer; }
   border: none;
   border-radius: 8px;
   font-size: 14px;
+}
+
+/* Navigation segment badge */
+.nav-segment-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+.nav-segment-preferred { background: #d1fae5; color: #065f46; }
+.nav-segment-other { background: #fef3c7; color: #92400e; }
+.nav-walk-badge {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #6b7280;
 }
 
 /* Maneuvers list */

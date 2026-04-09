@@ -10,8 +10,10 @@ interface Props {
   preferredItemNames: Set<string>
 }
 
-function routeLabel(index: number): string {
-  return index === 0 ? 'Route 1 (fastest)' : `Route ${index + 1}`
+function routeLabel(index: number, engine?: string): string {
+  const engineLabel = engine === 'brouter' ? 'BRouter' : 'Valhalla'
+  if (index === 0) return `Route 1 (fastest) - ${engineLabel}`
+  return `Route ${index + 1} - ${engineLabel}`
 }
 
 export default function RouteList({ routes, selectedIndex, onSelect, preferredItemNames }: Props) {
@@ -24,16 +26,17 @@ export default function RouteList({ routes, selectedIndex, onSelect, preferredIt
           ? computeRouteQuality(r.segments, preferredItemNames)
           : null
         const isSelected = i === selectedIndex
+        const isBRouter = r.engine === 'brouter'
         const preferredPct = quality ? Math.round(quality.preferred * 100) : null
 
         return (
           <button
             key={i}
-            className={`route-card ${isSelected ? 'route-card--selected' : ''}`}
+            className={`route-card ${isSelected ? 'route-card--selected' : ''} ${isBRouter ? 'route-card--brouter' : ''}`}
             onClick={() => onSelect(i)}
           >
             <div className="route-card-header">
-              <span className="route-card-label">{routeLabel(i)}</span>
+              <span className="route-card-label">{routeLabel(i, r.engine)}</span>
             </div>
 
             <div className="route-card-stats">
