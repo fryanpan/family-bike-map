@@ -98,6 +98,42 @@ function midpoint(coords: [number, number][]): [number, number] {
   return coords[Math.floor(coords.length / 2)]
 }
 
+/** Haversine distance in meters between two [lat, lng] points. */
+function segDistM(a: [number, number], b: [number, number]): number {
+  const R = 6371000
+  const dLat = (b[0] - a[0]) * Math.PI / 180
+  const dLng = (b[1] - a[1]) * Math.PI / 180
+  const x = Math.sin(dLat / 2) ** 2 +
+    Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
+}
+
+/**
+ * Coalesce nearby same-type segments for icon placement.
+ * Merges segments of the same itemName when the gap between them is <= gapM meters.
+ * Returns coalesced segments with combined coordinates — used only for icon placement,
+ * not for polyline rendering (which stays pixel-accurate).
+ */
+function coalesceForIcons(segments: RouteSegment[], gapM = 20): RouteSegment[] {
+  if (segments.length === 0) return []
+  const result: RouteSegment[] = [{ ...segments[0], coordinates: [...segments[0].coordinates] }]
+  for (let i = 1; i < segments.length; i++) {
+    const prev = result[result.length - 1]
+    const curr = segments[i]
+    const prevEnd = prev.coordinates[prev.coordinates.length - 1]
+    const currStart = curr.coordinates[0]
+    const gap = prevEnd && currStart ? segDistM(prevEnd, currStart) : Infinity
+    if (curr.itemName === prev.itemName && gap <= gapM) {
+      // Merge: extend prev with curr's coordinates
+      prev.coordinates = [...prev.coordinates, ...curr.coordinates]
+    } else {
+      result.push({ ...curr, coordinates: [...curr.coordinates] })
+    }
+  }
+  return result
+}
+
 const WALKING_COLOR = '#6b7280' // gray for walk-your-bike segments
 
 // Route segments are colored green (preferred) or orange (other).
@@ -154,9 +190,9 @@ function RouteDisplay({
             </Polyline>
           )
         })}
-        {/* Segment icons: walking icon for walk segments, legend icon for others */}
-        {visible
-          .filter((seg) => seg.coordinates.length >= 4)
+        {/* Segment icons: coalesced to reduce clutter on long routes */}
+        {coalesceForIcons(visible)
+          .filter((seg) => seg.coordinates.length >= 8)
           .map((seg, i) => {
             if (seg.isWalking) {
               return (
