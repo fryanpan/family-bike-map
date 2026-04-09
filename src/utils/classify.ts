@@ -33,7 +33,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🛤️', name: 'Shared footway (park path)', useRoads: 0.0,  defaultPreferred: true },
     ]},
     { defaultPreferred: true, items: [
-      { icon: '🛡️', name: 'Separated bike track',       useRoads: 0.05, defaultPreferred: true },
+      { icon: '🛡️', name: 'Elevated sidewalk path',       useRoads: 0.05, defaultPreferred: true },
       { icon: '🏘️', name: 'Living street',              useRoads: 0.05, defaultPreferred: true },
     ]},
     { defaultPreferred: false, items: [
@@ -56,7 +56,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🏠', name: 'Residential & local road',           useRoads: 0.15, defaultPreferred: true },
     ]},
     { defaultPreferred: false, items: [
-      { icon: '🛡️', name: 'Separated bike track (narrow)', useRoads: 0.0, defaultPreferred: false },
+      { icon: '🛡️', name: 'Elevated sidewalk path', useRoads: 0.0, defaultPreferred: false },
       { icon: '⚠️', name: 'Rough road (e.g. cobblestone)', useRoads: 0.15, defaultPreferred: false },
     ]},
   ],
@@ -73,7 +73,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🏠', name: 'Residential & local road',           useRoads: 0.6,  defaultPreferred: true },
     ]},
     { defaultPreferred: false, items: [
-      { icon: '🛡️', name: 'Separated bike track (slow)', useRoads: 0.0, defaultPreferred: false },
+      { icon: '🛡️', name: 'Elevated sidewalk path', useRoads: 0.0, defaultPreferred: false },
       { icon: '⚠️', name: 'Rough road (e.g. cobblestone)', useRoads: 0.6, defaultPreferred: false },
     ]},
   ],
@@ -261,12 +261,7 @@ export function classifyEdgeToItem(
   if (use === 'cycleway' || use === 'path' || use === 'mountain_bike') return 'Car-free path / Radweg'
   if (use === 'footway' || use === 'pedestrian') return 'Shared footway (park path)'
 
-  if (cycleLane === 'separated') {
-    if (profileKey === 'toddler') return 'Separated bike track'
-    if (profileKey === 'trailer') return 'Separated bike track (narrow)'
-    if (profileKey === 'training') return 'Separated bike track (slow)'
-    return null
-  }
+  if (cycleLane === 'separated') return 'Elevated sidewalk path'
 
   if (cycleLane === 'dedicated') return 'Painted bike lane'
   if (use === 'living_street')   return 'Living street'

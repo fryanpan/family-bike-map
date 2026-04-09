@@ -125,13 +125,12 @@ describe('classifyOsmTagsToItem', () => {
     expect(classifyOsmTagsToItem({ highway: 'cycleway' }, 'toddler')).toBe('Car-free path / Radweg')
   })
 
-  it('returns profile-specific name for separated bike track', () => {
+  it('returns Elevated sidewalk path for separated bike track (all profiles)', () => {
     const tags = { highway: 'residential', cycleway: 'track' }
-    expect(classifyOsmTagsToItem(tags, 'toddler')).toBe('Separated bike track')
-    expect(classifyOsmTagsToItem(tags, 'trailer')).toBe('Separated bike track (narrow)')
-    expect(classifyOsmTagsToItem(tags, 'training')).toBe('Separated bike track (slow)')
-    // Unknown profile → null (not representable in that profile's legend)
-    expect(classifyOsmTagsToItem(tags, 'unknown')).toBeNull()
+    expect(classifyOsmTagsToItem(tags, 'toddler')).toBe('Elevated sidewalk path')
+    expect(classifyOsmTagsToItem(tags, 'trailer')).toBe('Elevated sidewalk path')
+    expect(classifyOsmTagsToItem(tags, 'training')).toBe('Elevated sidewalk path')
+    expect(classifyOsmTagsToItem(tags, 'unknown')).toBe('Elevated sidewalk path')
   })
 
   it('returns Painted bike lane for cycleway=lane without physical separation', () => {

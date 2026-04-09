@@ -190,12 +190,7 @@ export function classifyOsmTagsToItem(
     (cycleway === 'lane' || cycleway === 'opposite_lane' ||
      cRight === 'lane' || cLeft === 'lane' || cBoth === 'lane') && hasSeparation(tags)
 
-  if (isSeparatedTrack || isPhysicallySeparatedLane) {
-    if (profileKey === 'toddler') return 'Separated bike track'
-    if (profileKey === 'trailer') return 'Separated bike track (narrow)'
-    if (profileKey === 'training') return 'Separated bike track (slow)'
-    return null
-  }
+  if (isSeparatedTrack || isPhysicallySeparatedLane) return 'Elevated sidewalk path'
 
   if (cycleway === 'lane' || cycleway === 'opposite_lane' ||
       cRight === 'lane' || cLeft === 'lane' || cBoth === 'lane') {

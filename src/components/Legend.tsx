@@ -38,9 +38,7 @@ function SeparatedPathSign() {
 
 const LEGEND_ICON_OVERRIDE: Record<string, React.ReactNode> = {
   'Fahrradstrasse':                      <FahrradstrasseSign />,
-  'Separated bike track':                <SeparatedPathSign />,
-  'Separated bike track (narrow)':       <SeparatedPathSign />,
-  'Separated bike track (slow)':         <SeparatedPathSign />,
+  'Elevated sidewalk path':                <SeparatedPathSign />,
 }
 
 interface Props {

@@ -320,8 +320,8 @@ describe('classifyEdgeToItem — uses Valhalla string API values (not legacy num
     expect(classifyEdgeToItem({ use: 'footway' }, 'toddler')).toBe('Shared footway (park path)')
   })
 
-  it('separated bike track ("cycle_lane"="separated") → Separated bike track for toddler', () => {
-    expect(classifyEdgeToItem({ cycle_lane: 'separated' }, 'toddler')).toBe('Separated bike track')
+  it('separated bike track ("cycle_lane"="separated") → Elevated sidewalk path for toddler', () => {
+    expect(classifyEdgeToItem({ cycle_lane: 'separated' }, 'toddler')).toBe('Elevated sidewalk path')
   })
 
   it('painted lane ("cycle_lane"="dedicated") → Painted bike lane', () => {

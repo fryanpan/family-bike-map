@@ -65,14 +65,14 @@ describe('classifyEdgeToItem — shared footway/pedestrian paths', () => {
   })
 })
 
-// ── Separated bike track alongside road (cycleway=track) ─────────────────────
+// ── Elevated sidewalk path alongside road (cycleway=track) ─────────────────────
 
 describe('classifyEdgeToItem — separated track (cycle_lane="separated")', () => {
   it('classifies separated track as profile-specific item name', () => {
     const edge: ValhallaEdge = { cycle_lane: 'separated' }
-    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Separated bike track')
-    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Separated bike track (narrow)')
-    expect(classifyEdgeToItem(edge, 'training')).toBe('Separated bike track (slow)')
+    expect(classifyEdgeToItem(edge, 'toddler')).toBe('Elevated sidewalk path')
+    expect(classifyEdgeToItem(edge, 'trailer')).toBe('Elevated sidewalk path')
+    expect(classifyEdgeToItem(edge, 'training')).toBe('Elevated sidewalk path')
   })
 })
 
@@ -142,9 +142,9 @@ describe('classifyEdgeToItem — bad surfaces return rough road', () => {
     const dirt: ValhallaEdge = { cycle_lane: 'separated', surface: 'dirt' }
     const compacted: ValhallaEdge = { cycle_lane: 'separated', surface: 'compacted' }
     expect(classifyEdgeToItem(dirt, 'toddler')).toBe('Rough road (e.g. cobblestone)')
-    expect(classifyEdgeToItem(compacted, 'toddler')).toBe('Separated bike track')
-    expect(classifyEdgeToItem(compacted, 'trailer')).toBe('Separated bike track (narrow)')
-    expect(classifyEdgeToItem(compacted, 'training')).toBe('Separated bike track (slow)')
+    expect(classifyEdgeToItem(compacted, 'toddler')).toBe('Elevated sidewalk path')
+    expect(classifyEdgeToItem(compacted, 'trailer')).toBe('Elevated sidewalk path')
+    expect(classifyEdgeToItem(compacted, 'training')).toBe('Elevated sidewalk path')
   })
 
   it('paving_stones is OK for toddler but rough for trailer/training', () => {
@@ -189,7 +189,7 @@ describe('getDefaultPreferredItems', () => {
     expect(items.has('Car-free path / Radweg')).toBe(true)
     expect(items.has('Fahrradstrasse')).toBe(true)
     expect(items.has('Shared footway (park path)')).toBe(true)
-    expect(items.has('Separated bike track')).toBe(true)
+    expect(items.has('Elevated sidewalk path')).toBe(true)
     expect(items.has('Living street')).toBe(true)
     // non-default items should NOT be preferred by default
     expect(items.has('Painted bike lane')).toBe(false)
@@ -201,7 +201,7 @@ describe('getDefaultPreferredItems', () => {
     expect(items.has('Car-free path / Radweg')).toBe(true)
     expect(items.has('Painted bike lane')).toBe(true)
     expect(items.has('Living street')).toBe(true)
-    expect(items.has('Separated bike track (slow)')).toBe(false)
+    expect(items.has('Elevated sidewalk path')).toBe(false)
   })
 
   it('returns empty set for unknown profile', () => {
