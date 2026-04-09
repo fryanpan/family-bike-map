@@ -6,7 +6,8 @@
  * OSM tags extracted from the BRouter `messages` array.
  */
 
-import type { Place, Route, RouteSegment } from '../utils/types'
+import type { Place, Route, RouteSegment, RouteLtsBreakdown, LtsSegmentInfo } from '../utils/types'
+import { computeLts, computeLtsBreakdown } from '../utils/lts'
 
 const API_BASE = '/api'
 
@@ -135,6 +136,43 @@ function classifyBRouterTags(tags: Record<string, string>): string | null {
 }
 
 /**
+ * Build a RouteLtsBreakdown from BRouter message rows.
+ * Each row represents a segment with OSM tags and a distance.
+ */
+function buildLtsBreakdown(rows: BRouterMessageRow[]): RouteLtsBreakdown | undefined {
+  if (rows.length === 0) return undefined
+
+  const ltsSegments = rows
+    .filter((r) => r.distance > 0)
+    .map((r) => ({ tags: r.wayTags, lengthM: r.distance }))
+
+  if (ltsSegments.length === 0) return undefined
+
+  const breakdown = computeLtsBreakdown(ltsSegments)
+
+  // Find the worst segment (highest LTS, longest distance as tiebreaker)
+  let worstSegment: LtsSegmentInfo | null = null
+  let worstLts = 0
+  let worstLen = 0
+
+  for (const row of rows) {
+    if (row.distance <= 0) continue
+    const lts = computeLts(row.wayTags)
+    const name = row.wayTags.name ?? row.wayTags.highway ?? 'unnamed'
+    if (lts > worstLts || (lts === worstLts && row.distance > worstLen)) {
+      worstLts = lts
+      worstLen = row.distance
+      worstSegment = { name, lts: lts, lengthM: row.distance }
+    }
+  }
+
+  return {
+    ...breakdown,
+    worstSegment,
+  }
+}
+
+/**
  * Parse a BRouter GeoJSON response into a Route.
  */
 function parseFeature(feature: BRouterGeoJSON['features'][0]): Route {
@@ -145,6 +183,7 @@ function parseFeature(feature: BRouterGeoJSON['features'][0]): Route {
 
   const messageRows = parseMessages(feature.properties.messages)
   const segments = buildBRouterSegments(messageRows, coordinates)
+  const ltsBreakdown = buildLtsBreakdown(messageRows)
 
   return {
     coordinates,
@@ -155,6 +194,7 @@ function parseFeature(feature: BRouterGeoJSON['features'][0]): Route {
     },
     segments: segments.length > 0 ? segments : undefined,
     engine: 'brouter',
+    ltsBreakdown,
   }
 }
 
