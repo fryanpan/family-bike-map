@@ -1,22 +1,27 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getStreetImage } from '../services/mapillary'
+import { getDefaultPreferredItems } from '../utils/classify'
 import type { MapillaryImage } from '../services/mapillary'
 import type { CityScan, AuditWay } from '../services/audit'
+import { classifyOsmTagsToItem } from '../services/overpass'
+import type { ClassificationRule } from '../services/rules'
 
 interface Props {
   scan: CityScan | null
+  regionRules?: ClassificationRule[]
 }
 
-/** Shuffle array in place (Fisher-Yates) and return it. */
 function shuffle<T>(arr: T[]): T[] {
-  for (let i = arr.length - 1; i > 0; i--) {
+  const out = [...arr]
+  for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
-    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+    ;[out[i], out[j]] = [out[j], out[i]]
   }
-  return arr
+  return out
 }
 
 const TARGET_PER_CLASS = 25
+const TAG_KEYS = ['highway', 'cycleway', 'cycleway:right', 'cycleway:left', 'cycleway:both', 'surface', 'smoothness', 'maxspeed', 'bicycle', 'segregated']
 
 interface FoundImage {
   way: AuditWay
@@ -27,9 +32,9 @@ function ClassSection({ classification, ways }: { classification: string; ways: 
   const [found, setFound] = useState<FoundImage[]>([])
   const [searching, setSearching] = useState(false)
   const [done, setDone] = useState(false)
+  const [expanded, setExpanded] = useState<number | null>(null)
 
-  // Shuffle candidates once
-  const candidates = useMemo(() => shuffle([...ways].filter((w) => w.center)), [ways])
+  const candidates = useMemo(() => shuffle(ways.filter((w) => w.center)), [ways])
 
   useEffect(() => {
     let cancelled = false
@@ -39,7 +44,6 @@ function ClassSection({ classification, ways }: { classification: string; ways: 
 
     async function search() {
       const results: FoundImage[] = []
-      // Try candidates in batches of 5 until we have enough or run out
       for (let i = 0; i < candidates.length && results.length < TARGET_PER_CLASS; i += 5) {
         const batch = candidates.slice(i, i + 5)
         const images = await Promise.all(
@@ -47,16 +51,11 @@ function ClassSection({ classification, ways }: { classification: string; ways: 
         )
         for (let j = 0; j < batch.length; j++) {
           if (cancelled) return
-          if (images[j]) {
-            results.push({ way: batch[j], image: images[j]! })
-          }
+          if (images[j]) results.push({ way: batch[j], image: images[j]! })
         }
         if (!cancelled) setFound([...results])
       }
-      if (!cancelled) {
-        setSearching(false)
-        setDone(true)
-      }
+      if (!cancelled) { setSearching(false); setDone(true) }
     }
 
     search()
@@ -72,25 +71,33 @@ function ClassSection({ classification, ways }: { classification: string; ways: 
         </span>
       </h3>
       <div className="audit-class-grid">
-        {found.map((s, i) => (
-          <div key={i} className="audit-class-card">
-            <img
-              src={s.image.thumbUrl}
-              alt={classification}
-              className="audit-class-img"
-              loading="lazy"
-            />
-            <div className="audit-class-card-meta">
-              {s.way.tags.name && <span className="audit-class-name">{s.way.tags.name}</span>}
-              <span className="audit-class-sig">
-                {Object.entries(s.way.tags)
-                  .filter(([k]) => ['highway', 'cycleway', 'cycleway:right', 'cycleway:left', 'surface'].includes(k))
-                  .map(([k, v]) => `${k}=${v}`)
-                  .join(' · ') || `OSM ${s.way.osmId}`}
-              </span>
+        {found.map((s, i) => {
+          const isExpanded = expanded === i
+          const tags = TAG_KEYS
+            .filter((k) => s.way.tags[k])
+            .slice(0, 3)
+            .map((k) => `${k}=${s.way.tags[k]}`)
+          return (
+            <div
+              key={i}
+              className={`audit-class-card${isExpanded ? ' audit-class-card-expanded' : ''}`}
+              onClick={() => setExpanded(isExpanded ? null : i)}
+            >
+              <img
+                src={s.image.thumbUrl}
+                alt={classification}
+                className="audit-class-img"
+                loading="lazy"
+              />
+              <div className="audit-class-card-meta">
+                {s.way.tags.name && <span className="audit-class-name">{s.way.tags.name}</span>}
+                {tags.map((t, ti) => (
+                  <span key={ti} className="audit-class-tag">{t}</span>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
       {searching && <div className="audit-class-loading">Searching for images…</div>}
       {done && found.length === 0 && <div className="audit-class-loading">No Mapillary images found</div>}
@@ -98,18 +105,36 @@ function ClassSection({ classification, ways }: { classification: string; ways: 
   )
 }
 
-export default function AuditSamplesTab({ scan }: Props) {
-  const byClass = useMemo(() => {
-    if (!scan) return new Map<string, AuditWay[]>()
-    const map = new Map<string, AuditWay[]>()
+export default function AuditSamplesTab({ scan, regionRules }: Props) {
+  const [travelMode, setTravelMode] = useState('toddler')
+
+  // Group ways by classification for the selected travel mode, split into preferred/other
+  const { preferred, other } = useMemo(() => {
+    if (!scan) return { preferred: new Map<string, AuditWay[]>(), other: new Map<string, AuditWay[]>() }
+
+    const preferredItems = getDefaultPreferredItems(travelMode)
+    const prefMap = new Map<string, AuditWay[]>()
+    const otherMap = new Map<string, AuditWay[]>()
+
     for (const group of scan.groups) {
-      const cls = group.classification ?? 'Unclassified'
+      // Reclassify with the selected travel mode
+      const sampleTags = group.samples[0]?.tags
+      const cls = sampleTags
+        ? (classifyOsmTagsToItem(sampleTags, travelMode, regionRules) ?? 'Unclassified')
+        : (group.classification ?? 'Unclassified')
+      const isPreferred = preferredItems.has(cls)
+      const map = isPreferred ? prefMap : otherMap
       const existing = map.get(cls) ?? []
       existing.push(...group.samples.filter((w) => w.center))
       map.set(cls, existing)
     }
-    return new Map([...map.entries()].sort((a, b) => b[1].length - a[1].length))
-  }, [scan])
+
+    const sortBySize = (a: [string, AuditWay[]], b: [string, AuditWay[]]) => b[1].length - a[1].length
+    return {
+      preferred: new Map([...prefMap.entries()].sort(sortBySize)),
+      other: new Map([...otherMap.entries()].sort(sortBySize)),
+    }
+  }, [scan, travelMode, regionRules])
 
   if (!scan) {
     return <div className="audit-empty">Scan a city first to see samples by class.</div>
@@ -117,9 +142,35 @@ export default function AuditSamplesTab({ scan }: Props) {
 
   return (
     <div className="audit-samples-tab">
-      {[...byClass.entries()].map(([cls, ways]) => (
-        <ClassSection key={cls} classification={cls} ways={ways} />
-      ))}
+      <div className="audit-samples-controls">
+        <select
+          className="audit-select"
+          value={travelMode}
+          onChange={(e) => setTravelMode(e.target.value)}
+        >
+          <option value="toddler">Toddler</option>
+          <option value="trailer">Trailer</option>
+          <option value="training">Training</option>
+        </select>
+      </div>
+
+      {preferred.size > 0 && (
+        <div className="audit-samples-group">
+          <h2 className="audit-samples-group-title audit-samples-preferred">Preferred</h2>
+          {[...preferred.entries()].map(([cls, ways]) => (
+            <ClassSection key={cls} classification={cls} ways={ways} />
+          ))}
+        </div>
+      )}
+
+      {other.size > 0 && (
+        <div className="audit-samples-group">
+          <h2 className="audit-samples-group-title audit-samples-other">Other</h2>
+          {[...other.entries()].map(([cls, ways]) => (
+            <ClassSection key={cls} classification={cls} ways={ways} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -250,7 +250,7 @@ export default function AuditPanel({ onClose }: Props) {
       )}
 
       {activeTab === 'samples' && (
-        <AuditSamplesTab scan={scan} />
+        <AuditSamplesTab scan={scan} regionRules={rules.rules} />
       )}
     </div>
   )
