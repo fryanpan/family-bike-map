@@ -74,13 +74,12 @@ export const DEFAULT_PROFILES: ProfileMap = {
     label: 'Bike Trailer',
     emoji: '🚲',
     description:
-      'Riding 15–25 km/h with a child trailer. Prefers wide, smooth paths that are easy to navigate with a trailer. Narrow separated tracks and cobblestones avoided.',
+      'Riding 20–25 km/h with a child trailer. Prefers wide, smooth paths. Narrow separated tracks and cobblestones avoided.',
     costingOptions: {
       bicycle_type: 'Hybrid',
-      cycling_speed: 11,
-      use_roads: 0.15,         // roadside bike lanes occasionally acceptable
-      avoid_bad_surfaces: 0.5, // same as toddler: avoids cobblestones, allows park paths.
-                               // 0.9 was blocking compacted/dirt trails that are safe for trailers.
+      cycling_speed: 22,        // actual trailer speed
+      use_roads: 0.15,
+      avoid_bad_surfaces: 0.5,
       use_hills: 0.15,
       use_ferry: 0.0,
       use_living_streets: 0.9,
@@ -92,15 +91,15 @@ export const DEFAULT_PROFILES: ProfileMap = {
     label: 'Fast Training',
     emoji: '⚡',
     description:
-      '~30 km/h rides focused on sustaining speed. Fast enough to ride with traffic on 30 km/h roads. Fahrradstrasse and recreational paths preferred; bus lanes and painted lanes good; slow/interrupted separated tracks avoided.',
+      '25–35 km/h road training. Smooth asphalt preferred, okay with traffic ≤30 km/h. Avoids tram tracks, narrow unpathable bike paths, and bumpy elevated paths.',
     costingOptions: {
       bicycle_type: 'Road',
-      cycling_speed: 22,
-      use_roads: 0.6,          // some roads fine
-      avoid_bad_surfaces: 0.4, // tolerates rougher surfaces
+      cycling_speed: 30,        // actual training speed
+      use_roads: 0.7,           // roads are fine if smooth and ≤30 km/h
+      avoid_bad_surfaces: 0.6,  // penalizes rough surfaces more (narrow tires)
       use_hills: 0.9,
       use_ferry: 0.0,
-      use_living_streets: 0.5,
+      use_living_streets: 0.3,  // living streets are too slow
     },
     editable: true,
     avoidances: ['cobblestones'],
