@@ -7,7 +7,7 @@
  * Routes:
  *   /api/valhalla/*   → proxy to valhalla1.openstreetmap.de
  *   /api/nominatim/*  → proxy to nominatim.openstreetmap.org
- *   /api/overpass     → proxy to overpass-api.de with 7-day edge cache
+ *   /api/overpass     → proxy to overpass-api.de with 30-day edge cache
  *   POST /api/feedback → create a Linear issue from user feedback
  */
 
@@ -88,7 +88,7 @@ export default {
     //
     // The Overpass API usage policy asks public-facing apps to avoid hitting
     // the public API on every user request. We comply by caching tile responses
-    // at the Cloudflare edge (shared across ALL users, global) for 7 days.
+    // at the Cloudflare edge (shared across ALL users, global) for 30 days.
     // First visitor pays the Overpass cost; everyone else gets the cached response.
     //
     // ?row=&col= query params identify the tile for the cache key.
@@ -131,8 +131,8 @@ export default {
         const toCache = new Response(respBody, {
           headers: {
             'Content-Type': 'application/json',
-            // 7-day TTL: long enough to be useful, short enough for OSM edits to appear.
-            'Cache-Control': 'public, max-age=604800',
+            // 30-day TTL: OSM cycling edits are infrequent enough that monthly refresh is fine.
+            'Cache-Control': 'public, max-age=2592000',
           },
         })
         await caches.default.put(cacheKey, toCache)
