@@ -2,8 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bike Route Planner</title>
+    <!-- Web font — DM Sans: geometric, warm, highly readable -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- Establish early connections to tile and API servers -->
     <link rel="preconnect" href="https://tile.openstreetmap.org" crossorigin />
     <link rel="dns-prefetch" href="https://a.tile.openstreetmap.org" />
@@ -15,5 +18,13 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script src="/feedback-widget.js"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        if (window.FeedbackWidget) {
+          FeedbackWidget.init({ mode: 'live', endpoint: '/api/feedback' });
+        }
+      });
+    </script>
   </body>
 </html>
