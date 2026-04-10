@@ -11,7 +11,9 @@ interface Props {
 }
 
 function engineTag(engine?: string): string {
-  return engine === 'brouter' ? 'B' : 'V'
+  if (engine === 'brouter') return 'B'
+  if (engine === 'client') return 'C'
+  return 'V'
 }
 
 export default function RouteList({ routes, selectedIndex, onSelect, preferredItemNames }: Props) {

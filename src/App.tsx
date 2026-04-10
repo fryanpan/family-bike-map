@@ -266,9 +266,9 @@ export default function App() {
       // Tag Valhalla routes with engine
       const taggedValhalla = valhallaResults.map((r) => ({ ...r, engine: 'valhalla' }))
 
-      // If client router succeeded, prepend it as the first option
+      // Client router is primary when it succeeds; Valhalla is fallback only
       const initialRoutes = clientResult
-        ? [clientResult, ...taggedValhalla]
+        ? [clientResult]
         : taggedValhalla
       setRoutes(initialRoutes)
 
@@ -533,7 +533,7 @@ export default function App() {
             onSelectRoute={setSelectedRouteIndex}
             waypoints={waypoints}
             onRemoveWaypoint={handleRemoveWaypoint}
-            onAddWaypoint={uiState === 'routing' && route ? handleAddWaypoint : undefined}
+            onAddWaypoint={uiState === 'routing' && route && route.engine === 'valhalla' ? handleAddWaypoint : undefined}
             overlayEnabled={overlayEnabled}
             profileKey={selectedProfile}
             onOverlayStatusChange={setOverlayStatus}
