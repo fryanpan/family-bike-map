@@ -276,7 +276,7 @@ export default function App() {
         return segments.length ? { ...result, segments } : result
       })).then((scored) => {
         const fastest = Math.min(...scored.map((r) => r.summary.duration))
-        const maxDuration = fastest * 1.2
+        const maxDuration = fastest * 1.75  // accept 75% longer for safer routes
 
         // Sort: highest preferred % first, but only if within 20% of fastest
         const reordered = [...scored].sort((a, b) => {

@@ -60,15 +60,12 @@ export const DEFAULT_PROFILES: ProfileMap = {
       'Toddler on their own bike/scooter (~10 km/h) — not yet comfortable biking beside cars or following traffic rules. Only Fahrradstrasse, car-free trails and elevated separated paths. Busy roads and painted road bike lanes avoided.',
     costingOptions: {
       bicycle_type: 'Hybrid',
-      cycling_speed: 10,
-      use_roads: 0.0,          // avoid roads entirely — paths and Fahrradstrasse only
-      avoid_bad_surfaces: 0.5, // avoids cobblestones (surface quality ~0.3) but allows
-                               // compacted/dirt park paths (quality ~0.7–0.9) like Engeldam.
-                               // 1.0 was too aggressive — penalised all non-smooth surfaces
-                               // including perfectly rideable park trails.
-      use_hills: 0.1,          // nearly flat
+      cycling_speed: 6,         // toddler speed — makes router care less about time
+      use_roads: 0.0,          // maximum road avoidance
+      avoid_bad_surfaces: 0.5,
+      use_hills: 0.1,
       use_ferry: 0.0,
-      use_living_streets: 1.0, // strongly prefers living streets / Fahrradstrasse-adjacent ways
+      use_living_streets: 1.0,
     },
     editable: true,
     avoidances: ['cobblestones'],
