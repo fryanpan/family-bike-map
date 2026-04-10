@@ -83,9 +83,9 @@ describe('buildRoutingGraph', () => {
     const link = graph.getLink('52.50000,13.40000', '52.50100,13.40000')
     expect(link).toBeTruthy()
     expect(link!.data.isWalking).toBe(true)
-    // Cost = time = distance / walking_speed. Walking is much slower than biking,
-    // so cost (time) should be much higher than for a bike edge of the same distance.
-    const walkingSpeed = 1.5 / 3.6 // toddler walk speed
+    // Cost = time = distance / walking_speed. Walking is slower than biking,
+    // so cost (time) should be higher than for a bike edge of the same distance.
+    const walkingSpeed = 4 / 3.6 // toddler walk speed (4 km/h)
     const expectedCost = link!.data.distance / walkingSpeed
     expect(link!.data.cost).toBeCloseTo(expectedCost, 0)
   })
@@ -172,6 +172,36 @@ describe('routeOnGraph', () => {
     // Check that walking segments are marked
     const walkingSegs = result!.segments.filter(s => s.isWalking)
     expect(walkingSegs.length).toBeGreaterThan(0)
+  })
+
+  test('toddler mode: Fahrradstrasse is fastest, painted bike lane is near-walking', () => {
+    // Fahrradstrasse edge
+    const fahrradWays: OsmWay[] = [{
+      osmId: 40,
+      itemName: null,
+      tags: { highway: 'residential', bicycle_road: 'yes' },
+      coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+    }]
+    const paintedWays: OsmWay[] = [{
+      osmId: 41,
+      itemName: null,
+      tags: { highway: 'secondary', cycleway: 'lane' },
+      coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+    }]
+
+    const preferred = new Set(['Fahrradstrasse', 'Painted bike lane'])
+    const gFahr = buildRoutingGraph(fahrradWays, 'toddler', preferred)
+    const gPaint = buildRoutingGraph(paintedWays, 'toddler', preferred)
+
+    const fahrLink = gFahr.getLink('52.50000,13.40000', '52.50100,13.40000')
+    const paintLink = gPaint.getLink('52.50000,13.40000', '52.50100,13.40000')
+    expect(fahrLink).toBeTruthy()
+    expect(paintLink).toBeTruthy()
+
+    // Fahrradstrasse (12 km/h) should be much cheaper than painted lane (3 km/h)
+    // Same distance, so cost ratio should be ~4:1
+    expect(paintLink!.data.cost / fahrLink!.data.cost).toBeGreaterThan(3.5)
+    expect(paintLink!.data.cost / fahrLink!.data.cost).toBeLessThan(4.5)
   })
 
   test('prefers lower-cost edges', () => {

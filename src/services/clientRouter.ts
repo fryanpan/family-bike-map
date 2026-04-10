@@ -65,21 +65,34 @@ function coordId(lat: number, lng: number): string {
 
 // ── Speed-based costing ───────────────────────────────────────────────────
 //
-// Cost = time to traverse the edge. Speed depends on mode:
-// - Preferred (safe for toddler to bike): toddler bike speed
-// - Other classified (known but not preferred): slower cautious bike
-// - Walking-only (footway, steps): walk speed — this is the key penalty
-// - Unclassified (no bike infra, car traffic): walk speed (Bea walks, won't bike here)
+// Cost = time to traverse the edge. Speed depends on infrastructure type.
+// Toddler mode has per-item-name speeds for fine-grained control:
+//   Fahrradstrasse > Bike path > Elevated sidewalk > Shared foot/Living street
+//   > Walking/Residential/Painted lane (strongly penalized)
 //
-// This naturally penalizes unsafe segments: walking is 5-7x slower than biking,
-// so a 200m walk gap adds ~2 min but a 2km gap adds ~20 min — router finds detours.
+// This naturally penalizes unsafe segments: walking-speed edges are 3-4x
+// slower than Fahrradstrasse, so the router finds safe detours.
+
+/** Per-item-name speeds (km/h) for toddler mode. */
+const TODDLER_ITEM_SPEEDS: Record<string, number> = {
+  'Fahrradstrasse':          12,  // best: priority bike road
+  'Bike path':               10,  // car-free Radweg
+  'Elevated sidewalk path':   9,  // separated track, slightly narrower
+  'Shared foot path':         8,  // shared with pedestrians
+  'Living street':            8,  // low traffic, shared space
+  'Painted bike lane':        3,  // strongly discouraged — nearly walking
+  'Shared bus lane':          3,  // strongly discouraged
+  'Residential/local road':   4,  // cautious, nearly walking
+}
+const TODDLER_WALKING_KMH = 4     // footway/pedestrian dismount speed
+const TODDLER_UNCLASSIFIED_KMH = 4 // unknown roads = walking
 
 const SPEEDS: Record<string, Record<string, number>> = {
   toddler: {
-    preferred: 10 / 3.6,    // 10 km/h — Bea bikes happily
-    otherClassified: 5 / 3.6, // 5 km/h — cautious biking on known-but-less-safe
-    walking: 1.5 / 3.6,     // 1.5 km/h — toddler walk speed
-    unclassified: 1.5 / 3.6, // walk — Bea won't bike on unknown roads
+    preferred: 10 / 3.6,      // fallback for preferred items not in TODDLER_ITEM_SPEEDS
+    otherClassified: 5 / 3.6, // fallback for other classified items
+    walking: TODDLER_WALKING_KMH / 3.6,
+    unclassified: TODDLER_UNCLASSIFIED_KMH / 3.6,
   },
   trailer: {
     preferred: 22 / 3.6,
@@ -97,6 +110,30 @@ const SPEEDS: Record<string, Record<string, number>> = {
 
 function getSpeed(profileKey: string): Record<string, number> {
   return SPEEDS[profileKey] ?? SPEEDS.toddler
+}
+
+/**
+ * Resolve the effective speed (m/s) for an edge given its classification.
+ * Toddler mode uses per-item-name speeds for fine granularity.
+ */
+function resolveEdgeSpeed(
+  profileKey: string,
+  itemName: string | null,
+  isWalking: boolean,
+  isPreferred: boolean,
+  speeds: Record<string, number>,
+): number {
+  if (isWalking) return speeds.walking
+
+  // Toddler: use per-item speeds when available
+  if (profileKey === 'toddler' && itemName && TODDLER_ITEM_SPEEDS[itemName] !== undefined) {
+    return TODDLER_ITEM_SPEEDS[itemName] / 3.6
+  }
+
+  // Generic fallback for all profiles
+  if (isPreferred) return speeds.preferred
+  if (itemName) return speeds.otherClassified
+  return speeds.unclassified
 }
 
 // ── Graph builder ──────────────────────────────────────────────────────────
@@ -136,25 +173,20 @@ export function buildRoutingGraph(
     const walking = isWalkingOnly(tags)
     const itemName = classifyOsmTagsToItem(tags, profileKey, regionRules)
     const speeds = getSpeed(profileKey)
+    const isPreferred = itemName !== null && preferredItemNames.has(itemName)
 
-    // Determine speed (m/s) — cost is time = distance / speed
-    let speed: number
-    if (walking) {
-      speed = speeds.walking
-    } else if (itemName && preferredItemNames.has(itemName)) {
-      speed = speeds.preferred
-    } else if (itemName) {
-      speed = speeds.otherClassified
-    } else {
-      // Unclassified road — check if there's a sidewalk for walking fallback
+    // Exclude unclassified major roads without sidewalks in toddler mode
+    if (!walking && !itemName) {
       const hasSidewalk = tags.sidewalk === 'both' || tags.sidewalk === 'left' ||
         tags.sidewalk === 'right' || tags.sidewalk === 'yes'
       const hw = tags.highway ?? ''
       if (profileKey === 'toddler' && !hasSidewalk && ['primary', 'secondary', 'tertiary', 'trunk'].includes(hw)) {
         continue  // skip this way entirely — no safe option for toddler
       }
-      speed = speeds.unclassified
     }
+
+    // Determine speed (m/s) — cost is time = distance / speed
+    const speed = resolveEdgeSpeed(profileKey, itemName, walking, isPreferred, speeds)
 
     // Check one-way constraints
     const oneway = tags.oneway === 'yes' || tags['oneway:bicycle'] === 'yes'
@@ -267,9 +299,13 @@ export function routeOnGraph(
     },
     heuristic(from: Node<NodeData>, to: Node<NodeData>) {
       // Heuristic must be in same units as cost (time in seconds).
-      // Use preferred speed as optimistic lower bound.
+      // Use the fastest possible speed as optimistic lower bound (admissible).
+      // For toddler, Fahrradstrasse at 12 km/h is the fastest.
+      const maxSpeed = profileKey === 'toddler'
+        ? Math.max(...Object.values(TODDLER_ITEM_SPEEDS)) / 3.6
+        : speeds.preferred
       const dist = haversineM(from.data.lat, from.data.lng, to.data.lat, to.data.lng)
-      return dist / speeds.preferred
+      return dist / maxSpeed
     },
   })
 
