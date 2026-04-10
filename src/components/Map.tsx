@@ -1,10 +1,11 @@
 import L from 'leaflet'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useMemo } from 'react'
 import { Marker, MapContainer, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import { PREFERRED_COLOR, OTHER_COLOR, getLegendItem } from '../utils/classify'
+import { getVisibleTiles, getCachedTile, classifyOsmTagsToItem } from '../services/overpass'
 import BikeMapOverlay from './BikeMapOverlay'
 import type { ClassificationRule } from '../services/rules'
-import type { Place, Route, RouteSegment } from '../utils/types'
+import type { Place, Route, RouteSegment, OsmWay } from '../utils/types'
 
 // Fix Leaflet default icons broken by Vite's asset bundling
 import markerIconUrl from 'leaflet/dist/images/marker-icon.png'
@@ -253,6 +254,84 @@ const currentLocationIcon = L.divIcon({
   iconAnchor: [10, 10],
 })
 
+/**
+ * Show preferred infrastructure segments near the route as clickable suggestions.
+ * Click a suggestion to add a waypoint at that point, forcing the route through it.
+ */
+function RouteSuggestions({ route, profileKey, preferredItemNames, regionRules, onAddWaypoint }: {
+  route: Route | null
+  profileKey: string
+  preferredItemNames: Set<string>
+  regionRules?: ClassificationRule[]
+  onAddWaypoint: (lat: number, lng: number) => void
+}) {
+  const map = useMap()
+
+  const suggestions = useMemo(() => {
+    if (!route || route.coordinates.length < 2) return []
+
+    // Get all cached tile data in the route's bounding area
+    const bounds = L.latLngBounds(route.coordinates.map(([lat, lng]) => [lat, lng] as [number, number]))
+    const padded = bounds.pad(0.3) // expand by 30% to catch nearby segments
+    const tiles = getVisibleTiles(padded)
+
+    const allWays: OsmWay[] = []
+    for (const t of tiles) {
+      const cached = getCachedTile(t.row, t.col)
+      if (cached) allWays.push(...cached)
+    }
+
+    // Filter to preferred segments within ~500m of the route
+    const THRESHOLD = 0.005 // ~500m in degrees
+    const routeCoords = route.coordinates
+
+    return allWays.filter((way) => {
+      const itemName = classifyOsmTagsToItem(way.tags, profileKey, regionRules)
+      if (!itemName || !preferredItemNames.has(itemName)) return false
+
+      // Check if any point of this way is near the route
+      for (const [wLat, wLng] of way.coordinates) {
+        for (const [rLat, rLng] of routeCoords) {
+          if (Math.abs(wLat - rLat) < THRESHOLD && Math.abs(wLng - rLng) < THRESHOLD) {
+            return true
+          }
+        }
+      }
+      return false
+    })
+  }, [route, profileKey, preferredItemNames, regionRules, map])
+
+  if (suggestions.length === 0) return null
+
+  return (
+    <>
+      {suggestions.map((way, i) => (
+        <Polyline
+          key={`suggest-${way.osmId ?? i}`}
+          positions={way.coordinates}
+          color="#10b981"
+          weight={8}
+          opacity={0.5}
+          eventHandlers={{
+            click: (e) => {
+              L.DomEvent.stopPropagation(e.originalEvent)
+              onAddWaypoint(e.latlng.lat, e.latlng.lng)
+            },
+          }}
+        >
+          <Tooltip sticky direction="top" offset={[0, -6]}>
+            <span style={{ fontSize: 11 }}>
+              {classifyOsmTagsToItem(way.tags, profileKey, regionRules) ?? 'Preferred'}
+              {way.tags.name ? ` — ${way.tags.name}` : ''}
+              <br /><b>Click to route through here</b>
+            </span>
+          </Tooltip>
+        </Polyline>
+      ))}
+    </>
+  )
+}
+
 function MapClickHandler({ onAddWaypoint }: { onAddWaypoint?: (lat: number, lng: number) => void }) {
   useMapEvents({
     click(e) {
@@ -358,7 +437,18 @@ export default function Map({
         )
       })}
 
-      {/* Selected route (prominent) */}
+      {/* Preferred segments near route — clickable to add waypoints */}
+      {onAddWaypoint && (
+        <RouteSuggestions
+          route={route}
+          profileKey={profileKey}
+          preferredItemNames={preferredItemNames}
+          regionRules={regionRules}
+          onAddWaypoint={onAddWaypoint}
+        />
+      )}
+
+      {/* Selected route (prominent, rendered on top) */}
       <RouteDisplay
         route={route}
         profileKey={profileKey}
