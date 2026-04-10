@@ -84,7 +84,7 @@ const TODDLER_ITEM_SPEEDS: Record<string, number> = {
   'Shared bus lane':          3,  // strongly discouraged
   'Residential/local road':   4,  // cautious, nearly walking
 }
-const TODDLER_WALKING_KMH = 4     // footway/pedestrian dismount speed
+const TODDLER_WALKING_KMH = 5     // footway/pedestrian dismount — slightly cheaper than unclassified
 const TODDLER_UNCLASSIFIED_KMH = 4 // unknown roads = walking
 
 const SPEEDS: Record<string, Record<string, number>> = {
