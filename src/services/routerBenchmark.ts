@@ -6,7 +6,7 @@
  */
 
 import {
-  prefetchBerlinTiles,
+  prefetchTiles,
   buildRoutingGraph,
   routeOnGraph,
 } from './clientRouter'
@@ -73,7 +73,7 @@ export async function runRoutingBenchmark(
   // Step 1: Pre-fetch all Berlin tiles
   onProgress?.('Fetching Berlin tiles...')
   const tileFetchStart = performance.now()
-  const allWays = await prefetchBerlinTiles((pct) => {
+  const allWays = await prefetchTiles({ south: 52.34, west: 13.08, north: 52.68, east: 13.76 }, (pct) => {
     onProgress?.(`Fetching tiles... ${pct}%`)
   })
   const tileFetchMs = performance.now() - tileFetchStart

@@ -83,8 +83,10 @@ describe('buildRoutingGraph', () => {
     const link = graph.getLink('52.500000,13.400000', '52.501000,13.400000')
     expect(link).toBeTruthy()
     expect(link!.data.isWalking).toBe(true)
-    // Cost should be distance * 5.0
-    const expectedCost = link!.data.distance * 5.0
+    // Cost = time = distance / walking_speed. Walking is much slower than biking,
+    // so cost (time) should be much higher than for a bike edge of the same distance.
+    const walkingSpeed = 1.5 / 3.6 // toddler walk speed
+    const expectedCost = link!.data.distance / walkingSpeed
     expect(link!.data.cost).toBeCloseTo(expectedCost, 0)
   })
 })

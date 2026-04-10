@@ -60,16 +60,41 @@ function coordId(lat: number, lng: number): string {
   return `${lat.toFixed(6)},${lng.toFixed(6)}`
 }
 
-// ── Cost multipliers ───────────────────────────────────────────────────────
+// ── Speed-based costing ───────────────────────────────────────────────────
+//
+// Cost = time to traverse the edge. Speed depends on mode:
+// - Preferred (safe for toddler to bike): toddler bike speed
+// - Other classified (known but not preferred): slower cautious bike
+// - Walking-only (footway, steps): walk speed — this is the key penalty
+// - Unclassified (no bike infra, car traffic): walk speed (Bea walks, won't bike here)
+//
+// This naturally penalizes unsafe segments: walking is 5-7x slower than biking,
+// so a 200m walk gap adds ~2 min but a 2km gap adds ~20 min — router finds detours.
 
-const COST_PREFERRED = 1.0
-const COST_OTHER_CLASSIFIED = 3.0
-const COST_WALKING = 5.0
-const COST_UNCLASSIFIED = 8.0
+const SPEEDS: Record<string, Record<string, number>> = {
+  toddler: {
+    preferred: 10 / 3.6,    // 10 km/h — Bea bikes happily
+    otherClassified: 5 / 3.6, // 5 km/h — cautious biking on known-but-less-safe
+    walking: 1.5 / 3.6,     // 1.5 km/h — toddler walk speed
+    unclassified: 1.5 / 3.6, // walk — Bea won't bike on unknown roads
+  },
+  trailer: {
+    preferred: 22 / 3.6,
+    otherClassified: 15 / 3.6,
+    walking: 4 / 3.6,       // adult walking with trailer
+    unclassified: 4 / 3.6,
+  },
+  training: {
+    preferred: 30 / 3.6,
+    otherClassified: 20 / 3.6,
+    walking: 5 / 3.6,
+    unclassified: 10 / 3.6, // training can bike on unclassified roads
+  },
+}
 
-// Average speeds (m/s) for time estimation
-const CYCLING_SPEED_MS = 15 / 3.6  // ~15 km/h family pace
-const WALKING_SPEED_MS = 5 / 3.6   // ~5 km/h walking
+function getSpeed(profileKey: string): Record<string, number> {
+  return SPEEDS[profileKey] ?? SPEEDS.toddler
+}
 
 // ── Graph builder ──────────────────────────────────────────────────────────
 
@@ -107,17 +132,25 @@ export function buildRoutingGraph(
     const tags = way.tags
     const walking = isWalkingOnly(tags)
     const itemName = classifyOsmTagsToItem(tags, profileKey, regionRules)
+    const speeds = getSpeed(profileKey)
 
-    // Determine cost multiplier
-    let multiplier: number
+    // Determine speed (m/s) — cost is time = distance / speed
+    let speed: number
     if (walking) {
-      multiplier = COST_WALKING
+      speed = speeds.walking
     } else if (itemName && preferredItemNames.has(itemName)) {
-      multiplier = COST_PREFERRED
+      speed = speeds.preferred
     } else if (itemName) {
-      multiplier = COST_OTHER_CLASSIFIED
+      speed = speeds.otherClassified
     } else {
-      multiplier = COST_UNCLASSIFIED
+      // Unclassified road — check if there's a sidewalk for walking fallback
+      const hasSidewalk = tags.sidewalk === 'both' || tags.sidewalk === 'left' ||
+        tags.sidewalk === 'right' || tags.sidewalk === 'yes'
+      const hw = tags.highway ?? ''
+      if (profileKey === 'toddler' && !hasSidewalk && ['primary', 'secondary', 'tertiary', 'trunk'].includes(hw)) {
+        continue  // skip this way entirely — no safe option for toddler
+      }
+      speed = speeds.unclassified
     }
 
     // Check one-way constraints
@@ -136,7 +169,7 @@ export function buildRoutingGraph(
       if (!graph.getNode(id2)) graph.addNode(id2, { lat: lat2, lng: lng2 })
 
       const dist = haversineM(lat1, lng1, lat2, lng2)
-      const cost = dist * multiplier
+      const cost = dist / speed  // cost = time in seconds
       const edgeData: EdgeData = { distance: dist, cost, wayTags: tags, isWalking: walking }
 
       // Forward edge (always)
@@ -206,13 +239,17 @@ export function routeOnGraph(
   const endId = findNearestNode(graph, endLat, endLng)
   if (!startId || !endId) return null
 
+  const speeds = getSpeed(profileKey)
   const pathFinder = aStar(graph, {
     oriented: true,
     distance(_from: Node<NodeData>, _to: Node<NodeData>, link) {
       return link.data.cost
     },
     heuristic(from: Node<NodeData>, to: Node<NodeData>) {
-      return haversineM(from.data.lat, from.data.lng, to.data.lat, to.data.lng)
+      // Heuristic must be in same units as cost (time in seconds).
+      // Use preferred speed as optimistic lower bound.
+      const dist = haversineM(from.data.lat, from.data.lng, to.data.lat, to.data.lng)
+      return dist / speeds.preferred
     },
   })
 
@@ -240,8 +277,7 @@ export function routeOnGraph(
     const link = graph.getLink(prevNode.id, currNode.id)
     if (link) {
       totalDistance += link.data.distance
-      const speed = link.data.isWalking ? WALKING_SPEED_MS : CYCLING_SPEED_MS
-      totalTime += link.data.distance / speed
+      totalTime += link.data.cost  // cost IS time in seconds
 
       const itemName = classifyOsmTagsToItem(link.data.wayTags, profileKey, regionRules)
       classified.push({
@@ -316,17 +352,18 @@ function getTilesForCorridor(
 // ── Prefetch Berlin tiles ──────────────────────────────────────────────────
 
 /**
- * Pre-fetch all tiles covering Berlin (bbox: 52.34-52.68 lat, 13.08-13.76 lng).
+ * Pre-fetch all tiles covering a bounding box.
  * Fetches in batches of 2 (respecting Overpass rate limits).
  */
-export async function prefetchBerlinTiles(
+export async function prefetchTiles(
+  bbox: { south: number; west: number; north: number; east: number },
   onProgress?: (pct: number) => void,
 ): Promise<OsmWay[]> {
   const TILE_DEGREES = 0.1
-  const minRow = Math.floor(52.34 / TILE_DEGREES)
-  const maxRow = Math.floor(52.68 / TILE_DEGREES)
-  const minCol = Math.floor(13.08 / TILE_DEGREES)
-  const maxCol = Math.floor(13.76 / TILE_DEGREES)
+  const minRow = Math.floor(bbox.south / TILE_DEGREES)
+  const maxRow = Math.floor(bbox.north / TILE_DEGREES)
+  const minCol = Math.floor(bbox.west / TILE_DEGREES)
+  const maxCol = Math.floor(bbox.east / TILE_DEGREES)
 
   const tiles: Array<{ row: number; col: number }> = []
   for (let r = minRow; r <= maxRow; r++) {
