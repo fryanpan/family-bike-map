@@ -640,15 +640,17 @@ export default function App() {
           />
         </Suspense>
 
-        {/* Travel mode selector */}
-        <div className="map-travel-mode">
-          <ProfileSelector
-            profiles={profiles}
-            selected={selectedProfile}
-            onSelect={handleProfileChange}
-            isCustomTravelMode={isCustomTravelMode}
-          />
-        </div>
+        {/* Travel mode selector — only on map when NOT routing (routing state has it in the panel) */}
+        {uiState !== 'routing' && (
+          <div className="map-travel-mode">
+            <ProfileSelector
+              profiles={profiles}
+              selected={selectedProfile}
+              onSelect={handleProfileChange}
+              isCustomTravelMode={isCustomTravelMode}
+            />
+          </div>
+        )}
 
         {/* Legend (hidden during routing on mobile via CSS) */}
         <div className="map-legend-wrap">
