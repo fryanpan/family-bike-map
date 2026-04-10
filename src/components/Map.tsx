@@ -88,7 +88,13 @@ function FitBoundsController({ route }: { route: Route | null }) {
   useEffect(() => {
     if (!route || route.coordinates.length < 2) return
     const bounds = L.latLngBounds(route.coordinates.map(([lat, lng]) => [lat, lng]))
-    map.fitBounds(bounds, { padding: [40, 40] })
+    // Asymmetric padding to account for floating panels:
+    // Mobile: top routing header (~80px), bottom route list (~200px)
+    // Desktop: left panel (~360px)
+    const isMobile = window.innerWidth < 768
+    const paddingTopLeft: [number, number] = isMobile ? [40, 80] : [360, 40]
+    const paddingBottomRight: [number, number] = isMobile ? [40, 200] : [40, 40]
+    map.fitBounds(bounds, { paddingTopLeft, paddingBottomRight })
   }, [route, map])
 
   return null

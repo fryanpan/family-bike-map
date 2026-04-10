@@ -62,9 +62,11 @@ interface Props {
   preferredItemNames: Set<string>
   currentLocation?: LatLng | null
   travelMode?: string
+  /** When true, hide the summary row and turn-by-turn until navigation starts. */
+  compact?: boolean
 }
 
-export default function DirectionsPanel({ route, onClose, preferredItemNames, currentLocation, travelMode }: Props) {
+export default function DirectionsPanel({ route, onClose, preferredItemNames, currentLocation, travelMode, compact }: Props) {
   const [navigating, setNavigating] = useState(false)
   const [step, setStep] = useState(0)
   const [turnsExpanded, setTurnsExpanded] = useState(false)
@@ -162,15 +164,17 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
 
   return (
     <div className="directions-panel">
-      {/* Compact summary row */}
-      <div className="route-summary">
-        <div className="summary-stats">
-          <span className="summary-distance">{formatDistance(summary.distance)}</span>
-          <span className="summary-sep">·</span>
-          <span className="summary-time">{formatDuration(summary.duration)}</span>
+      {/* Summary row — hidden in compact mode (info already in route card) */}
+      {!(compact && !navigating) && (
+        <div className="route-summary">
+          <div className="summary-stats">
+            <span className="summary-distance">{formatDistance(summary.distance)}</span>
+            <span className="summary-sep">·</span>
+            <span className="summary-time">{formatDuration(summary.duration)}</span>
+          </div>
+          <button className="close-btn" onClick={onClose} title="Clear route">✕</button>
         </div>
-        <button className="close-btn" onClick={onClose} title="Clear route">✕</button>
-      </div>
+      )}
 
       {/* Route quality bar */}
       {quality && (
@@ -186,17 +190,20 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
               <div className="qb-segment qb-other" style={{ flex: quality.other }} title={`${Math.round(quality.other * 100)}% other`} />
             )}
           </div>
-          <div className="quality-labels">
-            {quality.preferred > 0.05 && (
-              <span className="ql-preferred">{Math.round(quality.preferred * 100)}% preferred</span>
-            )}
-            {quality.walking > 0.05 && (
-              <span className="ql-walking">{Math.round(quality.walking * 100)}% walking</span>
-            )}
-            {quality.other > 0.05 && (
-              <span className="ql-other">{Math.round(quality.other * 100)}% other</span>
-            )}
-          </div>
+          {/* Quality labels — hidden in compact non-navigating mode */}
+          {!(compact && !navigating) && (
+            <div className="quality-labels">
+              {quality.preferred > 0.05 && (
+                <span className="ql-preferred">{Math.round(quality.preferred * 100)}% preferred</span>
+              )}
+              {quality.walking > 0.05 && (
+                <span className="ql-walking">{Math.round(quality.walking * 100)}% walking</span>
+              )}
+              {quality.other > 0.05 && (
+                <span className="ql-other">{Math.round(quality.other * 100)}% other</span>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -254,29 +261,33 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
             ▶ Start Navigation
           </button>
 
-          {/* Collapsible turn-by-turn */}
-          <button
-            className="turns-toggle"
-            onClick={() => setTurnsExpanded((v) => !v)}
-          >
-            <span>Turn-by-turn</span>
-            <span className="turns-toggle-arrow">{turnsExpanded ? '▲' : '▼'}</span>
-          </button>
+          {/* Collapsible turn-by-turn — hidden in compact mode */}
+          {!compact && (
+            <>
+              <button
+                className="turns-toggle"
+                onClick={() => setTurnsExpanded((v) => !v)}
+              >
+                <span>Turn-by-turn</span>
+                <span className="turns-toggle-arrow">{turnsExpanded ? '▲' : '▼'}</span>
+              </button>
 
-          {turnsExpanded && (
-            <ol className="maneuvers-list">
-              {(maneuvers as ValhallaManeuver[]).map((m, i) => (
-                <li key={i} className="maneuver">
-                  <span className="maneuver-icon">{icon(m.type)}</span>
-                  <div className="maneuver-body">
-                    <p className="maneuver-text">{m.instruction}</p>
-                    <p className="maneuver-meta">
-                      {formatDistance(m.length)} · {Math.max(1, Math.round(m.time / 60))} min
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ol>
+              {turnsExpanded && (
+                <ol className="maneuvers-list">
+                  {(maneuvers as ValhallaManeuver[]).map((m, i) => (
+                    <li key={i} className="maneuver">
+                      <span className="maneuver-icon">{icon(m.type)}</span>
+                      <div className="maneuver-body">
+                        <p className="maneuver-text">{m.instruction}</p>
+                        <p className="maneuver-meta">
+                          {formatDistance(m.length)} · {Math.max(1, Math.round(m.time / 60))} min
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </>
           )}
         </>
       )}

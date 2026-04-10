@@ -9,7 +9,6 @@ import PlaceCard from './components/PlaceCard'
 import RoutingHeader from './components/RoutingHeader'
 import ProfileSelector from './components/ProfileSelector'
 import DirectionsPanel from './components/DirectionsPanel'
-import FeedbackWidget from './components/FeedbackWidget'
 import { getRoute, DEFAULT_PROFILES } from './services/routing'
 import { scoreRoute } from './services/routeScorer'
 import { getBRouterRoutes } from './services/brouter'
@@ -493,9 +492,8 @@ export default function App() {
           />
         </div>
 
-        {/* Top-right controls */}
-        <div className="map-top-right">
-          <FeedbackWidget />
+        {/* Legend (hidden during routing on mobile via CSS) */}
+        <div className="map-legend-wrap">
           <Legend
             segments={route?.segments ?? null}
             overlayOn={overlayEnabled}
@@ -587,6 +585,7 @@ startQuickOptions={startQuickOptions}
                   preferredItemNames={preferredItemNames}
                   currentLocation={currentLocation}
                   travelMode={selectedProfile}
+                  compact
                 />
               </div>
             )}
