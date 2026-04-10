@@ -145,7 +145,7 @@ export default function App() {
 
   const [startPoint, setStartPoint] = useState<Place | null>(null)
   const [endPoint, setEndPoint]     = useState<Place | null>(null)
-  const [waypoints]                 = useState<Array<{ lat: number; lng: number }>>([])
+  const [waypoints, setWaypoints]   = useState<Array<{ lat: number; lng: number }>>([])
 
   const { location: currentLocation } = useGeolocation()
 
@@ -391,6 +391,13 @@ export default function App() {
 
   function handleRemoveWaypoint(index: number) {
     const newWps = waypoints.filter((_, i) => i !== index)
+    setWaypoints(newWps)
+    if (startPoint && endPoint) computeRoute(startPoint, endPoint, selectedProfile, newWps)
+  }
+
+  function handleAddWaypoint(lat: number, lng: number) {
+    const newWps = [...waypoints, { lat, lng }]
+    setWaypoints(newWps)
     if (startPoint && endPoint) computeRoute(startPoint, endPoint, selectedProfile, newWps)
   }
 
@@ -488,6 +495,7 @@ export default function App() {
             onSelectRoute={setSelectedRouteIndex}
             waypoints={waypoints}
             onRemoveWaypoint={handleRemoveWaypoint}
+            onAddWaypoint={uiState === 'routing' && route ? handleAddWaypoint : undefined}
             overlayEnabled={overlayEnabled}
             profileKey={selectedProfile}
             onOverlayStatusChange={setOverlayStatus}

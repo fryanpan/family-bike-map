@@ -1,6 +1,6 @@
 import L from 'leaflet'
 import { useEffect, useRef } from 'react'
-import { Marker, MapContainer, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet'
+import { Marker, MapContainer, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import { PREFERRED_COLOR, OTHER_COLOR, getLegendItem } from '../utils/classify'
 import BikeMapOverlay from './BikeMapOverlay'
 import type { ClassificationRule } from '../services/rules'
@@ -253,6 +253,24 @@ const currentLocationIcon = L.divIcon({
   iconAnchor: [10, 10],
 })
 
+function MapClickHandler({ onAddWaypoint }: { onAddWaypoint?: (lat: number, lng: number) => void }) {
+  useMapEvents({
+    click(e) {
+      if (onAddWaypoint) {
+        onAddWaypoint(e.latlng.lat, e.latlng.lng)
+      }
+    },
+  })
+  return null
+}
+
+const waypointAddIcon = L.divIcon({
+  html: '<div class="pin pin-waypoint">+</div>',
+  className: '',
+  iconSize: [26, 26],
+  iconAnchor: [13, 26],
+})
+
 interface Props {
   startPoint: { lat: number; lng: number; shortLabel?: string } | null
   endPoint: { lat: number; lng: number; shortLabel?: string } | null
@@ -270,6 +288,7 @@ interface Props {
   flyToPlace?: Place | null
   regionRules?: ClassificationRule[]
   onSelectRoute?: (index: number) => void
+  onAddWaypoint?: (lat: number, lng: number) => void
 }
 
 export default function Map({
@@ -289,6 +308,7 @@ export default function Map({
   flyToPlace,
   regionRules,
   onSelectRoute,
+  onAddWaypoint,
 }: Props) {
   return (
     <MapContainer
@@ -296,6 +316,7 @@ export default function Map({
       zoom={13}
       style={{ width: '100%', height: '100%' }}
     >
+      <MapClickHandler onAddWaypoint={onAddWaypoint} />
       <MapCenterController currentLocation={currentLocation} />
       <MapMoveController point={startPoint} zoom={14} />
       <MapMoveController point={flyToPlace ?? null} zoom={16} animate />
@@ -358,6 +379,9 @@ export default function Map({
         <Marker key={i} position={[wp.lat, wp.lng]} icon={waypointIcon}
           eventHandlers={{ click: () => onRemoveWaypoint(i) }}
         >
+          <Tooltip direction="top" offset={[0, -20]}>
+            <span style={{ fontSize: 11 }}>Via point — click to remove</span>
+          </Tooltip>
         </Marker>
       ))}
 
