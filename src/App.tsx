@@ -17,6 +17,7 @@ import { reverseGeocode } from './services/geocoding'
 import {
   getDefaultPreferredItems,
   getCostingFromPreferences,
+  computeRouteQuality,
 } from './utils/classify'
 import { CITY_PRESETS } from './services/audit'
 import { fetchRules } from './services/rules'
@@ -268,15 +269,31 @@ export default function App() {
         })
       }
 
-      // Enrich each route with segments using the unified Overpass-based scorer.
-      // Same classifier as the map overlay — consistent quality display for all engines.
-      taggedValhalla.forEach((result) => {
-        const coords = result.coordinates
-        scoreRoute(coords, profileKey, regionRules).then((segments) => {
-          if (segments.length) {
-            setRoutes((prev) => prev.map((r) => r.coordinates === coords ? { ...r, segments } : r))
-          }
+      // Enrich each route with segments, then reorder: "best" route first
+      // (highest preferred %) as long as it's within 20% of fastest time.
+      Promise.all(taggedValhalla.map(async (result) => {
+        const segments = await scoreRoute(result.coordinates, profileKey, regionRules)
+        return segments.length ? { ...result, segments } : result
+      })).then((scored) => {
+        const fastest = Math.min(...scored.map((r) => r.summary.duration))
+        const maxDuration = fastest * 1.2
+
+        // Sort: highest preferred % first, but only if within 20% of fastest
+        const reordered = [...scored].sort((a, b) => {
+          const aQuality = a.segments ? computeRouteQuality(a.segments, preferredItemNames) : null
+          const bQuality = b.segments ? computeRouteQuality(b.segments, preferredItemNames) : null
+          const aPref = aQuality?.preferred ?? 0
+          const bPref = bQuality?.preferred ?? 0
+          const aEligible = a.summary.duration <= maxDuration
+          const bEligible = b.summary.duration <= maxDuration
+          // Eligible routes first, then by preferred % descending
+          if (aEligible && !bEligible) return -1
+          if (!aEligible && bEligible) return 1
+          return bPref - aPref
         })
+
+        setRoutes(reordered)
+        setSelectedRouteIndex(0)
       })
 
       // Fetch BRouter routes in parallel (non-blocking — appended when ready)

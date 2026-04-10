@@ -315,21 +315,25 @@ export default function Map({
         regionRules={regionRules}
       />
 
-      {/* Alternate routes (faded, clickable) */}
+      {/* Alternate routes — visible but subdued, clickable to select */}
       {routes.map((altRoute, i) => {
         if (i === selectedRouteIndex) return null
         return (
           <Polyline
             key={`alt-${i}`}
             positions={altRoute.coordinates}
-            color="#94a3b8"
-            weight={10}
-            opacity={0.45}
-            dashArray="8 6"
+            color="#64748b"
+            weight={8}
+            opacity={0.6}
+            dashArray="10 6"
             eventHandlers={onSelectRoute ? {
-              click: () => onSelectRoute(i),
+              click: (e) => { L.DomEvent.stopPropagation(e.originalEvent); onSelectRoute(i) },
             } : undefined}
-          />
+          >
+            <Tooltip sticky direction="top" offset={[0, -6]}>
+              <span style={{ fontSize: 12 }}>Route {i + 1} — click to select</span>
+            </Tooltip>
+          </Polyline>
         )
       })}
 
