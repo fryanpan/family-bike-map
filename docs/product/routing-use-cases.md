@@ -1,5 +1,33 @@
 # Routing Use Cases
 
+## UC0: Learning to Ride
+
+**Who:** Parent + very young child (age 2-4) just learning to bike/scooter
+
+**What:** Not routing — discovering safe spaces to practice. Wide open areas with no cars, no intersections, flat or slightly downhill. The parent walks or rides slowly beside the child while she explores and builds confidence.
+
+**What makes a great learning spot:**
+- Wide car-free spaces (park paths, closed roads, multi-use trails)
+- Flat or gentle downhill
+- No intersections with cars, or so little traffic it doesn't matter
+- Enough width for a parent to walk beside while the child wobbles
+- Smooth surface (asphalt preferred, packed dirt okay)
+
+**Real examples that worked:**
+- JFK Drive in Golden Gate Park, SF (car-free, wide, flat)
+- Sanchez Street Slow Street, SF (minimal car traffic, gentle hill)
+- Alameda multi-use path (linear car-free park path, flat, wide)
+- Tempelhofer Feld, Berlin (former airport, completely flat and open)
+
+**What the product should do:**
+- "Show me safe places to practice biking near me"
+- Highlight wide car-free paths and open spaces on the map
+- Not routing — just discovery of suitable spaces
+
+**This is the entry point for the product.** Before you need routes, you need places. A family that finds great learning-to-ride spots through the app will trust it for routing later.
+
+---
+
 ## UC1: Family Mobility with Toddler
 
 **Who:** Parent + child (age 4) on her own bike/scooter, ~5-10 km/h
