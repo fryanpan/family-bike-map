@@ -80,12 +80,12 @@ describe('buildRoutingGraph', () => {
       coordinates: [[52.5, 13.4], [52.501, 13.4]],
     }]
     const graph = buildRoutingGraph(walkWays, 'toddler', new Set())
-    const link = graph.getLink('52.500000,13.400000', '52.501000,13.400000')
+    const link = graph.getLink('52.50000,13.40000', '52.50100,13.40000')
     expect(link).toBeTruthy()
     expect(link!.data.isWalking).toBe(true)
-    // Cost = time = distance / walking_speed. Walking is much slower than biking,
-    // so cost (time) should be much higher than for a bike edge of the same distance.
-    const walkingSpeed = 1.5 / 3.6 // toddler walk speed
+    // Cost = time = distance / walking_speed. Walking is slower than biking,
+    // so cost (time) should be higher than for a bike edge of the same distance.
+    const walkingSpeed = 4 / 3.6 // toddler walk speed (4 km/h)
     const expectedCost = link!.data.distance / walkingSpeed
     expect(link!.data.cost).toBeCloseTo(expectedCost, 0)
   })
@@ -140,6 +140,68 @@ describe('routeOnGraph', () => {
     )
     // ngraph returns empty array for unreachable
     expect(result).toBeNull()
+  })
+
+  test('tracks walking distance and percentage', () => {
+    // Route through a cycleway then a footway (walking)
+    const mixedWays: OsmWay[] = [
+      {
+        osmId: 30,
+        itemName: null,
+        tags: { highway: 'cycleway' },
+        coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+      },
+      {
+        osmId: 31,
+        itemName: null,
+        tags: { highway: 'footway' }, // walking-only (no bicycle=yes)
+        coordinates: [[52.5010, 13.4000], [52.5020, 13.4000]],
+      },
+    ]
+    const preferred = new Set(['Bike path'])
+    const graph = buildRoutingGraph(mixedWays, 'toddler', preferred)
+    const result = routeOnGraph(
+      graph, 52.5000, 13.4000, 52.5020, 13.4000,
+      'toddler', preferred,
+    )
+    expect(result).not.toBeNull()
+    expect(result!.walkingDistanceKm).toBeGreaterThan(0)
+    expect(result!.walkingPct).toBeGreaterThan(0)
+    expect(result!.walkingPct).toBeLessThan(1) // not 100% walking
+
+    // Check that walking segments are marked
+    const walkingSegs = result!.segments.filter(s => s.isWalking)
+    expect(walkingSegs.length).toBeGreaterThan(0)
+  })
+
+  test('toddler mode: Fahrradstrasse is fastest, painted bike lane is near-walking', () => {
+    // Fahrradstrasse edge
+    const fahrradWays: OsmWay[] = [{
+      osmId: 40,
+      itemName: null,
+      tags: { highway: 'residential', bicycle_road: 'yes' },
+      coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+    }]
+    const paintedWays: OsmWay[] = [{
+      osmId: 41,
+      itemName: null,
+      tags: { highway: 'secondary', cycleway: 'lane' },
+      coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+    }]
+
+    const preferred = new Set(['Fahrradstrasse', 'Painted bike lane'])
+    const gFahr = buildRoutingGraph(fahrradWays, 'toddler', preferred)
+    const gPaint = buildRoutingGraph(paintedWays, 'toddler', preferred)
+
+    const fahrLink = gFahr.getLink('52.50000,13.40000', '52.50100,13.40000')
+    const paintLink = gPaint.getLink('52.50000,13.40000', '52.50100,13.40000')
+    expect(fahrLink).toBeTruthy()
+    expect(paintLink).toBeTruthy()
+
+    // Fahrradstrasse (12 km/h) should be much cheaper than painted lane (3 km/h)
+    // Same distance, so cost ratio should be ~4:1
+    expect(paintLink!.data.cost / fahrLink!.data.cost).toBeGreaterThan(3.5)
+    expect(paintLink!.data.cost / fahrLink!.data.cost).toBeLessThan(4.5)
   })
 
   test('prefers lower-cost edges', () => {
