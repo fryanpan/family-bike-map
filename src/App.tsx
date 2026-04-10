@@ -12,7 +12,9 @@ import DirectionsPanel from './components/DirectionsPanel'
 import { getRoute, DEFAULT_PROFILES } from './services/routing'
 import { scoreRoute } from './services/routeScorer'
 import { getBRouterRoutes } from './services/brouter'
-import { clientRoute } from './services/clientRouter'
+import { clientRoute, prefetchTiles } from './services/clientRouter'
+import { isLocationCached, detectRegion, saveRegion, loadRegion } from './services/tileCache'
+import { injectCachedTile, latLngToTile, tileKey } from './services/overpass'
 import { logRoute } from './services/routeLog'
 import { reverseGeocode } from './services/geocoding'
 import {
@@ -24,7 +26,7 @@ import { CITY_PRESETS } from './services/audit'
 import { fetchRules } from './services/rules'
 import type { ClassificationRule } from './services/rules'
 import RouteList from './components/RouteList'
-import type { Place, Route, ProfileMap } from './utils/types'
+import type { Place, Route, ProfileMap, OsmWay } from './utils/types'
 import { Sentry } from './sentry'
 
 type UiState = 'search' | 'place-detail' | 'routing'
@@ -128,6 +130,46 @@ async function resolveCurrentLocation(): Promise<Place | null> {
   })
 }
 
+const TILE_DEGREES = 0.1
+
+/** Inject OsmWay[] from a cached region into the in-memory overpass tile cache. */
+function injectRegionIntoTileCache(
+  ways: OsmWay[],
+  bbox: { south: number; west: number; north: number; east: number },
+): void {
+  // Group ways by tile
+  // Group ways by tile. Use a plain object instead of Map to avoid shadowed Map.
+  const tileMap: Record<string, OsmWay[]> = {}
+  const minRow = Math.floor(bbox.south / TILE_DEGREES)
+  const maxRow = Math.floor(bbox.north / TILE_DEGREES)
+  const minCol = Math.floor(bbox.west / TILE_DEGREES)
+  const maxCol = Math.floor(bbox.east / TILE_DEGREES)
+
+  // Initialize all tiles in the bbox (even empty ones) so the router
+  // doesn't try to fetch them from Overpass
+  for (let r = minRow; r <= maxRow; r++) {
+    for (let c = minCol; c <= maxCol; c++) {
+      tileMap[tileKey(r, c)] = []
+    }
+  }
+
+  // Assign each way to its tile based on first coordinate
+  for (const way of ways) {
+    if (way.coordinates.length === 0) continue
+    const [lat, lng] = way.coordinates[0]
+    const tile = latLngToTile(lat, lng)
+    const key = tileKey(tile.row, tile.col)
+    if (tileMap[key]) tileMap[key].push(way)
+    else tileMap[key] = [way]
+  }
+
+  // Inject into the in-memory cache
+  for (const key of Object.keys(tileMap)) {
+    const [rowStr, colStr] = key.split(':')
+    injectCachedTile(parseInt(rowStr), parseInt(colStr), tileMap[key])
+  }
+}
+
 export default function App() {
   const [profiles, setProfiles] = useState<ProfileMap>(loadProfiles)
 
@@ -166,6 +208,15 @@ export default function App() {
   const [regionRules, setRegionRules] = useState<ClassificationRule[]>([])
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
 
+  // Tile cache state
+  const [tileCacheBanner, setTileCacheBanner] = useState<{
+    show: boolean
+    regionName: string
+    bbox: { south: number; west: number; north: number; east: number }
+  } | null>(null)
+  const [tileCacheProgress, setTileCacheProgress] = useState<number | null>(null)
+  const tileCacheCheckedRef = useRef(false)
+
   // Detect which city preset the map center falls within
   useEffect(() => {
     const loc = currentLocation ?? { lat: 52.52, lng: 13.405 } // default Berlin
@@ -180,6 +231,50 @@ export default function App() {
         .catch(() => { /* ignore */ })
     }
   }, [currentLocation, activeRegion])
+
+  // On app load: check if current location is inside a cached region.
+  // If cached, load tiles from IndexedDB. If not, show download banner.
+  useEffect(() => {
+    if (tileCacheCheckedRef.current) return
+    tileCacheCheckedRef.current = true
+
+    const loc = currentLocation ?? { lat: 52.52, lng: 13.405 }
+    void (async () => {
+      try {
+        const { cached, regionName } = await isLocationCached(loc.lat, loc.lng, 2)
+        if (cached && regionName) {
+          // Load from IndexedDB into in-memory tile cache
+          const region = await loadRegion(regionName)
+          if (region) {
+            injectRegionIntoTileCache(region.ways, region.bbox)
+          }
+        } else {
+          // Show download banner
+          const detected = detectRegion(loc.lat, loc.lng)
+          setTileCacheBanner({ show: true, regionName: detected.name, bbox: detected.bbox })
+        }
+      } catch {
+        // IndexedDB failure is non-critical
+      }
+    })()
+  }, [currentLocation]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleDownloadTiles() {
+    if (!tileCacheBanner) return
+    const { regionName, bbox } = tileCacheBanner
+    setTileCacheBanner(null)
+    setTileCacheProgress(0)
+
+    try {
+      const ways = await prefetchTiles(bbox, (pct) => setTileCacheProgress(pct))
+      await saveRegion(regionName, bbox, ways)
+      injectRegionIntoTileCache(ways, bbox)
+    } catch {
+      // Download failure is non-critical
+    } finally {
+      setTileCacheProgress(null)
+    }
+  }
 
   // Derived: has the user customized their travel mode's preferred path types?
   const isCustomTravelMode = !setsEqual(preferredItemNames, getDefaultPreferredItems(selectedProfile))
@@ -580,6 +675,32 @@ export default function App() {
           </button>
           {overlayStatusMsg && <p className="bike-layer-status">{overlayStatusMsg}</p>}
         </div>
+
+        {/* Tile cache download banner */}
+        {tileCacheBanner?.show && (
+          <div className="floating-card tile-cache-banner">
+            <p>Download cycling data for this area? (~30 seconds)</p>
+            <button className="tile-cache-btn" onClick={handleDownloadTiles}>
+              Download
+            </button>
+            <button
+              className="tile-cache-dismiss"
+              onClick={() => setTileCacheBanner(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Tile cache download progress */}
+        {tileCacheProgress !== null && (
+          <div className="floating-card tile-cache-progress">
+            <p>Downloading cycling data... {tileCacheProgress}%</p>
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${tileCacheProgress}%` }} />
+            </div>
+          </div>
+        )}
 
         {/* --- Floating UI card (changes per uiState) --- */}
 

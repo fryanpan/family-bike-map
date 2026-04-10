@@ -59,6 +59,15 @@ export function getCachedTile(row: number, col: number): OsmWay[] | undefined {
   return _tileCache.get(tileKey(row, col))
 }
 
+/**
+ * Inject pre-loaded tile data into the in-memory cache.
+ * Used by the IndexedDB tile cache to populate tiles on app load
+ * without fetching from Overpass.
+ */
+export function injectCachedTile(row: number, col: number, ways: OsmWay[]): void {
+  _tileCache.set(tileKey(row, col), ways)
+}
+
 // Client-side fetch timeout (ms). Must exceed the server-side Overpass timeout so
 // we get a proper HTTP error response rather than a silent network abort.
 const FETCH_TIMEOUT_MS = 35_000
