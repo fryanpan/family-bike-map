@@ -389,6 +389,15 @@ export default function App() {
     if (startPoint && endPoint) computeRoute(startPoint, endPoint, key, waypoints)
   }
 
+  function handleSwap() {
+    const newStart = endPoint
+    const newEnd = startPoint
+    setStartPoint(newStart)
+    setEndPoint(newEnd)
+    setWaypoints([...waypoints].reverse())
+    if (newStart && newEnd) void computeRoute(newStart, newEnd, selectedProfile, [...waypoints].reverse())
+  }
+
   function handleRemoveWaypoint(index: number) {
     const newWps = waypoints.filter((_, i) => i !== index)
     setWaypoints(newWps)
@@ -582,7 +591,8 @@ export default function App() {
                 onEndSelect={handleEndSelect}
                 onStartClear={() => { setStartPoint(null); setRoutes([]) }}
                 onEndClear={() => { setEndPoint(null); setRoutes([]) }}
-startQuickOptions={startQuickOptions}
+                onSwap={handleSwap}
+                startQuickOptions={startQuickOptions}
                 endQuickOptions={endQuickOptions}
               />
             </div>

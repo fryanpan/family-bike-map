@@ -205,12 +205,36 @@ button { font-family: inherit; cursor: pointer; }
   flex-shrink: 0;
 }
 .routing-back-btn:hover { color: #111827; }
-.routing-header { flex: 1; min-width: 0; }
+.routing-header {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .routing-inputs {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
+.routing-swap-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1.5px solid #d1d5db;
+  border-radius: 6px;
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.routing-swap-btn:hover { border-color: #93c5fd; color: #2563eb; }
 .routing-inputs .search-input {
   padding: 8px 10px;
   font-size: 14px;
