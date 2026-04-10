@@ -8,6 +8,9 @@
 import { useState, useCallback } from 'react'
 import { getRoute, formatDistance, formatDuration, DEFAULT_PROFILES } from '../services/routing'
 import { getBRouterRoutes } from '../services/brouter'
+import { runRoutingBenchmark, formatBenchmarkTable } from '../services/routerBenchmark'
+import type { BenchmarkSummary } from '../services/routerBenchmark'
+import { getDefaultPreferredItems } from '../utils/classify'
 import type { Place, Route, ProfileKey } from '../utils/types'
 
 interface EvalResult {
@@ -146,6 +149,30 @@ export default function AuditEvalTab() {
     setTestCases((prev) => prev.filter((_, i) => i !== idx))
   }, [])
 
+  // --- Benchmark state ---
+  const [benchmarkRunning, setBenchmarkRunning] = useState(false)
+  const [benchmarkProgress, setBenchmarkProgress] = useState('')
+  const [benchmarkResult, setBenchmarkResult] = useState<BenchmarkSummary | null>(null)
+
+  const handleRunBenchmark = useCallback(async () => {
+    setBenchmarkRunning(true)
+    setBenchmarkProgress('Starting...')
+    setBenchmarkResult(null)
+    try {
+      const preferred = getDefaultPreferredItems('toddler')
+      const summary = await runRoutingBenchmark('toddler', preferred, [], (msg) => {
+        setBenchmarkProgress(msg)
+      })
+      setBenchmarkResult(summary)
+      // Also log to console for easy copy
+      console.log(formatBenchmarkTable(summary))
+    } catch (e) {
+      setBenchmarkProgress(`Error: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBenchmarkRunning(false)
+    }
+  }, [])
+
   const selectedResult = selectedRoute
     ? results.get(selectedRoute.tcKey)?.[selectedRoute.idx]
     : null
@@ -278,6 +305,62 @@ export default function AuditEvalTab() {
           </p>
         </div>
       )}
+
+      {/* Client Router Benchmark */}
+      <div style={{ marginTop: 24, borderTop: '1px solid #444', paddingTop: 16 }}>
+        <h3 style={{ margin: '0 0 8px' }}>Client Router Benchmark</h3>
+        <button
+          className="btn-primary eval-run-btn"
+          onClick={handleRunBenchmark}
+          disabled={benchmarkRunning}
+        >
+          {benchmarkRunning ? 'Running Benchmark...' : 'Run Client vs Valhalla Benchmark'}
+        </button>
+        {benchmarkProgress && (
+          <p style={{ fontSize: 12, color: '#aaa', margin: '8px 0' }}>{benchmarkProgress}</p>
+        )}
+        {benchmarkResult && (
+          <div style={{ marginTop: 12 }}>
+            <p style={{ fontSize: 12, color: '#aaa' }}>
+              Tile fetch: {Math.round(benchmarkResult.tileFetchMs)}ms | {benchmarkResult.totalWays} ways
+            </p>
+            <table className="eval-table" style={{ fontSize: 11 }}>
+              <thead>
+                <tr>
+                  <th>Origin</th>
+                  <th>Destination</th>
+                  <th>Build ms</th>
+                  <th>Route ms</th>
+                  <th>Client km</th>
+                  <th>Client min</th>
+                  <th>Pref%</th>
+                  <th>Valhalla km</th>
+                  <th>Valhalla min</th>
+                  <th>Nodes</th>
+                  <th>Edges</th>
+                </tr>
+              </thead>
+              <tbody>
+                {benchmarkResult.rows.map((r, i) => (
+                  <tr key={i} className="eval-row">
+                    <td>{r.origin.slice(0, 16)}</td>
+                    <td>{r.destination.slice(0, 20)}</td>
+                    <td>{Math.round(r.clientGraphBuildMs)}</td>
+                    <td>{Math.round(r.clientRouteMs)}</td>
+                    <td>{r.clientDistanceKm !== null ? r.clientDistanceKm.toFixed(1) : '-'}</td>
+                    <td>{r.clientDurationS !== null ? Math.round(r.clientDurationS / 60) : '-'}</td>
+                    <td>{r.clientPreferredPct !== null ? `${r.clientPreferredPct}%` : '-'}</td>
+                    <td>{r.valhallaDistanceKm !== null ? r.valhallaDistanceKm.toFixed(1) : r.valhallaError?.slice(0, 15) ?? '-'}</td>
+                    <td>{r.valhallaDurationS !== null ? Math.round(r.valhallaDurationS / 60) : '-'}</td>
+                    <td>{r.clientNodes}</td>
+                    <td>{r.clientEdges}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

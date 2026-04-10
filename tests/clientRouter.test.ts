@@ -1,0 +1,172 @@
+import { describe, test, expect } from 'bun:test'
+import { buildRoutingGraph, routeOnGraph, haversineM } from '../src/services/clientRouter'
+import type { OsmWay } from '../src/utils/types'
+
+describe('haversineM', () => {
+  test('returns 0 for same point', () => {
+    expect(haversineM(52.5, 13.4, 52.5, 13.4)).toBe(0)
+  })
+
+  test('returns ~111km for 1 degree latitude', () => {
+    const dist = haversineM(52.0, 13.0, 53.0, 13.0)
+    expect(dist).toBeGreaterThan(110_000)
+    expect(dist).toBeLessThan(112_000)
+  })
+})
+
+describe('buildRoutingGraph', () => {
+  const ways: OsmWay[] = [
+    {
+      osmId: 1,
+      itemName: null,
+      tags: { highway: 'cycleway' },
+      coordinates: [
+        [52.5000, 13.4000],
+        [52.5010, 13.4000],
+        [52.5020, 13.4000],
+      ],
+    },
+    {
+      osmId: 2,
+      itemName: null,
+      tags: { highway: 'residential' },
+      coordinates: [
+        [52.5020, 13.4000],
+        [52.5020, 13.4010],
+      ],
+    },
+  ]
+
+  test('creates nodes for all coordinates', () => {
+    const graph = buildRoutingGraph(ways, 'toddler', new Set(['Bike path']))
+    // 4 unique coordinates
+    expect(graph.getNodeCount()).toBe(4)
+  })
+
+  test('creates edges in both directions for non-oneway', () => {
+    const graph = buildRoutingGraph(ways, 'toddler', new Set(['Bike path']))
+    // Way 1: 2 segments * 2 dirs = 4, Way 2: 1 segment * 2 dirs = 2, total = 6
+    expect(graph.getLinkCount()).toBe(6)
+  })
+
+  test('respects oneway', () => {
+    const onewayWays: OsmWay[] = [{
+      osmId: 3,
+      itemName: null,
+      tags: { highway: 'cycleway', oneway: 'yes' },
+      coordinates: [[52.5, 13.4], [52.501, 13.4]],
+    }]
+    const graph = buildRoutingGraph(onewayWays, 'toddler', new Set())
+    // 1 segment, oneway = 1 edge only
+    expect(graph.getLinkCount()).toBe(1)
+  })
+
+  test('oneway:bicycle=no overrides oneway', () => {
+    const overrideWays: OsmWay[] = [{
+      osmId: 4,
+      itemName: null,
+      tags: { highway: 'cycleway', oneway: 'yes', 'oneway:bicycle': 'no' },
+      coordinates: [[52.5, 13.4], [52.501, 13.4]],
+    }]
+    const graph = buildRoutingGraph(overrideWays, 'toddler', new Set())
+    expect(graph.getLinkCount()).toBe(2)
+  })
+
+  test('walking-only edges get higher cost', () => {
+    const walkWays: OsmWay[] = [{
+      osmId: 5,
+      itemName: null,
+      tags: { highway: 'footway' }, // no bicycle=yes → walking
+      coordinates: [[52.5, 13.4], [52.501, 13.4]],
+    }]
+    const graph = buildRoutingGraph(walkWays, 'toddler', new Set())
+    const link = graph.getLink('52.500000,13.400000', '52.501000,13.400000')
+    expect(link).toBeTruthy()
+    expect(link!.data.isWalking).toBe(true)
+    // Cost = time = distance / walking_speed. Walking is much slower than biking,
+    // so cost (time) should be much higher than for a bike edge of the same distance.
+    const walkingSpeed = 1.5 / 3.6 // toddler walk speed
+    const expectedCost = link!.data.distance / walkingSpeed
+    expect(link!.data.cost).toBeCloseTo(expectedCost, 0)
+  })
+})
+
+describe('routeOnGraph', () => {
+  // Simple linear graph: A -> B -> C
+  const ways: OsmWay[] = [{
+    osmId: 10,
+    itemName: null,
+    tags: { highway: 'cycleway' },
+    coordinates: [
+      [52.5000, 13.4000],
+      [52.5010, 13.4000],
+      [52.5020, 13.4000],
+    ],
+  }]
+
+  test('finds a path on a simple graph', () => {
+    const preferred = new Set(['Bike path'])
+    const graph = buildRoutingGraph(ways, 'toddler', preferred)
+    const result = routeOnGraph(
+      graph, 52.5000, 13.4000, 52.5020, 13.4000,
+      'toddler', preferred,
+    )
+    expect(result).not.toBeNull()
+    expect(result!.coordinates.length).toBe(3)
+    expect(result!.distanceKm).toBeGreaterThan(0)
+    expect(result!.durationS).toBeGreaterThan(0)
+  })
+
+  test('returns null for disconnected graph', () => {
+    const disconnected: OsmWay[] = [
+      {
+        osmId: 11,
+        itemName: null,
+        tags: { highway: 'cycleway', oneway: 'yes' },
+        coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+      },
+      {
+        osmId: 12,
+        itemName: null,
+        tags: { highway: 'cycleway', oneway: 'yes' },
+        coordinates: [[52.6000, 13.5000], [52.6010, 13.5000]],
+      },
+    ]
+    const graph = buildRoutingGraph(disconnected, 'toddler', new Set())
+    // Route from one cluster to the other: should return null (or empty path)
+    const result = routeOnGraph(
+      graph, 52.5000, 13.4000, 52.6010, 13.5000,
+      'toddler', new Set(),
+    )
+    // ngraph returns empty array for unreachable
+    expect(result).toBeNull()
+  })
+
+  test('prefers lower-cost edges', () => {
+    // Two parallel paths: one cycleway (preferred, cost 1x), one residential (cost 3x)
+    const twoPath: OsmWay[] = [
+      {
+        osmId: 20,
+        itemName: null,
+        tags: { highway: 'cycleway' },
+        coordinates: [[52.5000, 13.4000], [52.5005, 13.4010], [52.5010, 13.4020]],
+      },
+      {
+        osmId: 21,
+        itemName: null,
+        tags: { highway: 'residential' },
+        coordinates: [[52.5000, 13.4000], [52.4995, 13.4010], [52.5010, 13.4020]],
+      },
+    ]
+    const preferred = new Set(['Bike path'])
+    const graph = buildRoutingGraph(twoPath, 'toddler', preferred)
+    const result = routeOnGraph(
+      graph, 52.5000, 13.4000, 52.5010, 13.4020,
+      'toddler', preferred,
+    )
+    expect(result).not.toBeNull()
+    // Should take the cycleway (via 52.5005) not the residential (via 52.4995)
+    const midLat = result!.coordinates[1][0]
+    expect(midLat).toBeCloseTo(52.5005, 3)
+  })
+})

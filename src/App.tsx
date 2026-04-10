@@ -12,6 +12,7 @@ import DirectionsPanel from './components/DirectionsPanel'
 import { getRoute, DEFAULT_PROFILES } from './services/routing'
 import { scoreRoute } from './services/routeScorer'
 import { getBRouterRoutes } from './services/brouter'
+import { clientRoute } from './services/clientRouter'
 import { logRoute } from './services/routeLog'
 import { reverseGeocode } from './services/geocoding'
 import {
@@ -247,14 +248,32 @@ export default function App() {
     setSelectedRouteIndex(0)
 
     try {
+      // Try client-side router first (no waypoint support yet)
+      let clientResult: Route | null = null
+      if (wps.length === 0) {
+        try {
+          clientResult = await clientRoute(
+            start.lat, start.lng, end.lat, end.lng,
+            profileKey, preferredItemNames, regionRules,
+          )
+        } catch {
+          // Client router failure is non-critical — fall back to Valhalla
+        }
+      }
+
       const costingOptions = getCostingFromPreferences(preferredItemNames, profileKey, profile)
       const valhallaResults = await getRoute(start, end, { ...profile, costingOptions }, wps, 0)
       // Tag Valhalla routes with engine
       const taggedValhalla = valhallaResults.map((r) => ({ ...r, engine: 'valhalla' }))
-      setRoutes(taggedValhalla)
 
-      // Fire-and-forget route log for each Valhalla route
-      for (const result of taggedValhalla) {
+      // If client router succeeded, prepend it as the first option
+      const initialRoutes = clientResult
+        ? [clientResult, ...taggedValhalla]
+        : taggedValhalla
+      setRoutes(initialRoutes)
+
+      // Fire-and-forget route log for each route
+      for (const result of initialRoutes) {
         logRoute({
           startLat: start.lat,
           startLng: start.lng,
@@ -263,7 +282,7 @@ export default function App() {
           endLng: end.lng,
           endLabel: end.label,
           travelMode: profileKey,
-          engine: 'valhalla',
+          engine: result.engine ?? 'unknown',
           distanceM: Math.round(result.summary.distance * 1000),
           durationS: Math.round(result.summary.duration),
         })
@@ -271,7 +290,7 @@ export default function App() {
 
       // Enrich each route with segments, then reorder: "best" route first
       // (highest preferred %) as long as it's within 20% of fastest time.
-      Promise.all(taggedValhalla.map(async (result) => {
+      Promise.all(initialRoutes.map(async (result) => {
         const segments = await scoreRoute(result.coordinates, profileKey, regionRules)
         return segments.length ? { ...result, segments } : result
       })).then((scored) => {
