@@ -36,12 +36,26 @@ const waypointIcon = L.divIcon({
   iconAnchor: [13, 26],
 })
 
-function makeSegmentIcon(emoji: string): L.DivIcon {
+// Short labels for segment types — shown directly on the map instead of emoji icons
+const SHORT_LABELS: Record<string, string> = {
+  'Car-free path / Radweg': 'Radweg',
+  'Fahrradstrasse': 'Fahrradstr.',
+  'Shared footway (park path)': 'Park path',
+  'Elevated sidewalk path': 'Sidewalk path',
+  'Living street': 'Living st.',
+  'Painted bike lane': 'Bike lane',
+  'Shared bus lane': 'Bus lane',
+  'Residential & local road': 'Local road',
+  'Rough road (e.g. cobblestone)': 'Rough',
+}
+
+function makeTextLabel(text: string, isPreferred: boolean): L.DivIcon {
+  const bg = isPreferred ? '#047857' : '#92400e'
   return L.divIcon({
-    html: `<div class="seg-icon">${emoji}</div>`,
+    html: `<div class="seg-label" style="background:${bg}">${text}</div>`,
     className: '',
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
+    iconSize: [0, 0],
+    iconAnchor: [0, 10],
   })
 }
 
@@ -92,8 +106,8 @@ function FitBoundsController({ route }: { route: Route | null }) {
     // Mobile: top routing header (~80px), bottom route list (~200px)
     // Desktop: left panel (~360px)
     const isMobile = window.innerWidth < 768
-    const paddingTopLeft: [number, number] = isMobile ? [40, 80] : [360, 40]
-    const paddingBottomRight: [number, number] = isMobile ? [40, 200] : [40, 40]
+    const paddingTopLeft: [number, number] = isMobile ? [40, 100] : [360, 40]
+    const paddingBottomRight: [number, number] = isMobile ? [40, Math.round(window.innerHeight * 0.38)] : [40, 40]
     map.fitBounds(bounds, { paddingTopLeft, paddingBottomRight })
   }, [route, map])
 
@@ -196,26 +210,27 @@ function RouteDisplay({
             </Polyline>
           )
         })}
-        {/* Segment icons: coalesced to reduce clutter on long routes */}
+        {/* Segment text labels: coalesced, shown directly on map */}
         {coalesceForIcons(visible)
-          .filter((seg) => seg.coordinates.length >= 8)
+          .filter((seg) => seg.coordinates.length >= 10)
           .map((seg, i) => {
             if (seg.isWalking) {
               return (
                 <Marker
-                  key={`icon-${i}`}
+                  key={`label-${i}`}
                   position={midpoint(seg.coordinates)}
-                  icon={makeSegmentIcon('\u{1F6B6}')}
+                  icon={makeTextLabel('Walk', false)}
                 />
               )
             }
-            const legendItem = getLegendItem(seg.itemName, profileKey)
-            if (!legendItem) return null
+            const label = SHORT_LABELS[seg.itemName ?? '']
+            if (!label) return null
+            const isPreferred = seg.itemName !== null && preferredItemNames.has(seg.itemName)
             return (
               <Marker
-                key={`icon-${i}`}
+                key={`label-${i}`}
                 position={midpoint(seg.coordinates)}
-                icon={makeSegmentIcon(legendItem.icon)}
+                icon={makeTextLabel(label, isPreferred)}
               />
             )
           })}

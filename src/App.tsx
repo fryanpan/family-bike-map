@@ -573,19 +573,27 @@ startQuickOptions={startQuickOptions}
 
             {route && !isLoading && (
               <div className="floating-card floating-route-summary">
+                <div className="route-panel-header">
+                  <ProfileSelector
+                    profiles={profiles}
+                    selected={selectedProfile}
+                    onSelect={handleProfileChange}
+                    isCustomTravelMode={isCustomTravelMode}
+                  />
+                  <DirectionsPanel
+                    route={route}
+                    onClose={backToSearch}
+                    preferredItemNames={preferredItemNames}
+                    currentLocation={currentLocation}
+                    travelMode={selectedProfile}
+                    compact
+                  />
+                </div>
                 <RouteList
                   routes={routes}
                   selectedIndex={selectedRouteIndex}
                   onSelect={setSelectedRouteIndex}
                   preferredItemNames={preferredItemNames}
-                />
-                <DirectionsPanel
-                  route={route}
-                  onClose={backToSearch}
-                  preferredItemNames={preferredItemNames}
-                  currentLocation={currentLocation}
-                  travelMode={selectedProfile}
-                  compact
                 />
               </div>
             )}
