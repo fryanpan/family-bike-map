@@ -1,184 +1,197 @@
 # Technical Architecture
 
-## Current Architecture (Implemented)
-
-The app is a single-page web application deployed on Cloudflare Workers. There is no separate backend — the Worker serves both static assets and proxies API calls.
+## System Overview
 
 ```mermaid
 graph TB
-    subgraph "Client (React SPA)"
-        UI[Map UI<br/>React + MapLibre/Leaflet]
-        Classify[Route Classifier<br/>classify.ts / overpass.ts]
+    subgraph "Browser (React SPA)"
+        UI[Map UI<br/>React + Leaflet]
+        ClientRouter[Client Router<br/>ngraph.path A*]
+        TileCache[Tile Cache<br/>In-memory + IndexedDB]
+        Classify[Classifier<br/>classify.ts + overpass.ts]
+        Scorer[Route Scorer<br/>routeScorer.ts]
     end
 
-    subgraph "Cloudflare Worker"
-        Worker[Worker<br/>serves assets + proxies API]
+    subgraph "Cloudflare"
+        Worker[Worker<br/>API proxy + D1 + KV]
+        EdgeCache[Edge Cache<br/>30-day TTL]
+        D1[(D1 Database<br/>route logs)]
+        KV[(KV Store<br/>classification rules)]
     end
 
     subgraph "External APIs"
-        Valhalla[Valhalla<br/>valhalla1.openstreetmap.de<br/>bicycle routing]
-        Nominatim[Nominatim<br/>nominatim.openstreetmap.org<br/>geocoding]
-        Overpass[Overpass API<br/>overpass-api.de<br/>OSM tile data for overlay]
+        Valhalla[Valhalla<br/>fallback routing]
+        Nominatim[Nominatim<br/>geocoding]
+        Overpass[Overpass API<br/>OSM infrastructure data]
+        Mapillary[Mapillary<br/>street imagery]
     end
 
-    UI -->|route request| Worker
-    UI -->|geocode| Nominatim
-    Classify -->|tile bounding box query| Overpass
+    UI --> ClientRouter
+    ClientRouter --> TileCache
+    TileCache -->|cache miss| Worker
+    Worker -->|proxy + cache| Overpass
     Worker -->|proxy| Valhalla
+    Worker -->|proxy| Nominatim
+    Classify --> TileCache
+    Scorer --> TileCache
+    UI -->|route log| D1
+    UI -->|rules| KV
+    EdgeCache -->|30-day TTL| Overpass
 ```
 
-## Component Details
+## Routing Architecture
 
-### Frontend (React + Leaflet)
+```mermaid
+flowchart TD
+    Start[User searches route] --> Fetch[Fetch/cache Overpass tiles<br/>for route corridor]
+    Fetch --> Build[Build graph from<br/>cached OsmWay data]
+    Build --> AStar[A* pathfinding<br/>ngraph.path]
+    AStar --> Found{Path found?}
+    Found -->|Yes| Score[Score segments<br/>using classifier]
+    Found -->|No| Fallback[Fallback to Valhalla]
+    Score --> Heal[Heal intersection gaps<br/>≤30m between preferred]
+    Heal --> Display[Display route on map]
+    Fallback --> ValScore[Score Valhalla route<br/>using same classifier]
+    ValScore --> Heal
+```
 
-**Key files:**
+### Cost Model (speed-based)
 
-| File | Purpose |
-|------|---------|
-| `src/App.tsx` | App state, route computation, profile management |
-| `src/components/Map.tsx` | Leaflet map, route polyline display, auto-fit bounds |
-| `src/components/ProfileEditor.tsx` | Edit rider profiles, avoidances, costing sliders |
-| `src/components/ProfileSelector.tsx` | Profile switcher (on-map overlay) |
-| `src/components/BikeMapOverlay.tsx` | Tile-cached bike infrastructure overlay from Overpass |
-| `src/components/Legend.tsx` | Route quality legend with safety class toggles |
-| `src/components/SearchBar.tsx` | Address autocomplete via Nominatim |
-| `src/components/DirectionsPanel.tsx` | Turn-by-turn directions and route summary |
-| `src/services/routing.ts` | Valhalla route requests, profile definitions |
-| `src/services/overpass.ts` | OSM bike infrastructure queries and classification |
-| `src/services/geocoding.ts` | Nominatim forward/reverse geocoding |
-| `src/utils/classify.ts` | Edge → SafetyClass classification (profile-aware) |
-| `src/utils/types.ts` | Shared types including `SafetyClass`, `RiderProfile` |
-| `src/hooks/useGeolocation.ts` | GPS watch position hook |
+The client router uses **time as cost** — faster segments are cheaper. This naturally handles multimodal routing: walking is slow, biking preferred paths is fast.
 
-### Routing: Valhalla (Public Instance)
+| Infrastructure (toddler) | Speed | Cost per 100m |
+|---|:---:|:---:|
+| Fahrradstrasse | 12 km/h | 30s |
+| Bike path (Radweg) | 10 km/h | 36s |
+| Elevated sidewalk path | 9 km/h | 40s |
+| Shared foot path / Living street | 8 km/h | 45s |
+| Residential/local road | 4 km/h | 90s |
+| Painted bike lane | 3 km/h | 120s |
+| Walking (footway) | 5 km/h | 72s |
+| Unclassified road without sidewalk | **Excluded** | ∞ |
 
-All routing calls go through the Cloudflare Worker which proxies to `valhalla1.openstreetmap.de`. The Worker handles CORS and rate limiting.
+### Gap Healing
 
-**Costing profiles** (defined in `routing.ts`):
+OSM has short unclassified segments at intersections (crossings, turning circles). If a non-preferred segment is ≤5 coordinates (~30m) with preferred segments on both sides, it inherits the surrounding classification. Applied to route display, quality metrics, and client router output.
 
-| Profile | Bicycle Type | Speed | Use Roads | Avoid Bad Surfaces |
-|---------|-------------|-------|-----------|-------------------|
-| toddler | Hybrid | 10 km/h | 0.0 | 0.5 |
-| trailer | Hybrid | 11 km/h | 0.15 | 0.5 |
-| training | Road | 22 km/h | 0.6 | 0.4 |
-
-When a profile has `avoidances: ['cobblestones']`, the routing enforces `avoid_bad_surfaces >= 0.5` in the Valhalla request.
-
-**Two-phase route rendering:**
-1. `getRoute()` — fast Valhalla `/route` call, returns geometry + maneuvers
-2. `getRouteSegments()` — async Valhalla `trace_attributes` call, classifies each edge and colors segments by safety class
-
-### Safety Classification Model
-
-Routes and overlay paths are classified into 3 levels (`SafetyClass`, a string union type matching the display color palette):
-
-| Level | Color | Meaning |
-|-------|-------|---------|
-| `'green'` | Green (#10b981) | Car-free paths, Fahrradstrasse, shared footways |
-| `'amber'` | Amber (#f97316) | Separated tracks alongside roads, living streets |
-| `'red'` | Red (#e11d48) | Painted lanes, shared roads, roads without protection |
-
-Classification is **profile-aware** — the same road can be `'amber'` for toddler but `'red'` for trailer. See `classify.ts` and `overpass.ts` for the full logic.
-
-#### Two classification paths (must stay in sync)
-
-| Path | Function | Input | Used by |
-|------|----------|-------|---------|
-| Routing | `classifyEdge()` in `classify.ts` | Valhalla `trace_attributes` edge | Route segment coloring |
-| Overlay | `classifyOsmTags()` in `overpass.ts` | Raw OSM tags from Overpass | Map background overlay |
-
-Both implement the same semantic model. `BAD_SURFACES` (cobblestone, sett, gravel, etc.) is defined once in `classify.ts` and imported by `overpass.ts`. **Any change to classification logic must be applied in both files and verified to produce consistent results.**
-
-Notable Valhalla limitation: it does not expose `cycleway:separation` or `cycleway:buffer` tags, so it cannot distinguish plain painted lanes from bollard-protected ones. The overlay (`overpass.ts`) handles this via `hasSeparation()` and upgrades the classification accordingly.
-
-#### Preferred path types
-
-`PROFILE_LEGEND` in `classify.ts` defines the per-profile list of path types, their `SafetyClass`, and whether they are preferred by default (`defaultPreferred: boolean`). This is the canonical mapping from infrastructure type → legend item → `SafetyClass`.
-
-- `getDefaultPreferredItems(profileKey)` — returns the default preferred item names for a profile
-- `getPreferredSafetyClasses(preferredNames, profileKey)` — maps preferred names → `Set<SafetyClass>`
-
-Preferred safety classes are used to:
-1. **Color route segments**: preferred → green (`PREFERRED_COLOR`), other → orange (`OTHER_COLOR`)
-2. **Filter overlay visibility**: preferred classes shown, others hidden (unless "show all" toggled)
-3. **Route quality bar**: fraction of route in preferred vs. non-preferred classes
-
-Preferred types currently affect display only. Routing costing is controlled separately by each profile's `costingOptions` in `routing.ts` and does not change when the user rearranges the legend.
-
-### Bike Infrastructure Overlay
-
-`BikeMapOverlay` fetches OSM data via Overpass API at the current map viewport. Results are cached by tile (0.1° grid, ~74 km² at Berlin latitude), so panning/zooming reuses already-fetched tiles. The overlay shows at all zoom levels but warns when more than 12 tiles would need loading (too zoomed out).
-
-Each overlay way is colored by its `SafetyClass` (from `SAFETY` palette in `classify.ts`). Visibility filtering uses `preferredSafetyClasses` directly — preferred classes are shown, others hidden unless "Show other paths" is toggled.
-
-### Deployment
-
-**Cloudflare Workers** serves everything:
-- Static assets (React SPA, built by Vite)
-- API proxy endpoints at `/api/valhalla/*`
-- Feedback endpoint at `/api/feedback`
-
-No database, no cache layer — all state lives in the browser (localStorage for profiles, in-memory for route/overlay data).
-
-## Data Flow: Route Request
+## Data Flow
 
 ```mermaid
 sequenceDiagram
     participant User
     participant App
+    participant Cache as Tile Cache
+    participant Router as Client Router
     participant Worker
-    participant Valhalla
+    participant Overpass
 
-    User->>App: Select start + end
-    App->>Worker: POST /api/valhalla/route
-    Worker->>Valhalla: POST /route (bicycle costing)
-    Valhalla-->>Worker: Route geometry + maneuvers
-    Worker-->>App: Route data
-    App->>App: Decode polyline, fit map bounds
-    App->>Worker: POST /api/valhalla/trace_attributes (async)
-    Worker->>Valhalla: trace_attributes (edge data)
-    Valhalla-->>Worker: Per-edge attributes
-    Worker-->>App: Edge attributes
-    App->>App: Classify edges → colored segments
-    App->>App: Render colored route on map
+    User->>App: Search destination
+    App->>Cache: Need tiles for corridor?
+    Cache-->>App: Some cached, some missing
+    App->>Worker: Fetch missing tiles
+    Worker->>Overpass: Query (or serve 30-day edge cache)
+    Overpass-->>Worker: OSM ways
+    Worker-->>App: Ways data
+    App->>Cache: Store tiles (memory + IndexedDB)
+    App->>Router: Route on graph
+    Router->>Cache: Read all corridor tiles
+    Router->>Router: Build graph, A* search
+    Router-->>App: Route + segments
+    App->>App: Heal gaps, compute quality
+    App->>App: Display on map
+    App->>Worker: Log route to D1
 ```
 
-## Rider Profiles
+## Classification System
 
-Profiles are defined in `routing.ts` as `DEFAULT_PROFILES`. Users can customise any profile (stored in `localStorage`). Each profile has:
+Single source of truth for all infrastructure classification. Used by: map overlay, route coloring, route scoring, client router cost function.
 
-- `costingOptions` — Valhalla bicycle costing parameters
-- `avoidances` — named avoidance categories (e.g. `['cobblestones']`) that override costing options
-- `editable` — whether the user can modify this profile
+```mermaid
+graph LR
+    OSM[OSM Tags<br/>highway, cycleway,<br/>surface, bicycle_road] --> Classify[classifyOsmTagsToItem<br/>overpass.ts]
+    Rules[Region Rules<br/>Cloudflare KV] --> Classify
+    Classify --> ItemName[Item Name<br/>e.g. Fahrradstrasse,<br/>Painted bike lane]
+    ItemName --> Preferred{In preferredItemNames?}
+    Preferred -->|Yes| Green[Green on map<br/>Low routing cost]
+    Preferred -->|No| Orange[Orange on map<br/>High routing cost]
+```
+
+### Per-travel-mode infrastructure preferences
+
+| Infrastructure | Toddler | Trailer | Training |
+|---|:---:|:---:|:---:|
+| Bike path | Preferred | Preferred | Preferred |
+| Fahrradstrasse | Preferred | Preferred | Preferred |
+| Shared foot path | Preferred | Preferred | Preferred |
+| Elevated sidewalk path | Preferred | Other | Other |
+| Living street | Preferred | Preferred | Preferred |
+| Painted bike lane | Other | Preferred | Preferred |
+| Shared bus lane | Other | Preferred | Preferred |
+| Residential/local road | Other | Preferred | Preferred |
+| Rough surface | Other | Other | Other |
+
+### Surface handling (per-mode)
+
+| Surface | Toddler | Trailer | Training |
+|---|:---:|:---:|:---:|
+| paving_stones | OK | Rough | Rough |
+| compacted | OK | OK | OK |
+| sett/cobblestone | Rough | Rough | Rough |
+| dirt/gravel/sand | Rough | Rough | Rough |
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/services/clientRouter.ts` | Client-side A* routing on Overpass graph |
+| `src/services/routeScorer.ts` | Score any route using Overpass data |
+| `src/services/overpass.ts` | Overpass queries, tile cache, `classifyOsmTagsToItem` |
+| `src/utils/classify.ts` | PROFILE_LEGEND, quality metrics, gap healing |
+| `src/services/routing.ts` | Valhalla API (fallback), profile definitions |
+| `src/services/tileCache.ts` | IndexedDB tile persistence, city detection |
+| `src/services/brouter.ts` | BRouter API (comparison routing) |
+| `src/services/rules.ts` | Per-region classification rules (KV) |
+| `src/services/audit.ts` | City scan, tag grouping, classification audit |
+| `src/services/routeLog.ts` | Route logging to D1 |
+| `src/services/mapillary.ts` | Mapillary street-level imagery |
+| `src/components/Map.tsx` | Leaflet map, route display, segment suggestions |
+| `src/components/BikeMapOverlay.tsx` | Canvas-rendered bike infrastructure overlay |
+| `src/components/DirectionsPanel.tsx` | Navigation, GPS tracking, speech |
+| `src/components/AuditPanel.tsx` | Admin classification audit tool |
+| `src/worker.ts` | Cloudflare Worker (all API endpoints) |
+| `scripts/benchmark-routing.ts` | Routing quality benchmark (22 Berlin test routes) |
+
+## Infrastructure
+
+| Service | Purpose | Cost |
+|---------|---------|------|
+| Cloudflare Pages + Workers | SPA hosting + API proxy | Free tier |
+| Cloudflare KV | Classification rules per region | Free tier |
+| Cloudflare D1 | Route logs, segment feedback | Free tier |
+| Cloudflare Edge Cache | 30-day Overpass tile cache | Free |
+| Sentry | Error tracking | Free tier |
+| Mapillary | Street-level imagery in audit tool | Free API |
+| Valhalla (public) | Fallback routing | Free |
+| BRouter (public) | Comparison routing | Free |
+| Overpass (public) | OSM infrastructure data | Free |
+
+## Benchmark Results (2026-04-11)
+
+22 Berlin test routes, toddler mode:
+
+| Engine | Avg preferred % | Notes |
+|--------|:---:|------|
+| **Client router** | **57%** | Uses Overpass data + speed-based costing |
+| BRouter (safety) | 40% | Generic safety profile, can't express our preferences |
+| Valhalla | 35% | `use_roads=0.0` but treats painted lanes as bike infra |
+
+**Note:** The benchmark scores Valhalla/BRouter routes using coordinate-matching against Overpass data (different from the app's segment-based scoring with gap healing). The app's displayed % may differ slightly from benchmark numbers.
 
 ## Architecture Rules
 
-### Consistency invariants (checked before every merge)
-
-The following must always be consistent. Before declaring any feature or bug fix done, verify all of them:
-
-1. **Classification parity**: `classifyEdge()` (classify.ts) and `classifyOsmTags()` (overpass.ts) must produce the same `SafetyClass` for equivalent infrastructure. Check both when touching either. The Valhalla-vs-OSM attribute mapping is documented in the comment block above `classifyEdge()`.
-
-2. **PROFILE_LEGEND ↔ classifier alignment**: Every `safetyClass` value in `PROFILE_LEGEND` must match what `classifyEdge()` and `classifyOsmTags()` actually return for that infrastructure type on that profile. If you add a new path type or change a classifier return value, update both.
-
-3. **BAD_SURFACES single source**: `BAD_SURFACES` is defined in `classify.ts` and imported by `overpass.ts`. Never duplicate or redefine it. Changes propagate automatically.
-
-4. **SafetyClass values**: The only valid `SafetyClass` values are `'green'`, `'amber'`, and `'red'`. No legacy names (`great`, `good`, `ok`, `bad`, `avoid`) anywhere in code, tests, or comments that describe runtime behavior.
-
-5. **Color palette single source**: All colors come from `STATUS_COLOR` in `classify.ts`. Never hardcode hex values for route/overlay colors in components.
-
-### URL State Encoding
-**All map layout state must be encoded in the URL.** This includes:
-- Active travel mode (`travelMode=`)
-- Custom preferred item set (`preferred=`)
-- Visibility toggles (e.g. `showOther=1`)
-
-This ensures the map view is shareable and bookmarkable. State that belongs in the URL: anything that changes what the user sees on the map or how the route is rendered. State that does NOT belong: ephemeral UI (loading spinners, hover states), or profile definitions (stored in localStorage).
-
-## Open Questions / Future Work
-
-1. **Multi-city support**: Currently Berlin-only via the public Valhalla instance. Long-term: self-hosted with configurable OSM extracts.
-2. **User accounts**: No auth yet — profiles stored in localStorage only.
-3. **Route saving/sharing**: Not implemented.
-4. **Feedback system**: `FeedbackWidget` exists but feeds a simple endpoint; no aggregation or crowdsourced routing yet.
-5. **Mobile app**: Web-only for now.
+1. **Single classification source:** `classifyOsmTagsToItem` in overpass.ts is THE classifier. Used by overlay, router, scorer. Never duplicate.
+2. **Never push to main.** Always branch → PR → CI → merge.
+3. **Tile cache is the routing graph.** What you see on the map overlay IS what the router routes on.
+4. **Speed IS the penalty.** No arbitrary multipliers. Walking is slow → high cost → router finds detours.
+5. **Heal intersection gaps.** Short non-preferred gaps between preferred segments are healed everywhere.
+6. **City-agnostic.** All tile fetching, caching, and routing work for any city, not just Berlin.
