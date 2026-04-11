@@ -92,6 +92,67 @@ async function getAllRegionNames(): Promise<string[]> {
 }
 
 /**
+ * Get all cached regions from IndexedDB (name, bbox, savedAt — without ways for lightweight listing).
+ */
+export async function getAllRegions(): Promise<CachedRegion[]> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly')
+    const request = tx.objectStore(STORE_NAME).getAll()
+    request.onsuccess = () => resolve(request.result as CachedRegion[])
+    request.onerror = () => reject(request.error)
+  })
+}
+
+/**
+ * Delete a cached region by name.
+ */
+export async function deleteRegion(name: string): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    tx.objectStore(STORE_NAME).delete(name)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+/**
+ * Estimate the number of Overpass tiles a bbox covers and how long they'll take to fetch.
+ */
+export function estimateTiles(
+  bbox: { south: number; west: number; north: number; east: number },
+): { tileCount: number; estimatedSeconds: number } {
+  const TILE_DEGREES = 0.1
+  const minRow = Math.floor(bbox.south / TILE_DEGREES)
+  const maxRow = Math.floor(bbox.north / TILE_DEGREES)
+  const minCol = Math.floor(bbox.west / TILE_DEGREES)
+  const maxCol = Math.floor(bbox.east / TILE_DEGREES)
+  const tileCount = (maxRow - minRow + 1) * (maxCol - minCol + 1)
+  // ~4s per tile (2 concurrent fetches, ~8s per pair)
+  const estimatedSeconds = Math.ceil(tileCount / 2) * 4
+  return { tileCount, estimatedSeconds }
+}
+
+/**
+ * Compute a bbox from a center point with a radius in km.
+ */
+export function bboxFromCenter(
+  lat: number,
+  lng: number,
+  radiusKm: number,
+): { south: number; west: number; north: number; east: number } {
+  const latDelta = radiusKm / 111.0
+  const lngDelta = radiusKm / (111.0 * Math.cos(lat * Math.PI / 180))
+  return {
+    south: lat - latDelta,
+    north: lat + latDelta,
+    west: lng - lngDelta,
+    east: lng + lngDelta,
+  }
+}
+
+/**
  * Check if a location (with buffer in km) is inside any cached region.
  * The buffer expands the query point into a small bbox and checks overlap
  * with cached region bboxes.

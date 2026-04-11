@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { detectRegion } from '../src/services/tileCache'
+import { detectRegion, estimateTiles, bboxFromCenter } from '../src/services/tileCache'
 
 describe('detectRegion', () => {
   test('detects Berlin', () => {
@@ -46,5 +46,52 @@ describe('detectRegion', () => {
   test('detects Marin', () => {
     const result = detectRegion(37.95, -122.50)
     expect(result.name).toBe('marin')
+  })
+})
+
+describe('estimateTiles', () => {
+  test('single tile bbox returns 1 tile', () => {
+    const result = estimateTiles({ south: 52.5, west: 13.4, north: 52.55, east: 13.45 })
+    expect(result.tileCount).toBe(1)
+    expect(result.estimatedSeconds).toBeGreaterThan(0)
+  })
+
+  test('small area returns correct tile count', () => {
+    // floor(52.4/0.1)=524 to floor(52.7/0.1)=527 → 4 rows
+    // floor(13.3/0.1)=133 to floor(13.6/0.1)=136 → 4 cols → 16 tiles
+    const result = estimateTiles({ south: 52.4, west: 13.3, north: 52.7, east: 13.6 })
+    expect(result.tileCount).toBe(16)
+  })
+
+  test('estimated seconds scales with tile count', () => {
+    const small = estimateTiles({ south: 52.5, west: 13.4, north: 52.55, east: 13.45 })
+    const large = estimateTiles({ south: 52.4, west: 13.3, north: 52.7, east: 13.6 })
+    expect(large.estimatedSeconds).toBeGreaterThan(small.estimatedSeconds)
+  })
+})
+
+describe('bboxFromCenter', () => {
+  test('returns symmetric bbox around center', () => {
+    const bbox = bboxFromCenter(52.52, 13.405, 3)
+    expect(bbox.south).toBeLessThan(52.52)
+    expect(bbox.north).toBeGreaterThan(52.52)
+    expect(bbox.west).toBeLessThan(13.405)
+    expect(bbox.east).toBeGreaterThan(13.405)
+  })
+
+  test('3km radius gives ~0.054 degree lat span each side', () => {
+    const bbox = bboxFromCenter(52.52, 13.405, 3)
+    const latSpan = bbox.north - bbox.south
+    // 3km each side = 6km total, 6/111 ≈ 0.054
+    expect(latSpan).toBeGreaterThan(0.05)
+    expect(latSpan).toBeLessThan(0.06)
+  })
+
+  test('longitude span is wider than latitude span at Berlin latitude', () => {
+    const bbox = bboxFromCenter(52.52, 13.405, 3)
+    const latSpan = bbox.north - bbox.south
+    const lngSpan = bbox.east - bbox.west
+    // At 52N, longitude degrees are smaller, so more degrees needed for same km
+    expect(lngSpan).toBeGreaterThan(latSpan)
   })
 })

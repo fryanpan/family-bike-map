@@ -13,7 +13,11 @@ import { getRoute, DEFAULT_PROFILES } from './services/routing'
 import { scoreRoute } from './services/routeScorer'
 import { getBRouterRoutes } from './services/brouter'
 import { clientRoute, prefetchTiles } from './services/clientRouter'
-import { isLocationCached, detectRegion, saveRegion, loadRegion } from './services/tileCache'
+import {
+  isLocationCached, detectRegion, saveRegion, loadRegion,
+  getAllRegions, deleteRegion, bboxFromCenter, estimateTiles,
+  type CachedRegion,
+} from './services/tileCache'
 import { injectCachedTile, latLngToTile, tileKey } from './services/overpass'
 import { logRoute } from './services/routeLog'
 import { reverseGeocode } from './services/geocoding'
@@ -218,6 +222,15 @@ export default function App() {
   const [tileCacheProgress, setTileCacheProgress] = useState<number | null>(null)
   const tileCacheCheckedRef = useRef(false)
 
+  // Rectangle draw mode + cached regions display
+  const [drawingCache, setDrawingCache] = useState(false)
+  const [cachedRegions, setCachedRegions] = useState<CachedRegion[]>([])
+
+  // Search-triggered cache banner (separate from initial load banner)
+  const [searchCacheBanner, setSearchCacheBanner] = useState<{
+    lat: number; lng: number
+  } | null>(null)
+
   // Detect which city preset the map center falls within
   useEffect(() => {
     const loc = currentLocation ?? { lat: 52.52, lng: 13.405 } // default Berlin
@@ -275,6 +288,92 @@ export default function App() {
     } finally {
       setTileCacheProgress(null)
     }
+  }
+
+  // Load cached regions list on mount
+  useEffect(() => {
+    getAllRegions().then((regions) => {
+      // Strip ways for lightweight state (only need name + bbox + savedAt)
+      setCachedRegions(regions.map((r) => ({ ...r, ways: [] })))
+    }).catch(() => { /* ignore */ })
+  }, [])
+
+  function refreshCachedRegionsList() {
+    getAllRegions().then((regions) => {
+      setCachedRegions(regions.map((r) => ({ ...r, ways: [] })))
+    }).catch(() => { /* ignore */ })
+  }
+
+  /** Handle rectangle draw confirm: download tiles for the drawn bbox. */
+  async function handleDrawConfirm(bbox: { south: number; west: number; north: number; east: number }) {
+    setDrawingCache(false)
+    setTileCacheProgress(0)
+
+    const centerLat = (bbox.south + bbox.north) / 2
+    const centerLng = (bbox.west + bbox.east) / 2
+    const detected = detectRegion(centerLat, centerLng)
+    const regionName = detected.name
+
+    try {
+      const ways = await prefetchTiles(bbox, (pct) => setTileCacheProgress(pct))
+      await saveRegion(regionName, bbox, ways)
+      injectRegionIntoTileCache(ways, bbox)
+      refreshCachedRegionsList()
+    } catch {
+      // Download failure is non-critical
+    } finally {
+      setTileCacheProgress(null)
+    }
+  }
+
+  /** Handle delete of a cached region. */
+  async function handleDeleteRegion(name: string) {
+    try {
+      await deleteRegion(name)
+      refreshCachedRegionsList()
+    } catch { /* ignore */ }
+  }
+
+  /** Handle refresh of a cached region: re-download tiles. */
+  async function handleRefreshRegion(
+    name: string,
+    bbox: { south: number; west: number; north: number; east: number },
+  ) {
+    setTileCacheProgress(0)
+    try {
+      const ways = await prefetchTiles(bbox, (pct) => setTileCacheProgress(pct))
+      await saveRegion(name, bbox, ways)
+      injectRegionIntoTileCache(ways, bbox)
+      refreshCachedRegionsList()
+    } catch { /* ignore */ }
+    finally { setTileCacheProgress(null) }
+  }
+
+  /** Check if a destination is cached; if not, show the search cache banner. */
+  async function checkLocationCache(lat: number, lng: number) {
+    try {
+      const { cached } = await isLocationCached(lat, lng, 3)
+      if (!cached) {
+        setSearchCacheBanner({ lat, lng })
+      }
+    } catch { /* ignore */ }
+  }
+
+  /** Download 3km radius around the search banner target. */
+  async function handleSearchBannerDownload() {
+    if (!searchCacheBanner) return
+    const { lat, lng } = searchCacheBanner
+    setSearchCacheBanner(null)
+    setTileCacheProgress(0)
+    const bbox = bboxFromCenter(lat, lng, 3)
+    const detected = detectRegion(lat, lng)
+    try {
+      const ways = await prefetchTiles(bbox, (pct) => setTileCacheProgress(pct))
+      await saveRegion(detected.name, bbox, ways)
+      injectRegionIntoTileCache(ways, bbox)
+      refreshCachedRegionsList()
+    } catch { /* ignore */ }
+    finally { setTileCacheProgress(null) }
   }
 
   // Derived: has the user customized their travel mode's preferred path types?
@@ -457,6 +556,7 @@ export default function App() {
   function handlePlaceSelect(place: Place) {
     setSelectedPlace(place)
     setUiState('place-detail')
+    void checkLocationCache(place.lat, place.lng)
   }
 
   // --- Start routing to a destination from current location ---
@@ -640,6 +740,12 @@ export default function App() {
             showOtherPaths={showOtherPaths}
             flyToPlace={flyToPlace}
             regionRules={regionRules}
+            drawingCache={drawingCache}
+            onDrawConfirm={handleDrawConfirm}
+            onDrawCancel={() => setDrawingCache(false)}
+            cachedRegions={cachedRegions}
+            onDeleteRegion={handleDeleteRegion}
+            onRefreshRegion={handleRefreshRegion}
           />
         </Suspense>
 
@@ -669,16 +775,26 @@ export default function App() {
           />
         </div>
 
-        {/* Bike layer status + audit gear */}
+        {/* Bike layer status + audit gear + download area button */}
         <div className="map-bike-layer-toggle">
-          <button
-            className="audit-gear-btn"
-            onClick={() => setAuditOpen(true)}
-            title="Classification audit"
-          >
-            ⚙️
-          </button>
-          {overlayStatusMsg && <p className="bike-layer-status">{overlayStatusMsg}</p>}
+          <div className="map-bike-layer-buttons">
+            <button
+              className="audit-gear-btn"
+              onClick={() => setAuditOpen(true)}
+              title="Classification audit"
+            >
+              ⚙️
+            </button>
+            <button
+              className={`cache-draw-btn${drawingCache ? ' cache-draw-btn-active' : ''}`}
+              onClick={() => setDrawingCache((v) => !v)}
+              title={drawingCache ? 'Cancel drawing' : 'Download area'}
+            >
+              {drawingCache ? 'Cancel' : 'DL'}
+            </button>
+          </div>
+          {drawingCache && <p className="bike-layer-status">Draw a rectangle on the map</p>}
+          {overlayStatusMsg && !drawingCache && <p className="bike-layer-status">{overlayStatusMsg}</p>}
         </div>
 
         {/* Tile cache download banner */}
@@ -705,6 +821,24 @@ export default function App() {
             <p className="download-banner-text">Downloading cycling data... {tileCacheProgress}%</p>
             <div className="download-banner-progress">
               <div className="download-banner-fill" style={{ width: `${tileCacheProgress}%` }} />
+            </div>
+          </div>
+        )}
+
+        {/* Search-triggered cache banner */}
+        {searchCacheBanner && !tileCacheProgress && !tileCacheBanner?.show && (
+          <div className="download-banner">
+            <p className="download-banner-text">This area hasn't been cached. Download for better routing?</p>
+            <div className="download-banner-actions">
+              <button
+                className="download-banner-dismiss"
+                onClick={() => setSearchCacheBanner(null)}
+              >
+                Dismiss
+              </button>
+              <button className="download-banner-btn" onClick={handleSearchBannerDownload}>
+                Download
+              </button>
             </div>
           </div>
         )}
