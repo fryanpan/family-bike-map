@@ -38,13 +38,13 @@ describe('buildRoutingGraph', () => {
   ]
 
   test('creates nodes for all coordinates', () => {
-    const graph = buildRoutingGraph(ways, 'toddler', new Set(['Bike path']))
+    const graph = buildRoutingGraph(ways, 'kid-starting-out', new Set(['Bike path']))
     // 4 unique coordinates
     expect(graph.getNodeCount()).toBe(4)
   })
 
   test('creates edges in both directions for non-oneway', () => {
-    const graph = buildRoutingGraph(ways, 'toddler', new Set(['Bike path']))
+    const graph = buildRoutingGraph(ways, 'kid-starting-out', new Set(['Bike path']))
     // Way 1: 2 segments * 2 dirs = 4, Way 2: 1 segment * 2 dirs = 2, total = 6
     expect(graph.getLinkCount()).toBe(6)
   })
@@ -56,7 +56,7 @@ describe('buildRoutingGraph', () => {
       tags: { highway: 'cycleway', oneway: 'yes' },
       coordinates: [[52.5, 13.4], [52.501, 13.4]],
     }]
-    const graph = buildRoutingGraph(onewayWays, 'toddler', new Set())
+    const graph = buildRoutingGraph(onewayWays, 'kid-starting-out', new Set())
     // 1 segment, oneway = 1 edge only
     expect(graph.getLinkCount()).toBe(1)
   })
@@ -68,7 +68,7 @@ describe('buildRoutingGraph', () => {
       tags: { highway: 'cycleway', oneway: 'yes', 'oneway:bicycle': 'no' },
       coordinates: [[52.5, 13.4], [52.501, 13.4]],
     }]
-    const graph = buildRoutingGraph(overrideWays, 'toddler', new Set())
+    const graph = buildRoutingGraph(overrideWays, 'kid-starting-out', new Set())
     expect(graph.getLinkCount()).toBe(2)
   })
 
@@ -79,7 +79,7 @@ describe('buildRoutingGraph', () => {
       tags: { highway: 'footway' }, // no bicycle=yes → walking
       coordinates: [[52.5, 13.4], [52.501, 13.4]],
     }]
-    const graph = buildRoutingGraph(walkWays, 'toddler', new Set())
+    const graph = buildRoutingGraph(walkWays, 'kid-starting-out', new Set())
     const link = graph.getLink('52.50000,13.40000', '52.50100,13.40000')
     expect(link).toBeTruthy()
     expect(link!.data.isWalking).toBe(true)
@@ -106,10 +106,10 @@ describe('routeOnGraph', () => {
 
   test('finds a path on a simple graph', () => {
     const preferred = new Set(['Bike path'])
-    const graph = buildRoutingGraph(ways, 'toddler', preferred)
+    const graph = buildRoutingGraph(ways, 'kid-starting-out', preferred)
     const result = routeOnGraph(
       graph, 52.5000, 13.4000, 52.5020, 13.4000,
-      'toddler', preferred,
+      'kid-starting-out', preferred,
     )
     expect(result).not.toBeNull()
     expect(result!.coordinates.length).toBe(3)
@@ -132,11 +132,11 @@ describe('routeOnGraph', () => {
         coordinates: [[52.6000, 13.5000], [52.6010, 13.5000]],
       },
     ]
-    const graph = buildRoutingGraph(disconnected, 'toddler', new Set())
+    const graph = buildRoutingGraph(disconnected, 'kid-starting-out', new Set())
     // Route from one cluster to the other: should return null (or empty path)
     const result = routeOnGraph(
       graph, 52.5000, 13.4000, 52.6010, 13.5000,
-      'toddler', new Set(),
+      'kid-starting-out', new Set(),
     )
     // ngraph returns empty array for unreachable
     expect(result).toBeNull()
@@ -159,10 +159,10 @@ describe('routeOnGraph', () => {
       },
     ]
     const preferred = new Set(['Bike path'])
-    const graph = buildRoutingGraph(mixedWays, 'toddler', preferred)
+    const graph = buildRoutingGraph(mixedWays, 'kid-starting-out', preferred)
     const result = routeOnGraph(
       graph, 52.5000, 13.4000, 52.5020, 13.4000,
-      'toddler', preferred,
+      'kid-starting-out', preferred,
     )
     expect(result).not.toBeNull()
     expect(result!.walkingDistanceKm).toBeGreaterThan(0)
@@ -190,8 +190,8 @@ describe('routeOnGraph', () => {
     }]
 
     const preferred = new Set(['Fahrradstrasse', 'Painted bike lane'])
-    const gFahr = buildRoutingGraph(fahrradWays, 'toddler', preferred)
-    const gPaint = buildRoutingGraph(paintedWays, 'toddler', preferred)
+    const gFahr = buildRoutingGraph(fahrradWays, 'kid-starting-out', preferred)
+    const gPaint = buildRoutingGraph(paintedWays, 'kid-starting-out', preferred)
 
     const fahrLink = gFahr.getLink('52.50000,13.40000', '52.50100,13.40000')
     const paintLink = gPaint.getLink('52.50000,13.40000', '52.50100,13.40000')
@@ -221,10 +221,10 @@ describe('routeOnGraph', () => {
       },
     ]
     const preferred = new Set(['Bike path'])
-    const graph = buildRoutingGraph(twoPath, 'toddler', preferred)
+    const graph = buildRoutingGraph(twoPath, 'kid-starting-out', preferred)
     const result = routeOnGraph(
       graph, 52.5000, 13.4000, 52.5010, 13.4020,
-      'toddler', preferred,
+      'kid-starting-out', preferred,
     )
     expect(result).not.toBeNull()
     // Should take the cycleway (via 52.5005) not the residential (via 52.4995)

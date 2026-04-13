@@ -1,13 +1,16 @@
 /**
- * BRouter routing service.
+ * BRouter routing — BENCHMARK ONLY.
+ *
+ * Not used by the main web app. Kept so we can compare client-side routing
+ * against BRouter from src/services/routerBenchmark.ts and AuditEvalTab.
  *
  * Calls the /api/brouter proxy (which forwards to brouter.de/brouter) and
  * parses the GeoJSON response into our Route type, including per-segment
  * OSM tags extracted from the BRouter `messages` array.
  */
 
-import type { Place, Route, RouteSegment, RouteLtsBreakdown, LtsSegmentInfo } from '../utils/types'
-import { computeLts, computeLtsBreakdown } from '../utils/lts'
+import type { Place, Route, RouteSegment, RouteLtsBreakdown, LtsSegmentInfo } from '../../utils/types'
+import { computeLts, computeLtsBreakdown } from '../../utils/lts'
 
 const API_BASE = '/api'
 
@@ -237,14 +240,16 @@ function parseFeature(feature: BRouterGeoJSON['features'][0]): Route {
  */
 // Map our travel modes to the closest BRouter profiles
 const BROUTER_PROFILES: Record<string, string> = {
-  toddler: 'safety',               // most road-avoiding, supports dismount fallback
-  trailer: 'safety',               // same — avoids busy roads, penalizes bad surfaces
-  training: 'fastbike-lowtraffic', // faster but still avoids high-traffic roads
+  'kid-starting-out': 'safety',     // most road-avoiding, supports dismount fallback
+  'kid-confident':    'safety',
+  'kid-traffic-savvy':'safety',
+  'carrying-kid':     'safety',     // avoids busy roads, penalizes bad surfaces
+  training:           'fastbike-lowtraffic', // faster but still avoids high-traffic roads
 }
 
 export async function getBRouterRoutes(start: Place, end: Place, travelMode?: string): Promise<Route[]> {
   const lonlats = `${start.lng},${start.lat}|${end.lng},${end.lat}`
-  const profile = BROUTER_PROFILES[travelMode ?? 'toddler'] ?? 'safety'
+  const profile = BROUTER_PROFILES[travelMode ?? 'kid-starting-out'] ?? 'safety'
   const baseParams = `lonlats=${lonlats}&profile=${profile}&format=geojson`
 
   // Fetch primary and alternate in parallel

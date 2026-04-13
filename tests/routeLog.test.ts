@@ -21,7 +21,7 @@ describe('logRoute', () => {
       endLat: 52.51,
       endLng: 13.42,
       endLabel: 'School',
-      travelMode: 'toddler',
+      travelMode: 'kid-starting-out',
       engine: 'valhalla',
       distanceM: 2500,
       durationS: 600,
@@ -50,7 +50,7 @@ describe('logRoute', () => {
       startLng: 13.4,
       endLat: 52.51,
       endLng: 13.42,
-      travelMode: 'toddler',
+      travelMode: 'kid-starting-out',
       engine: 'valhalla',
     })
 

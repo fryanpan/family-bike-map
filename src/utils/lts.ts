@@ -1,11 +1,55 @@
 /**
  * Level of Traffic Stress (LTS) scoring per segment.
  *
- * Based on Furth (2012) / Conveyal simplified method.
- * Uses OSM tags available in BRouter responses or Overpass data.
+ * Based on Furth (2012) / Conveyal simplified method, calibrated per
+ * Mineta Transportation Institute's "Low-Stress Bicycling and Network
+ * Connectivity" (Mekuria, Furth, Nixon 2012). LTS levels are explicitly
+ * tied to Geller's Four Types of Cyclists (Portland BOT, 2006). See
+ * docs/research/family-safety/standards.md.
+ *
+ * Uses OSM tags available in Overpass data.
  */
 
 export type LtsLevel = 1 | 2 | 3 | 4
+
+/**
+ * Human-readable labels for LTS levels.
+ *
+ * `short` is the user-facing label (no jargon, no Geller terminology).
+ * `official` is the Geller / Mekuria label, suitable for tooltips and
+ * citations to the source research. `description` is a one-line plain-
+ * language elaboration safe to render in the UI.
+ *
+ * UI strings should always read from this constant rather than hardcoding
+ * "LTS 1" or "LTS 2" — internal code uses the LtsLevel type, but the
+ * end user never sees the number.
+ */
+export const LTS_LABELS: Record<LtsLevel, {
+  short: string
+  official: string
+  description: string
+}> = {
+  1: {
+    short:       'Kid-friendly',
+    official:    'Children',
+    description: 'Suitable for children. Fully separated or essentially car-free.',
+  },
+  2: {
+    short:       'Most adults',
+    official:    'Interested but concerned',
+    description: 'Comfortable for most adults. Quiet residential or buffered lanes.',
+  },
+  3: {
+    short:       'Confident',
+    official:    'Enthused and confident',
+    description: 'Confident cyclists only. Painted lanes on busier streets.',
+  },
+  4: {
+    short:       'Experienced',
+    official:    'Strong and fearless',
+    description: 'Experienced cyclists only. Mixed traffic on fast or wide roads.',
+  },
+}
 
 /**
  * Compute LTS for a road segment from OSM tags.

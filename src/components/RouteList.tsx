@@ -1,4 +1,4 @@
-import { formatDistance, formatDuration } from '../services/routing'
+import { formatDistance, formatDuration } from '../utils/format'
 import { computeRouteQuality } from '../utils/classify'
 import { PREFERRED_COLOR, OTHER_COLOR } from '../utils/classify'
 import type { Route } from '../utils/types'

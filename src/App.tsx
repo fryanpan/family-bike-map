@@ -9,9 +9,8 @@ import PlaceCard from './components/PlaceCard'
 import RoutingHeader from './components/RoutingHeader'
 import ProfileSelector from './components/ProfileSelector'
 import DirectionsPanel from './components/DirectionsPanel'
-import { getRoute, DEFAULT_PROFILES } from './services/routing'
+import { DEFAULT_PROFILES } from './data/profiles'
 import { scoreRoute } from './services/routeScorer'
-import { getBRouterRoutes } from './services/brouter'
 import { clientRoute, prefetchTiles } from './services/clientRouter'
 import {
   isLocationCached, detectRegion, saveRegion, loadRegion,
@@ -24,7 +23,6 @@ import { reverseGeocode } from './services/geocoding'
 import {
   healSegmentGaps,
   getDefaultPreferredItems,
-  getCostingFromPreferences,
   computeRouteQuality,
 } from './utils/classify'
 import { CITY_PRESETS } from './services/audit'
@@ -89,7 +87,7 @@ function getInitialState(): { profileKey: string; preferredItems: Set<string>; s
   // URL preferred param takes top priority
   if (preferredParam !== null) {
     const items = new Set(preferredParam.split(',').filter(Boolean))
-    const profile = (modeParam && DEFAULT_PROFILES[modeParam]) ? modeParam : 'toddler'
+    const profile = (modeParam && DEFAULT_PROFILES[modeParam]) ? modeParam : 'kid-starting-out'
     return { profileKey: profile, preferredItems: items, showOtherPaths }
   }
 
@@ -104,7 +102,7 @@ function getInitialState(): { profileKey: string; preferredItems: Set<string>; s
     const savedCustom = localStorage.getItem(CUSTOM_PREFERRED_KEY)
     if (savedCustom) {
       const items = new Set(JSON.parse(savedCustom) as string[])
-      const profile = (savedMode && DEFAULT_PROFILES[savedMode]) ? savedMode : 'toddler'
+      const profile = (savedMode && DEFAULT_PROFILES[savedMode]) ? savedMode : 'kid-starting-out'
       return { profileKey: profile, preferredItems: items, showOtherPaths }
     }
     if (savedMode && DEFAULT_PROFILES[savedMode]) {
@@ -112,7 +110,7 @@ function getInitialState(): { profileKey: string; preferredItems: Set<string>; s
     }
   } catch { /* ignore */ }
 
-  return { profileKey: 'toddler', preferredItems: getDefaultPreferredItems('toddler'), showOtherPaths }
+  return { profileKey: 'kid-starting-out', preferredItems: getDefaultPreferredItems('kid-starting-out'), showOtherPaths }
 }
 
 /** Resolve the user's current location as a Place (async, returns null on failure). */
@@ -443,28 +441,43 @@ export default function App() {
     setSelectedRouteIndex(0)
 
     try {
-      // Try client-side router first (no waypoint support yet)
-      let clientResult: Route | null = null
-      if (wps.length === 0) {
-        try {
-          clientResult = await clientRoute(
-            start.lat, start.lng, end.lat, end.lng,
-            profileKey, preferredItemNames, regionRules,
-          )
-        } catch {
-          // Client router failure is non-critical — fall back to Valhalla
-        }
+      // Client-side router is the only routing path. If the user has waypoints,
+      // we chain single-leg clientRoute calls through each waypoint in order and
+      // concatenate the results. Valhalla and BRouter are benchmark-only now.
+      const legPoints: Array<{ lat: number; lng: number }> = [
+        { lat: start.lat, lng: start.lng },
+        ...wps,
+        { lat: end.lat, lng: end.lng },
+      ]
+
+      const legs: Route[] = []
+      for (let i = 0; i < legPoints.length - 1; i++) {
+        const a = legPoints[i]
+        const b = legPoints[i + 1]
+        const leg = await clientRoute(
+          a.lat, a.lng, b.lat, b.lng,
+          profileKey, preferredItemNames, regionRules,
+        )
+        if (!leg) throw new Error('No route found for this segment')
+        legs.push(leg)
       }
 
-      const costingOptions = getCostingFromPreferences(preferredItemNames, profileKey, profile)
-      const valhallaResults = await getRoute(start, end, { ...profile, costingOptions }, wps, 0)
-      // Tag Valhalla routes with engine
-      const taggedValhalla = valhallaResults.map((r) => ({ ...r, engine: 'valhalla' }))
+      const combined: Route = legs.length === 1
+        ? legs[0]
+        : {
+            coordinates: legs.flatMap((l, i) =>
+              i === 0 ? l.coordinates : l.coordinates.slice(1),
+            ),
+            maneuvers: legs.flatMap((l) => l.maneuvers),
+            summary: {
+              distance: legs.reduce((sum, l) => sum + l.summary.distance, 0),
+              duration: legs.reduce((sum, l) => sum + l.summary.duration, 0),
+            },
+            segments: legs.flatMap((l) => l.segments ?? []),
+            engine: 'client',
+          }
 
-      // Client router is primary when it succeeds; Valhalla is fallback only
-      const initialRoutes = clientResult
-        ? [clientResult]
-        : taggedValhalla
+      const initialRoutes = [combined]
       setRoutes(initialRoutes)
 
       // Fire-and-forget route log for each route
@@ -511,38 +524,6 @@ export default function App() {
         setSelectedRouteIndex(0)
       })
 
-      // BRouter comparison routes — disabled in single-route mode
-      // TODO: re-enable when routing mode toggle is added to settings
-      false && getBRouterRoutes(start, end, profileKey).then((brouterResults) => {
-        // Log BRouter routes
-        for (const result of brouterResults) {
-          logRoute({
-            startLat: start.lat,
-            startLng: start.lng,
-            startLabel: start.label,
-            endLat: end.lat,
-            endLng: end.lng,
-            endLabel: end.label,
-            travelMode: profileKey,
-            engine: 'brouter',
-            distanceM: Math.round(result.summary.distance * 1000),
-            durationS: Math.round(result.summary.duration),
-          })
-        }
-        setRoutes((prev) => [...prev, ...brouterResults])
-        // Score BRouter routes with the unified scorer too
-        for (const result of brouterResults) {
-          const coords = result.coordinates
-          scoreRoute(coords, profileKey, regionRules).then((rawSegs) => {
-            const segments = healSegmentGaps(rawSegs, preferredItemNames)
-            if (segments.length) {
-              setRoutes((prev) => prev.map((r) => r.coordinates === coords ? { ...r, segments } : r))
-            }
-          })
-        }
-      }).catch(() => {
-        // BRouter failure is non-critical — Valhalla routes still available
-      })
     } catch (e) {
       const msg = (e as Error).message ?? 'Could not find a route'
       setError(msg)

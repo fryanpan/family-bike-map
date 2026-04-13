@@ -73,43 +73,75 @@ function coordId(lat: number, lng: number): string {
 // This naturally penalizes unsafe segments: walking-speed edges are 3-4x
 // slower than Fahrradstrasse, so the router finds safe detours.
 
-/** Per-item-name speeds (km/h) for toddler mode. */
-const TODDLER_ITEM_SPEEDS: Record<string, number> = {
+/**
+ * Per-item-name speeds (km/h) for "kid starting out" and other strict kid modes.
+ * These items dominate route preference because the kid is piloting at low speed.
+ */
+const KID_ITEM_SPEEDS: Record<string, number> = {
   'Fahrradstrasse':          12,  // best: priority bike road
   'Bike path':               10,  // car-free Radweg
   'Elevated sidewalk path':   9,  // separated track, slightly narrower
   'Shared foot path':         8,  // shared with pedestrians
   'Living street':            8,  // low traffic, shared space
-  'Painted bike lane':        3,  // strongly discouraged — same as walking
+  'Painted bike lane':        3,  // strongly discouraged for strict modes
   'Shared bus lane':          3,  // strongly discouraged
   'Residential/local road':   4,  // cautious, nearly walking
 }
-const TODDLER_WALKING_KMH = 3     // toddler walking or biking very slowly on sidewalk with people
-const TODDLER_UNCLASSIFIED_KMH = 3 // unknown roads = walking speed
+
+// Kid walking pace — used as the "bridge over bad infra by walking on the
+// sidewalk" speed for ALL kid modes (starting out, confident, traffic-savvy).
+// Heavily penalized in cost so the router only uses it as a last resort.
+const KID_WALKING_KMH = 3
+
+// All four "kid modes" share the most-protective exclusion logic.
+// kid-traffic-savvy is allowed to use tertiary roads with sidewalks,
+// but trunk/primary/secondary are still excluded for all kid modes.
+const KID_MODES = new Set([
+  'kid-starting-out',
+  'kid-confident',
+  'kid-traffic-savvy',
+])
 
 const SPEEDS: Record<string, Record<string, number>> = {
-  toddler: {
-    preferred: 10 / 3.6,      // fallback for preferred items not in TODDLER_ITEM_SPEEDS
-    otherClassified: 5 / 3.6, // fallback for other classified items
-    walking: TODDLER_WALKING_KMH / 3.6,
-    unclassified: TODDLER_UNCLASSIFIED_KMH / 3.6,
+  // Strictest. Only segregated LTS 1 infra, fully car-free pathways.
+  'kid-starting-out': {
+    preferred: 10 / 3.6,
+    otherClassified: 5 / 3.6,
+    walking: KID_WALKING_KMH / 3.6,
+    unclassified: KID_WALKING_KMH / 3.6,
   },
-  trailer: {
-    preferred: 22 / 3.6,
-    otherClassified: 15 / 3.6,
-    walking: 4 / 3.6,       // adult walking with trailer
+  // Kid has good control; living streets and Fahrradstraßen acceptable.
+  'kid-confident': {
+    preferred: 12 / 3.6,
+    otherClassified: 7 / 3.6,
+    walking: KID_WALKING_KMH / 3.6,
     unclassified: 4 / 3.6,
   },
+  // Kid handles painted lanes and intersections; tertiary with sidewalk OK.
+  'kid-traffic-savvy': {
+    preferred: 14 / 3.6,
+    otherClassified: 10 / 3.6,
+    walking: KID_WALKING_KMH / 3.6,
+    unclassified: 6 / 3.6,
+  },
+  // Adult pilots; surface-strict; can take residential and painted lanes.
+  'carrying-kid': {
+    preferred: 22 / 3.6,
+    otherClassified: 15 / 3.6,
+    walking: 4 / 3.6,         // adult walking pace
+    unclassified: 4 / 3.6,
+  },
+  // Adult fitness ride; LTS ≤3, prioritizes 30 km/h flow.
   training: {
     preferred: 30 / 3.6,
     otherClassified: 20 / 3.6,
     walking: 5 / 3.6,
-    unclassified: 10 / 3.6, // training can bike on unclassified roads
+    unclassified: 10 / 3.6,
   },
 }
 
 function getSpeed(profileKey: string): Record<string, number> {
-  return SPEEDS[profileKey] ?? SPEEDS.toddler
+  return SPEEDS[profileKey] ?? SPEEDS['kid-starting-out']
 }
 
 /**
@@ -125,9 +157,10 @@ function resolveEdgeSpeed(
 ): number {
   if (isWalking) return speeds.walking
 
-  // Toddler: use per-item speeds when available
-  if (profileKey === 'toddler' && itemName && TODDLER_ITEM_SPEEDS[itemName] !== undefined) {
-    return TODDLER_ITEM_SPEEDS[itemName] / 3.6
+  // Kid modes: use per-item speeds when available (more granular than the
+  // generic preferred/otherClassified buckets above).
+  if (KID_MODES.has(profileKey) && itemName && KID_ITEM_SPEEDS[itemName] !== undefined) {
+    return KID_ITEM_SPEEDS[itemName] / 3.6
   }
 
   // Generic fallback for all profiles
@@ -175,13 +208,20 @@ export function buildRoutingGraph(
     const speeds = getSpeed(profileKey)
     const isPreferred = itemName !== null && preferredItemNames.has(itemName)
 
-    // Exclude unclassified major roads without sidewalks in toddler mode
+    // Exclude unclassified major roads without sidewalks in kid modes.
+    // kid-traffic-savvy is more permissive: tertiary roads with sidewalks
+    // are allowed (kid can cross at lights, ride at the curb).
     if (!walking && !itemName) {
       const hasSidewalk = tags.sidewalk === 'both' || tags.sidewalk === 'left' ||
         tags.sidewalk === 'right' || tags.sidewalk === 'yes'
       const hw = tags.highway ?? ''
-      if (profileKey === 'toddler' && !hasSidewalk && ['primary', 'secondary', 'tertiary', 'trunk'].includes(hw)) {
-        continue  // skip this way entirely — no safe option for toddler
+      if (KID_MODES.has(profileKey)) {
+        const blocked = profileKey === 'kid-traffic-savvy'
+          ? ['primary', 'secondary', 'trunk']
+          : ['primary', 'secondary', 'tertiary', 'trunk']
+        if (!hasSidewalk && blocked.includes(hw)) {
+          continue  // no safe option for a kid on this road
+        }
       }
     }
 
@@ -300,9 +340,10 @@ export function routeOnGraph(
     heuristic(from: Node<NodeData>, to: Node<NodeData>) {
       // Heuristic must be in same units as cost (time in seconds).
       // Use the fastest possible speed as optimistic lower bound (admissible).
-      // For toddler, Fahrradstrasse at 12 km/h is the fastest.
-      const maxSpeed = profileKey === 'toddler'
-        ? Math.max(...Object.values(TODDLER_ITEM_SPEEDS)) / 3.6
+      // For kid modes, the per-item speed table dominates — pick the fastest
+      // entry as the optimistic A* heuristic lower bound.
+      const maxSpeed = KID_MODES.has(profileKey)
+        ? Math.max(...Object.values(KID_ITEM_SPEEDS)) / 3.6
         : speeds.preferred
       const dist = haversineM(from.data.lat, from.data.lng, to.data.lat, to.data.lng)
       return dist / maxSpeed

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { formatDistance, formatDuration } from '../services/routing'
+import { formatDistance, formatDuration } from '../utils/format'
 import { computeRouteQuality } from '../utils/classify'
 import SegmentFeedback from './SegmentFeedback'
 import type { Route, ValhallaManeuver, LatLng } from '../utils/types'

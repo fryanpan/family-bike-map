@@ -1,4 +1,4 @@
-import type { ValhallaEdge, RouteSegment, BicycleCostingOptions, RiderProfile } from './types'
+import type { ValhallaEdge, RouteSegment } from './types'
 
 // Two-tone display palette — preferred paths green, other paths orange.
 // Chosen for high contrast against OpenStreetMap tile backgrounds.
@@ -6,17 +6,20 @@ export const PREFERRED_COLOR = '#10b981'  // teal-green
 export const OTHER_COLOR     = '#f97316'  // orange
 
 // ── Profile-aware legend ────────────────────────────────────────────────────
-// Each profile defines its path types, which are preferred by default, and
-// the Valhalla use_roads value that each type implies when preferred.
+// Each ride mode defines which infrastructure tiers are preferred by default.
+// "Preferred" items render in green on the route; non-preferred render orange.
+// The picker UX shows these as toggles so users can override.
 //
-// useRoads controls how willing Valhalla is to route on car roads (0 = avoid,
-// 1 = freely use). Preferred items set the effective use_roads for the route
-// request — the max useRoads across all preferred items wins.
+// Modes (see docs/product/plans/2026-04-13-three-layer-scoring-plan.md):
+//   kid-starting-out  — kid pilots, fully car-free pathways only (default)
+//   kid-confident     — kid pilots, accepts living streets + Fahrradstraßen
+//   kid-traffic-savvy — kid pilots, accepts painted lanes on quiet roads
+//   carrying-kid      — adult pilots; surface-strict
+//   training          — adult fitness; LTS ≤3, secondary mode
 
 export interface LegendItem {
   icon: string
   name: string
-  useRoads: number        // Valhalla use_roads implied when this item is preferred
   defaultPreferred: boolean
 }
 
@@ -26,55 +29,101 @@ export interface LegendGroup {
 }
 
 export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
-  toddler: [
+  // Strictest. Only physically car-separated infra. Default mode on first launch.
+  // Elevated sidewalk paths count — they're curb-separated even though next to a road.
+  'kid-starting-out': [
     { defaultPreferred: true, items: [
-      { icon: '🚴', name: 'Bike path',    useRoads: 0.0,  defaultPreferred: true },
-      { icon: '🚲', name: 'Fahrradstrasse',             useRoads: 0.0,  defaultPreferred: true },
-      { icon: '🛤️', name: 'Shared foot path', useRoads: 0.0,  defaultPreferred: true },
-    ]},
-    { defaultPreferred: true, items: [
-      { icon: '🛡️', name: 'Elevated sidewalk path',       useRoads: 0.05, defaultPreferred: true },
-      { icon: '🏘️', name: 'Living street',              useRoads: 0.05, defaultPreferred: true },
+      { icon: '🚴', name: 'Bike path',              defaultPreferred: true },
+      { icon: '🚲', name: 'Fahrradstrasse',         defaultPreferred: true },
+      { icon: '🛤️', name: 'Shared foot path',      defaultPreferred: true },
+      { icon: '🛡️', name: 'Elevated sidewalk path', defaultPreferred: true },
     ]},
     { defaultPreferred: false, items: [
-      { icon: '〰️', name: 'Painted bike lane',          useRoads: 0.3,  defaultPreferred: false },
-      { icon: '🚌', name: 'Shared bus lane',            useRoads: 0.3,  defaultPreferred: false },
-      { icon: '🏠', name: 'Residential/local road',           useRoads: 0.5,  defaultPreferred: false },
-      { icon: '⚠️', name: 'Rough surface', useRoads: 0.5, defaultPreferred: false },
+      { icon: '🏘️', name: 'Living street',          defaultPreferred: false },
+      { icon: '〰️', name: 'Painted bike lane',      defaultPreferred: false },
+      { icon: '🚌', name: 'Shared bus lane',        defaultPreferred: false },
+      { icon: '🏠', name: 'Residential/local road', defaultPreferred: false },
+      { icon: '⚠️', name: 'Rough surface',          defaultPreferred: false },
     ]},
   ],
-  trailer: [
+
+  // Kid has good control + basic awareness. Adds quiet residential and
+  // sidewalk-elevated tracks to the preferred set.
+  'kid-confident': [
     { defaultPreferred: true, items: [
-      { icon: '🚴', name: 'Bike path',    useRoads: 0.0,  defaultPreferred: true },
-      { icon: '🚲', name: 'Fahrradstrasse',             useRoads: 0.0,  defaultPreferred: true },
-      { icon: '🛤️', name: 'Shared foot path', useRoads: 0.0,  defaultPreferred: true },
-      { icon: '🚌', name: 'Shared bus lane',            useRoads: 0.15, defaultPreferred: true },
+      { icon: '🚴', name: 'Bike path',          defaultPreferred: true },
+      { icon: '🚲', name: 'Fahrradstrasse',     defaultPreferred: true },
+      { icon: '🛤️', name: 'Shared foot path',  defaultPreferred: true },
     ]},
     { defaultPreferred: true, items: [
-      { icon: '〰️', name: 'Painted bike lane',          useRoads: 0.15, defaultPreferred: true },
-      { icon: '🏘️', name: 'Living street',              useRoads: 0.05, defaultPreferred: true },
-      { icon: '🏠', name: 'Residential/local road',           useRoads: 0.15, defaultPreferred: true },
+      { icon: '🛡️', name: 'Elevated sidewalk path', defaultPreferred: true },
+      { icon: '🏘️', name: 'Living street',          defaultPreferred: true },
     ]},
     { defaultPreferred: false, items: [
-      { icon: '🛡️', name: 'Elevated sidewalk path', useRoads: 0.0, defaultPreferred: false },
-      { icon: '⚠️', name: 'Rough surface', useRoads: 0.15, defaultPreferred: false },
+      { icon: '〰️', name: 'Painted bike lane',      defaultPreferred: false },
+      { icon: '🚌', name: 'Shared bus lane',        defaultPreferred: false },
+      { icon: '🏠', name: 'Residential/local road', defaultPreferred: false },
+      { icon: '⚠️', name: 'Rough surface',          defaultPreferred: false },
     ]},
   ],
+
+  // Kid handles painted lanes + intersections. Adds residential and painted
+  // lanes to the preferred set; arterial roads still excluded by router.
+  'kid-traffic-savvy': [
+    { defaultPreferred: true, items: [
+      { icon: '🚴', name: 'Bike path',          defaultPreferred: true },
+      { icon: '🚲', name: 'Fahrradstrasse',     defaultPreferred: true },
+      { icon: '🛤️', name: 'Shared foot path',  defaultPreferred: true },
+      { icon: '🛡️', name: 'Elevated sidewalk path', defaultPreferred: true },
+      { icon: '🏘️', name: 'Living street',          defaultPreferred: true },
+    ]},
+    { defaultPreferred: true, items: [
+      { icon: '〰️', name: 'Painted bike lane',      defaultPreferred: true },
+      { icon: '🏠', name: 'Residential/local road', defaultPreferred: true },
+    ]},
+    { defaultPreferred: false, items: [
+      { icon: '🚌', name: 'Shared bus lane',        defaultPreferred: false },
+      { icon: '⚠️', name: 'Rough surface',          defaultPreferred: false },
+    ]},
+  ],
+
+  // Adult pilots a child seat / cargo bike / trailer. Surface-strict;
+  // willing to take residential and painted lanes since adult has judgment.
+  'carrying-kid': [
+    { defaultPreferred: true, items: [
+      { icon: '🚴', name: 'Bike path',          defaultPreferred: true },
+      { icon: '🚲', name: 'Fahrradstrasse',     defaultPreferred: true },
+      { icon: '🛤️', name: 'Shared foot path',  defaultPreferred: true },
+      { icon: '🚌', name: 'Shared bus lane',    defaultPreferred: true },
+    ]},
+    { defaultPreferred: true, items: [
+      { icon: '〰️', name: 'Painted bike lane',      defaultPreferred: true },
+      { icon: '🏘️', name: 'Living street',          defaultPreferred: true },
+      { icon: '🏠', name: 'Residential/local road', defaultPreferred: true },
+    ]},
+    { defaultPreferred: false, items: [
+      { icon: '🛡️', name: 'Elevated sidewalk path', defaultPreferred: false },
+      { icon: '⚠️', name: 'Rough surface',          defaultPreferred: false },
+    ]},
+  ],
+
+  // Bryan's mode. Adult fitness ride. Prioritizes 30 km/h flow.
+  // Secondary — Komoot exists for this use case.
   training: [
     { defaultPreferred: true, items: [
-      { icon: '🚴', name: 'Bike path',    useRoads: 0.0,  defaultPreferred: true },
-      { icon: '🚲', name: 'Fahrradstrasse',             useRoads: 0.0,  defaultPreferred: true },
-      { icon: '🛤️', name: 'Shared foot path', useRoads: 0.0,  defaultPreferred: true },
-      { icon: '〰️', name: 'Painted bike lane',          useRoads: 0.6,  defaultPreferred: true },
-      { icon: '🚌', name: 'Shared bus lane',            useRoads: 0.6,  defaultPreferred: true },
+      { icon: '🚴', name: 'Bike path',          defaultPreferred: true },
+      { icon: '🚲', name: 'Fahrradstrasse',     defaultPreferred: true },
+      { icon: '🛤️', name: 'Shared foot path',  defaultPreferred: true },
+      { icon: '〰️', name: 'Painted bike lane',  defaultPreferred: true },
+      { icon: '🚌', name: 'Shared bus lane',    defaultPreferred: true },
     ]},
     { defaultPreferred: true, items: [
-      { icon: '🏘️', name: 'Living street',              useRoads: 0.5,  defaultPreferred: true },
-      { icon: '🏠', name: 'Residential/local road',           useRoads: 0.6,  defaultPreferred: true },
+      { icon: '🏘️', name: 'Living street',          defaultPreferred: true },
+      { icon: '🏠', name: 'Residential/local road', defaultPreferred: true },
     ]},
     { defaultPreferred: false, items: [
-      { icon: '🛡️', name: 'Elevated sidewalk path', useRoads: 0.0, defaultPreferred: false },
-      { icon: '⚠️', name: 'Rough surface', useRoads: 0.6, defaultPreferred: false },
+      { icon: '🛡️', name: 'Elevated sidewalk path', defaultPreferred: false },
+      { icon: '⚠️', name: 'Rough surface',          defaultPreferred: false },
     ]},
   ],
 }
@@ -174,37 +223,12 @@ export function getLegendItem(name: string | null, profileKey: string): LegendIt
   return undefined
 }
 
-/**
- * Compute Valhalla costing options from the user's current preferred items.
- * use_roads is the max useRoads across all preferred items; use_living_streets
- * is boosted when 'Living street' is preferred.
- */
-export function getCostingFromPreferences(
-  preferredItemNames: Set<string>,
-  profileKey: string,
-  baseProfile: RiderProfile,
-): BicycleCostingOptions {
-  const groups = PROFILE_LEGEND[profileKey]
-  if (!groups) return baseProfile.costingOptions
-
-  let useRoads = 0.0
-  let useLivingStreets = 0.5
-
-  for (const group of groups) {
-    for (const item of group.items) {
-      if (preferredItemNames.has(item.name)) {
-        useRoads = Math.max(useRoads, item.useRoads)
-        if (item.name === 'Living street') useLivingStreets = 1.0
-      }
-    }
-  }
-
-  return {
-    ...baseProfile.costingOptions,
-    use_roads: useRoads,
-    use_living_streets: useLivingStreets,
-  }
-}
+// getCostingFromPreferences was a Valhalla-specific helper that computed
+// `use_roads` from the user's preferred items. It has been removed: the main
+// app no longer uses Valhalla, and the client router reads preferences
+// directly from the preferred-item set without needing a costing translation.
+// If you need this for benchmarking against Valhalla, see
+// src/services/benchmark/valhalla.ts.
 
 // Surfaces that are always rough regardless of travel mode.
 const ALWAYS_BAD_SURFACES = new Set([
@@ -222,12 +246,16 @@ const SPEED_SENSITIVE_SURFACES = new Set([
 
 /**
  * Check if a surface is bad for a given travel mode.
- * - Toddler: only universally bad surfaces (paving_stones are OK at low speed)
- * - Trailer/training: universally bad + speed-sensitive surfaces
+ * - kid-starting-out: only universally bad surfaces (paving_stones are OK at walking pace)
+ * - All other modes (kid-confident, kid-traffic-savvy, carrying-kid, training):
+ *   universally bad + speed-sensitive surfaces (paving stones rough at speed)
+ *
+ * The kid-starting-out exception exists because at 3–10 km/h on Berlin paving
+ * stones, even small kid wheels handle the joints fine. At 15+ km/h they don't.
  */
 export function isBadSurface(surface: string, profileKey: string): boolean {
   if (ALWAYS_BAD_SURFACES.has(surface)) return true
-  if (profileKey !== 'toddler' && SPEED_SENSITIVE_SURFACES.has(surface)) return true
+  if (profileKey !== 'kid-starting-out' && SPEED_SENSITIVE_SURFACES.has(surface)) return true
   return false
 }
 
