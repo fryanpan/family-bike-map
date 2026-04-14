@@ -72,6 +72,15 @@ export interface LtsClassification {
   // quiet residential, and painted lanes are NOT (cars present on the same
   // surface, even if slow or rare).
   carFree: boolean
+  // True iff the edge is legally or structurally engineered to give bikes
+  // priority over cars on a shared surface. Fahrradstraßen (bicycle_road=yes),
+  // Dutch fietsstraten (cyclestreet=yes), living streets (legally ≤ walking
+  // pace for motor traffic), and residential streets restricted to local
+  // access only (motor_vehicle=destination) all qualify. In practice, cars
+  // on these infrastructures slow down and yield to bikes — bad actors
+  // happen but are the exception, not the norm. NOTE: Layer 2 city profiles
+  // may demote specific named corridors where drivers habitually misbehave.
+  bikePriority: boolean
   // True iff the edge has any explicit bike infrastructure — a cycleway
   // tag, a bike path, a Fahrradstraße, or a dedicated track/lane.
   bikeInfra: boolean
@@ -128,6 +137,18 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
     bikeOnFoot ||
     hasSeparatedTrack ||
     explicitlyNoMotor
+
+  // bikePriority: the edge is engineered or legally designated to give bikes
+  // priority over cars. Shared surface with cars, but cars are constrained
+  // to yield or travel at walking pace. In practice, interactions are rare
+  // and predictable. Bad actors can still happen — Layer 2 city profiles
+  // may demote specific named corridors where drivers habitually misbehave
+  // (e.g. SF's Noe Slow Street).
+  const isLocalAccessOnly = tags.motor_vehicle === 'destination' || tags.motor_vehicle === 'permissive'
+  const bikePriority =
+    isBikeRoad ||                                       // Fahrradstraße / fietsstraat
+    isLivingStreet ||                                   // legally ≤ walking pace for cars
+    (isResidential && isLocalAccessOnly)                // SF Slow Street pattern
 
   // bikeInfra: any explicit cycling facility at all.
   const bikeInfra =
@@ -215,7 +236,7 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
     return 3 // default for unknown
   })()
 
-  return { lts, carFree, bikeInfra, speedKmh, trafficDensity, surface }
+  return { lts, carFree, bikePriority, bikeInfra, speedKmh, trafficDensity, surface }
 }
 
 /**

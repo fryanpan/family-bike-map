@@ -185,10 +185,11 @@ describe('routeOnGraph', () => {
     expect(walkingSegs.length).toBeGreaterThan(0)
   })
 
-  test('kid-starting-out rejects Fahrradstrasse and painted bike lane (cars present)', () => {
-    // Under Option C, kid-starting-out requires physical car separation.
-    // Fahrradstrasse has cars as guests on the same surface — rejected.
-    // Secondary-road painted lane is LTS 3 in Berlin-style context — rejected.
+  test('kid-starting-out accepts Fahrradstrasse (bike-priority) but rejects secondary-road painted lanes', () => {
+    // Under Option C, kid-starting-out requires low car risk: either
+    // physically car-free OR bike-prioritized infrastructure. Fahrradstraßen
+    // qualify because cars are legally guests and in practice yield.
+    // Secondary-road painted lanes don't — ordinary traffic at speed.
     const fahrradWays: OsmWay[] = [{
       osmId: 40,
       itemName: null,
@@ -206,9 +207,42 @@ describe('routeOnGraph', () => {
     const gFahr = buildRoutingGraph(fahrradWays, 'kid-starting-out', preferred)
     const gPaint = buildRoutingGraph(paintedWays, 'kid-starting-out', preferred)
 
-    // Both rejected → empty graphs
-    expect(gFahr.getLinkCount()).toBe(0)
+    // Fahrradstraße accepted (bikePriority), secondary painted lane rejected.
+    expect(gFahr.getLinkCount()).toBe(2)  // both directions
     expect(gPaint.getLinkCount()).toBe(0)
+  })
+
+  test('kid-starting-out accepts SF Slow Streets (residential + motor_vehicle=destination)', () => {
+    // SF-style Slow Street: residential street restricted to local access.
+    // OSM pattern: highway=residential + motor_vehicle=destination.
+    const slowStreetWays: OsmWay[] = [{
+      osmId: 42,
+      itemName: null,
+      tags: {
+        highway: 'residential',
+        motor_vehicle: 'destination',
+        maxspeed: '25',
+      },
+      coordinates: [[37.7600, -122.4300], [37.7610, -122.4300]],
+    }]
+    const graph = buildRoutingGraph(slowStreetWays, 'kid-starting-out', new Set())
+    expect(graph.getLinkCount()).toBe(2)
+  })
+
+  test('kid-starting-out rejects ordinary quiet residential (not bike-prioritized)', () => {
+    // Just a quiet residential street with no bike-priority designation.
+    // kid-confident would accept (full Furth LTS 1), kid-starting-out rejects
+    // because cars are neither absent nor structurally constrained.
+    const residentialWays: OsmWay[] = [{
+      osmId: 43,
+      itemName: null,
+      tags: { highway: 'residential', maxspeed: '30' },
+      coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+    }]
+    const gStart = buildRoutingGraph(residentialWays, 'kid-starting-out', new Set())
+    const gConf = buildRoutingGraph(residentialWays, 'kid-confident', new Set())
+    expect(gStart.getLinkCount()).toBe(0)  // kid-starting-out rejects
+    expect(gConf.getLinkCount()).toBe(2)   // kid-confident accepts
   })
 
   test('kid-confident accepts Fahrradstrasse but still rejects secondary-road painted lanes', () => {
