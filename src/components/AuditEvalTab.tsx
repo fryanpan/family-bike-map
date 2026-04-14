@@ -6,8 +6,8 @@
  */
 
 import { useState, useCallback } from 'react'
-import { getRoute, formatDistance, formatDuration, DEFAULT_PROFILES } from '../services/routing'
-import { getBRouterRoutes } from '../services/brouter'
+import { getRoute, formatDistance, formatDuration, DEFAULT_PROFILES } from '../services/benchmark/valhalla'
+import { getBRouterRoutes } from '../services/benchmark/brouter'
 import { runRoutingBenchmark, formatBenchmarkTable } from '../services/routerBenchmark'
 import type { BenchmarkSummary } from '../services/routerBenchmark'
 import { getDefaultPreferredItems } from '../utils/classify'
@@ -46,10 +46,10 @@ const PRESET_TEST_CASES: TestCase[] = [
 ]
 
 const ENGINE_MODES: Array<{ engine: string; mode: string; profileKey?: ProfileKey }> = [
-  { engine: 'Valhalla', mode: 'toddler', profileKey: 'toddler' },
-  { engine: 'Valhalla', mode: 'trailer', profileKey: 'trailer' },
-  { engine: 'Valhalla', mode: 'training', profileKey: 'training' },
-  { engine: 'BRouter', mode: 'trekking' },
+  { engine: 'Valhalla', mode: 'kid-starting-out', profileKey: 'kid-starting-out' },
+  { engine: 'Valhalla', mode: 'carrying-kid',    profileKey: 'carrying-kid' },
+  { engine: 'Valhalla', mode: 'training',        profileKey: 'training' },
+  { engine: 'BRouter',  mode: 'trekking' },
 ]
 
 function makePlaceFromTestCase(tc: TestCase, which: 'start' | 'end'): Place {

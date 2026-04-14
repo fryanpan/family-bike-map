@@ -10,8 +10,8 @@ import {
   buildRoutingGraph,
   routeOnGraph,
 } from './clientRouter'
-import { getRoute, DEFAULT_PROFILES, formatDistance, formatDuration } from './routing'
-import { getCostingFromPreferences, computeRouteQuality } from '../utils/classify'
+import { getRoute, DEFAULT_PROFILES, formatDistance, formatDuration } from './benchmark/valhalla'
+import { computeRouteQuality } from '../utils/classify'
 import type { OsmWay, Route } from '../utils/types'
 import type { ClassificationRule } from './rules'
 
@@ -127,11 +127,14 @@ export async function runRoutingBenchmark(
       try {
         const profile = DEFAULT_PROFILES[profileKey]
         if (profile) {
-          const costingOptions = getCostingFromPreferences(preferredItemNames, profileKey, profile)
+          // Benchmark uses profile defaults directly; per-preference costing
+          // override (the old getCostingFromPreferences) was Valhalla-specific
+          // and has been removed from the main app since Valhalla is now
+          // benchmark-only.
           const valhallaRoutes = await getRoute(
             { ...origin, shortLabel: origin.label },
             { ...dest, shortLabel: dest.label },
-            { ...profile, costingOptions },
+            profile,
             [],
             0,
           )

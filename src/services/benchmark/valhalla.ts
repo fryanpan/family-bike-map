@@ -1,110 +1,30 @@
-import { decode } from '../utils/polyline'
-import { classifyEdgeToItem, buildSegments } from '../utils/classify'
+// Valhalla routing — BENCHMARK ONLY.
+// Not used by the main web app. Kept so we can compare client-side routing
+// quality and timing against the public Valhalla instance from
+// src/services/routerBenchmark.ts and src/components/AuditEvalTab.tsx.
+import { decode } from '../../utils/polyline'
+import { classifyEdgeToItem, buildSegments } from '../../utils/classify'
+import { DEFAULT_PROFILES } from '../../data/profiles'
+import { formatDistance, formatDuration } from '../../utils/format'
 import type {
   Place,
   LatLng,
   RiderProfile,
-  ProfileMap,
   Route,
   RouteSegment,
   ValhallaEdge,
-} from '../utils/types'
+} from '../../utils/types'
+
+// Re-export for benchmark consumers that previously imported from this file.
+export { DEFAULT_PROFILES, formatDistance, formatDuration }
 
 // All API calls use relative paths — same origin in production (Cloudflare Worker
 // serves both assets and API), and proxied via wrangler dev locally.
 const API_BASE = '/api'
 
-/**
- * Rider profiles mapped to Valhalla bicycle costing options.
- *
- * Our custom safety model (from original product spec) maps to Valhalla params:
- *
- *  use_roads:          0 = strongly prefer bike infrastructure over any road
- *                      → For toddler/trailer: keep at 0 so Valhalla avoids roads even
- *                        if they have painted bike lanes (lane=cycleway still a road)
- *
- *  avoid_bad_surfaces: 0 = tolerant, 1 = avoid cobblestones/gravel
- *                      → ALL profiles avoid cobblestones per spec
- *
- *  use_hills:          0 = flat routes only; 1 = embrace hills
- *
- *  use_living_streets: Valhalla gives Fahrradstrasse (bicycle_road=yes) a large bonus
- *                      similar to living streets — setting high ensures they're preferred
- *
- * Safety priority per profile (from product spec):
- *
- *  toddler:
- *    GREAT: Fahrradstrasse, fully separate recreational trails
- *    GOOD:  Separated bike paths elevated on sidewalk
- *    GOOD:  Quiet side streets
- *    BAD:   Bike paths on the road (cycleway=lane) — "no better than road without one"
- *    AVOID: Cobblestones
- *
- *  trailer (similar to toddler, more lenient):
- *    GREAT: Fahrradstrasse, separate recreational trails
- *    GOOD:  Separated elevated paths
- *    OK:    Roadside (non-elevated) bike lanes, bus lane with bike
- *    AVOID: Cobblestones
- *
- *  training:
- *    GREAT: Fahrradstrasse, recreational paths
- *    GOOD:  Bus lane bike routes
- *    OK:    Multi-lane roads ≤30 km/h
- *    AVOID: Cobblestones
- */
-export const DEFAULT_PROFILES: ProfileMap = {
-  toddler: {
-    label: 'With Toddler',
-    emoji: '👶',
-    description:
-      'Toddler on their own bike/scooter (~10 km/h) — not yet comfortable biking beside cars or following traffic rules. Only Fahrradstrasse, car-free trails and elevated separated paths. Busy roads and painted road bike lanes avoided.',
-    costingOptions: {
-      bicycle_type: 'Hybrid',
-      cycling_speed: 6,         // toddler speed — makes router care less about time
-      use_roads: 0.0,          // maximum road avoidance
-      avoid_bad_surfaces: 0.5,
-      use_hills: 0.1,
-      use_ferry: 0.0,
-      use_living_streets: 1.0,
-    },
-    editable: true,
-    avoidances: ['cobblestones'],
-  },
-  trailer: {
-    label: 'Bike Trailer',
-    emoji: '🚲',
-    description:
-      'Riding 20–25 km/h with a child trailer. Prefers wide, smooth paths. Narrow separated tracks and cobblestones avoided.',
-    costingOptions: {
-      bicycle_type: 'Hybrid',
-      cycling_speed: 22,        // actual trailer speed
-      use_roads: 0.15,
-      avoid_bad_surfaces: 0.5,
-      use_hills: 0.15,
-      use_ferry: 0.0,
-      use_living_streets: 0.9,
-    },
-    editable: true,
-    avoidances: ['cobblestones'],
-  },
-  training: {
-    label: 'Fast Training',
-    emoji: '⚡',
-    description:
-      '25–35 km/h road training. Smooth asphalt preferred, okay with traffic ≤30 km/h. Avoids tram tracks, narrow unpathable bike paths, and bumpy elevated paths.',
-    costingOptions: {
-      bicycle_type: 'Road',
-      cycling_speed: 30,        // actual training speed
-      use_roads: 0.7,           // roads are fine if smooth and ≤30 km/h
-      avoid_bad_surfaces: 0.6,  // penalizes rough surfaces more (narrow tires)
-      use_hills: 0.9,
-      use_ferry: 0.0,
-      use_living_streets: 0.3,  // living streets are too slow
-    },
-    editable: true,
-    avoidances: ['cobblestones'],
-  },
-}
+// DEFAULT_PROFILES has moved to src/data/profiles.ts (single source of truth
+// for the 5 ride modes). It is re-exported above so existing benchmark
+// imports continue to work.
 
 interface ValhallaManeuverRaw {
   type: number
@@ -284,14 +204,5 @@ export async function getRouteSegments(
   }
 }
 
-export function formatDistance(km: number): string {
-  if (km < 1) return `${Math.round(km * 1000)} m`
-  return `${km.toFixed(1)} km`
-}
-
-export function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (h > 0) return `${h}h ${m}m`
-  return `${m} min`
-}
+// formatDistance and formatDuration moved to src/utils/format.ts.
+// Re-exported at the top of this file for benchmark consumers.

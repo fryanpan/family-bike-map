@@ -246,3 +246,39 @@
 - Language localization for feedback tags?
 
 **Status**: Deferred to Phase 3. Document for future reference.
+
+---
+
+## 2026-04-13: Region model — defer sub-municipal and cross-boundary handling
+
+**Context**: Family bike routing profiles need to attach to *something* — a city, a metro area, a borough? Governance structures vary by country (German Gemeinde, US city, London borough, Tokyo ku, Barcelona district) and bike infrastructure quality tracks governance. No single OSM admin_level captures "the right unit" globally.
+
+**Decision**: V1 uses one profile per route, keyed by the origin's reverse-geocoded city name. Assume most family trips are <15 km and stay within one administrative region. Defer sub-municipal profiles (Waltham Forest, Setagaya), cross-boundary route splitting (Berlin → Potsdam), and Wikidata-keyed filenames until real user complaints surface.
+
+**See**: [`region-model.md`](./region-model.md) for full thinking, governance table, and triggers to revisit.
+
+**Status**: Deferred. Documented and punted until v2.
+
+---
+
+## 2026-04-13: 5-mode picker, drop Valhalla and BRouter from main app
+
+**Context**: Mode rebuild + router consolidation, executed in one pass against the three-layer scoring plan ([`plans/2026-04-13-three-layer-scoring-plan.md`](./plans/2026-04-13-three-layer-scoring-plan.md)).
+
+**Decisions**:
+
+1. **Five top-level modes** (was three): `kid-starting-out` (default), `kid-confident`, `kid-traffic-savvy`, `carrying-kid`, `training`. The previous `toddler` → `kid-starting-out`, `trailer` → `carrying-kid`, `training` unchanged. Two new kid modes capture the developmental progression from "needs car-free paths" → "can handle painted lanes." Geller / Mekuria labels added to `LTS_LABELS` for tooltips.
+
+2. **Default mode = kid-starting-out** on first launch, to surface the product's most-protective routing immediately.
+
+3. **Single source of truth for `DEFAULT_PROFILES`** is now `src/data/profiles.ts`; `src/utils/format.ts` holds the format helpers. Both are imported by the main app and re-exported from `src/services/benchmark/valhalla.ts` for benchmark consumers.
+
+4. **Valhalla and BRouter removed from the main web app routing path.** The main app now routes through `clientRouter` only, with multi-leg waypoint chaining done inline. Both Valhalla (`src/services/benchmark/valhalla.ts`) and BRouter (`src/services/benchmark/brouter.ts`) are retained for benchmark and audit-eval comparisons via `routerBenchmark.ts` and `AuditEvalTab.tsx`.
+
+5. **`useRoads` removed.** The Valhalla-specific `useRoads` field on `LegendItem` and the `getCostingFromPreferences` helper are gone. Mode → routing behavior is now fully expressed by `PROFILE_LEGEND` defaults + per-mode tables in `clientRouter.ts`.
+
+6. **Sidewalk bridge-walk fallback** is implemented for all kid modes (`KID_MODES` set in `clientRouter.ts`) at 3 km/h, heavily penalized so the router only uses it as a last resort to bridge unavoidable bad-infra gaps. `kid-traffic-savvy` is more permissive about tertiary roads with sidewalks than the stricter kid modes.
+
+**Verification**: 204/204 tests pass; `bunx tsc --noEmit` clean; production build succeeds.
+
+**Status**: Shipped.

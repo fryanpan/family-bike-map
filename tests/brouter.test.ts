@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { parseMessages, buildBRouterSegments, isWalkingSegment } from '../src/services/brouter'
+import { parseMessages, buildBRouterSegments, isWalkingSegment } from '../src/services/benchmark/brouter'
 
 describe('parseMessages', () => {
   test('parses header + data rows correctly', () => {

@@ -204,14 +204,14 @@ describe('routing integration — Dresdener Str 112 → Zoo (toddler mode)', () 
   it('uses some preferred (car-free/separated) infrastructure (quality.preferred > 0.1)', async () => {
     if (skipIfOffline()) return
     const { coords } = await fetchRoute(DRESDENER_STR_112, ZOO_ENTRANCE, TODDLER_OPTS)
-    const quality = await fetchRouteQuality(coords, 'toddler')
+    const quality = await fetchRouteQuality(coords, 'kid-starting-out')
     expect(quality.preferred).toBeGreaterThan(0.1)
   })
 
   it('uses some car-free/separated infrastructure (quality.preferred > 0.15)', async () => {
     if (skipIfOffline()) return
     const { coords } = await fetchRoute(DRESDENER_STR_112, ZOO_ENTRANCE, TODDLER_OPTS)
-    const quality = await fetchRouteQuality(coords, 'toddler')
+    const quality = await fetchRouteQuality(coords, 'kid-starting-out')
     // The route includes cycleway sections near Potsdamer Platz and Tiergarten
     expect(quality.preferred).toBeGreaterThan(0.15)
   })
@@ -256,8 +256,8 @@ describe('routing integration — Dresdener Str 112 → Le Brot (training mode)'
   it('bus lanes classify as Shared bus lane (preferred for training, not for toddler by default)', () => {
     const buslane = { cycle_lane: 'share_busway' }
     expect(classifyEdgeToItem(buslane, 'training')).toBe('Shared bus lane')
-    expect(classifyEdgeToItem(buslane, 'trailer')).toBe('Shared bus lane')
-    expect(classifyEdgeToItem(buslane, 'toddler')).toBe('Shared bus lane')
+    expect(classifyEdgeToItem(buslane, 'carrying-kid')).toBe('Shared bus lane')
+    expect(classifyEdgeToItem(buslane, 'kid-starting-out')).toBe('Shared bus lane')
     // Whether it's "preferred" depends on the user's preferredItemNames, not the classification
     const toddlerPreferred = new Set(['Bike path', 'Fahrradstrasse'])
     const trainingPreferred = new Set(['Shared bus lane'])
@@ -293,7 +293,7 @@ describe('routing integration — Dresdener Str 112 → Humboldt Forum (toddler 
   it('uses car-free or park paths near the destination (quality.preferred > 0)', async () => {
     if (skipIfOffline()) return
     const { coords } = await fetchRoute(DRESDENER_STR_112, HUMBOLDT_FORUM, TODDLER_OPTS)
-    const quality = await fetchRouteQuality(coords, 'toddler')
+    const quality = await fetchRouteQuality(coords, 'kid-starting-out')
     // The Schloßplatz approach and Fischerinsel area include car-free sections
     expect(quality.preferred).toBeGreaterThan(0)
   })
@@ -309,23 +309,23 @@ describe('classifyEdgeToItem — uses Valhalla string API values (not legacy num
    */
 
   it('car-free cycleway ("use"="cycleway") → Bike path', () => {
-    expect(classifyEdgeToItem({ use: 'cycleway' }, 'toddler')).toBe('Bike path')
+    expect(classifyEdgeToItem({ use: 'cycleway' }, 'kid-starting-out')).toBe('Bike path')
   })
 
   it('off-road path ("use"="path") → Bike path', () => {
-    expect(classifyEdgeToItem({ use: 'path' }, 'toddler')).toBe('Bike path')
+    expect(classifyEdgeToItem({ use: 'path' }, 'kid-starting-out')).toBe('Bike path')
   })
 
   it('park footway ("use"="footway") → Shared foot path', () => {
-    expect(classifyEdgeToItem({ use: 'footway' }, 'toddler')).toBe('Shared foot path')
+    expect(classifyEdgeToItem({ use: 'footway' }, 'kid-starting-out')).toBe('Shared foot path')
   })
 
   it('separated bike track ("cycle_lane"="separated") → Elevated sidewalk path for toddler', () => {
-    expect(classifyEdgeToItem({ cycle_lane: 'separated' }, 'toddler')).toBe('Elevated sidewalk path')
+    expect(classifyEdgeToItem({ cycle_lane: 'separated' }, 'kid-starting-out')).toBe('Elevated sidewalk path')
   })
 
   it('painted lane ("cycle_lane"="dedicated") → Painted bike lane', () => {
-    expect(classifyEdgeToItem({ cycle_lane: 'dedicated' }, 'toddler')).toBe('Painted bike lane')
+    expect(classifyEdgeToItem({ cycle_lane: 'dedicated' }, 'kid-starting-out')).toBe('Painted bike lane')
   })
 
   it('bus lane ("cycle_lane"="share_busway") → Shared bus lane', () => {
@@ -333,10 +333,10 @@ describe('classifyEdgeToItem — uses Valhalla string API values (not legacy num
   })
 
   it('residential road ("road_class"="residential") → Residential/local road', () => {
-    expect(classifyEdgeToItem({ road_class: 'residential' }, 'toddler')).toBe('Residential/local road')
+    expect(classifyEdgeToItem({ road_class: 'residential' }, 'kid-starting-out')).toBe('Residential/local road')
   })
 
   it('secondary road ("road_class"="secondary") → null (arterial, not in legend)', () => {
-    expect(classifyEdgeToItem({ road_class: 'secondary' }, 'toddler')).toBeNull()
+    expect(classifyEdgeToItem({ road_class: 'secondary' }, 'kid-starting-out')).toBeNull()
   })
 })

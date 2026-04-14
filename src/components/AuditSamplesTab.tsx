@@ -110,7 +110,7 @@ function ClassSection({ classification, ways }: { classification: string; ways: 
 }
 
 export default function AuditSamplesTab({ scan, regionRules }: Props) {
-  const [travelMode, setTravelMode] = useState('toddler')
+  const [travelMode, setTravelMode] = useState('kid-starting-out')
 
   // Group ways by classification for the selected travel mode, split into preferred/other
   const { preferred, other } = useMemo(() => {
@@ -153,8 +153,10 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
           value={travelMode}
           onChange={(e) => setTravelMode(e.target.value)}
         >
-          <option value="toddler">Toddler</option>
-          <option value="trailer">Trailer</option>
+          <option value="kid-starting-out">Kid starting out</option>
+          <option value="kid-confident">Kid confident</option>
+          <option value="kid-traffic-savvy">Kid traffic-savvy</option>
+          <option value="carrying-kid">Carrying kid</option>
           <option value="training">Training</option>
         </select>
       </div>
