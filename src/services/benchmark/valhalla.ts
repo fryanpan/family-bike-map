@@ -134,7 +134,7 @@ export async function getRoute(
  *
  * profileKey is passed to classifyEdgeToItem() so segment item names reflect what THIS
  * profile maps the infrastructure to — e.g. separated tracks get different item names
- * per profile (toddler vs trailer vs training).
+ * per profile (kid modes vs carrying-kid vs training).
  *
  * Key fix: requests edge.bicycle_road to correctly identify Fahrradstrasse
  * (bicycle_road=yes). The old code used edge.bicycle_network which tracks cycling

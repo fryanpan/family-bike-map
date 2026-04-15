@@ -349,19 +349,22 @@ button { font-family: inherit; cursor: pointer; }
 }
 .profile-chips {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .profile-chip {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-height: 40px;
-  padding: 8px 16px;
+  gap: 4px;
+  min-width: 76px;
+  padding: 8px 10px;
   border: 1.5px solid #e5e7eb;
   border-radius: 12px;
   background: #f9fafb;
   transition: all .15s;
+  cursor: pointer;
 }
 .profile-chip:hover { border-color: #93c5fd; background: #eff6ff; }
 .profile-chip.selected {
@@ -372,11 +375,20 @@ button { font-family: inherit; cursor: pointer; }
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 26px;
+  height: 36px;
   color: #374151;
 }
 .profile-chip.selected .profile-chip-icon { color: #2563eb; }
 .profile-chip-emoji { font-size: 22px; line-height: 1; }
+.profile-chip-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: #4b5563;
+  text-align: center;
+  line-height: 1.2;
+  max-width: 72px;
+}
+.profile-chip.selected .profile-chip-label { color: #1d4ed8; }
 
 .profile-edit-icon {
   flex-shrink: 0;
