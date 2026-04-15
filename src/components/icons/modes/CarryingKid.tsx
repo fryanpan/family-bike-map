@@ -1,41 +1,40 @@
 import type { SVGProps } from 'react'
 
-// Carrying kid — adult piloting a bike with a small passenger
-// in a rear child seat. Ambiguous enough to represent child seat,
-// longtail cargo, bucket cargo, or trailer — hardware refinement
-// lives in Layer 3 prose, not in the picker.
+// Carrying kid — adult bike towing a child trailer. The trailer is a
+// single boxy shape because the mode covers all carrying variants
+// (trailer, longtail, bucket cargo, child seat). Landscape composition:
+// trailer on the left, bike on the right, hitch arm connecting them.
 export function CarryingKid(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
-      viewBox="0 0 48 48"
+      width="40"
+      height="22"
+      viewBox="0 0 62 32"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.75"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-hidden="true"
       {...props}
     >
-      {/* Bike (larger adult-scale, centered) */}
-      <circle cx="12" cy="38" r="4" />
-      <circle cx="36" cy="38" r="4" />
-      <path d="M 12 38 L 22 26 L 36 38" />
-      {/* seat post */}
-      <line x1="22" y1="26" x2="24" y2="22" />
-      {/* handlebar stem */}
-      <line x1="22" y1="26" x2="28" y2="24" />
+      {/* Bike (right portion) */}
+      <circle cx="34" cy="22" r="8" strokeWidth="1.6" />
+      <circle cx="52" cy="22" r="8" strokeWidth="1.6" />
+      <path d="M34 22 L42 22 L39 12 Z" />
+      <path d="M39 12 L47 12 L52 22" />
+      <line x1="47" y1="12" x2="42" y2="22" />
+      <line x1="36" y1="12" x2="42" y2="12" />
+      <line x1="45" y1="10" x2="49" y2="10" />
 
-      {/* Adult rider (leaning forward) */}
-      <circle cx="28" cy="17" r="2.4" />
-      <line x1="28" y1="19.4" x2="24" y2="22" />
-      <line x1="26.5" y1="21" x2="28" y2="24" />
+      {/* Hitch arm: rear axle → trailer coupling */}
+      <line x1="34" y1="22" x2="22" y2="20" strokeWidth="1.4" />
 
-      {/* Rear child seat with small passenger */}
-      {/* seat bracket */}
-      <line x1="14" y1="28" x2="14" y2="24" />
-      <line x1="14" y1="24" x2="18" y2="24" />
-      {/* kid passenger */}
-      <circle cx="16" cy="19" r="1.6" />
-      <line x1="16" y1="20.6" x2="16" y2="24" />
+      {/* Trailer body */}
+      <rect x="5" y="13" width="17" height="12" rx="2" strokeWidth="1.4" />
+      {/* Trailer wheels */}
+      <circle cx="9.5"  cy="25" r="4" strokeWidth="1.4" />
+      <circle cx="17.5" cy="25" r="4" strokeWidth="1.4" />
     </svg>
   )
 }

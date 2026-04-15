@@ -349,7 +349,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .profile-chips {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -357,9 +357,8 @@ button { font-family: inherit; cursor: pointer; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  min-width: 76px;
-  padding: 8px 10px;
+  min-height: 40px;
+  padding: 8px 16px;
   border: 1.5px solid #e5e7eb;
   border-radius: 12px;
   background: #f9fafb;
@@ -375,20 +374,11 @@ button { font-family: inherit; cursor: pointer; }
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 36px;
+  height: 26px;
   color: #374151;
 }
 .profile-chip.selected .profile-chip-icon { color: #2563eb; }
 .profile-chip-emoji { font-size: 22px; line-height: 1; }
-.profile-chip-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: #4b5563;
-  text-align: center;
-  line-height: 1.2;
-  max-width: 72px;
-}
-.profile-chip.selected .profile-chip-label { color: #1d4ed8; }
 
 .profile-edit-icon {
   flex-shrink: 0;

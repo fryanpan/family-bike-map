@@ -57,7 +57,15 @@ function loadProfiles(): ProfileMap {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved) {
       const parsed = JSON.parse(saved) as ProfileMap
-      return { ...DEFAULT_PROFILES, ...parsed }
+      // Only merge overrides for profile keys that still exist in the
+      // current DEFAULT_PROFILES. Cached profiles with stale keys
+      // (e.g. `toddler`, `trailer` from before the 5-mode rename) are
+      // silently dropped — we never want them to appear as extra chips.
+      const merged: ProfileMap = { ...DEFAULT_PROFILES }
+      for (const key of Object.keys(DEFAULT_PROFILES)) {
+        if (parsed[key]) merged[key] = parsed[key]
+      }
+      return merged
     }
   } catch { /* ignore */ }
   return { ...DEFAULT_PROFILES }
@@ -211,23 +219,15 @@ export default function App() {
   const [regionRules, setRegionRules] = useState<ClassificationRule[]>([])
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
 
-  // Tile cache state
-  const [tileCacheBanner, setTileCacheBanner] = useState<{
-    show: boolean
-    regionName: string
-    bbox: { south: number; west: number; north: number; east: number }
-  } | null>(null)
+  // Tile cache state. The client router lazy-fetches tiles on demand, so
+  // there is no longer an "auto-show download banner" flow. Power users can
+  // still pre-cache a region explicitly via the viewport selection UI.
   const [tileCacheProgress, setTileCacheProgress] = useState<number | null>(null)
   const tileCacheCheckedRef = useRef(false)
 
   // Cache viewport selection mode (Google Maps-style frame)
   const [cacheSelecting, setCacheSelecting] = useState(false)
   const [cachedRegions, setCachedRegions] = useState<CachedRegion[]>([])
-
-  // Search-triggered cache banner (separate from initial load banner)
-  const [searchCacheBanner, setSearchCacheBanner] = useState<{
-    lat: number; lng: number
-  } | null>(null)
 
   // Detect which city preset the map center falls within
   useEffect(() => {
@@ -244,8 +244,12 @@ export default function App() {
     }
   }, [currentLocation, activeRegion])
 
-  // On app load: check if current location is inside a cached region.
-  // If cached, load tiles from IndexedDB. If not, show download banner.
+  // On app load: if the current location is inside a cached region, load
+  // those tiles from IndexedDB into the in-memory cache so the display
+  // overlay renders instantly. If the region is NOT cached, do nothing —
+  // the client router will lazy-fetch tiles as needed when the user
+  // searches or routes. Power users can still pre-cache regions explicitly
+  // via the "download area" button in the bike-layer controls.
   useEffect(() => {
     if (tileCacheCheckedRef.current) return
     tileCacheCheckedRef.current = true
@@ -255,38 +259,16 @@ export default function App() {
       try {
         const { cached, regionName } = await isLocationCached(loc.lat, loc.lng, 2)
         if (cached && regionName) {
-          // Load from IndexedDB into in-memory tile cache
           const region = await loadRegion(regionName)
           if (region) {
             injectRegionIntoTileCache(region.ways, region.bbox)
           }
-        } else {
-          // Show download banner
-          const detected = detectRegion(loc.lat, loc.lng)
-          setTileCacheBanner({ show: true, regionName: detected.name, bbox: detected.bbox })
         }
       } catch {
         // IndexedDB failure is non-critical
       }
     })()
   }, [currentLocation]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function handleDownloadTiles() {
-    if (!tileCacheBanner) return
-    const { regionName, bbox } = tileCacheBanner
-    setTileCacheBanner(null)
-    setTileCacheProgress(0)
-
-    try {
-      const ways = await prefetchTiles(bbox, (pct) => setTileCacheProgress(pct))
-      await saveRegion(regionName, bbox, ways)
-      injectRegionIntoTileCache(ways, bbox)
-    } catch {
-      // Download failure is non-critical
-    } finally {
-      setTileCacheProgress(null)
-    }
-  }
 
   // Load cached regions list on mount
   useEffect(() => {
@@ -341,33 +323,6 @@ export default function App() {
     try {
       const ways = await prefetchTiles(bbox, (pct) => setTileCacheProgress(pct))
       await saveRegion(name, bbox, ways)
-      injectRegionIntoTileCache(ways, bbox)
-      refreshCachedRegionsList()
-    } catch { /* ignore */ }
-    finally { setTileCacheProgress(null) }
-  }
-
-  /** Check if a destination is cached; if not, show the search cache banner. */
-  async function checkLocationCache(lat: number, lng: number) {
-    try {
-      const { cached } = await isLocationCached(lat, lng, 3)
-      if (!cached) {
-        setSearchCacheBanner({ lat, lng })
-      }
-    } catch { /* ignore */ }
-  }
-
-  /** Download 3km radius around the search banner target. */
-  async function handleSearchBannerDownload() {
-    if (!searchCacheBanner) return
-    const { lat, lng } = searchCacheBanner
-    setSearchCacheBanner(null)
-    setTileCacheProgress(0)
-    const bbox = bboxFromCenter(lat, lng, 3)
-    const detected = detectRegion(lat, lng)
-    try {
-      const ways = await prefetchTiles(bbox, (pct) => setTileCacheProgress(pct))
-      await saveRegion(detected.name, bbox, ways)
       injectRegionIntoTileCache(ways, bbox)
       refreshCachedRegionsList()
     } catch { /* ignore */ }
@@ -537,7 +492,6 @@ export default function App() {
   function handlePlaceSelect(place: Place) {
     setSelectedPlace(place)
     setUiState('place-detail')
-    void checkLocationCache(place.lat, place.lng)
   }
 
   // --- Start routing to a destination from current location ---
@@ -779,48 +733,12 @@ export default function App() {
           {overlayStatusMsg && !cacheSelecting && <p className="bike-layer-status">{overlayStatusMsg}</p>}
         </div>
 
-        {/* Tile cache download banner */}
-        {tileCacheBanner?.show && (
-          <div className="download-banner">
-            <p className="download-banner-text">Download cycling data for {tileCacheBanner.regionName}? (~30 seconds)</p>
-            <div className="download-banner-actions">
-              <button
-                className="download-banner-dismiss"
-                onClick={() => setTileCacheBanner(null)}
-              >
-                Dismiss
-              </button>
-              <button className="download-banner-btn" onClick={handleDownloadTiles}>
-                Download
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Tile cache download progress */}
         {tileCacheProgress !== null && (
           <div className="download-banner">
             <p className="download-banner-text">Downloading cycling data... {tileCacheProgress}%</p>
             <div className="download-banner-progress">
               <div className="download-banner-fill" style={{ width: `${tileCacheProgress}%` }} />
-            </div>
-          </div>
-        )}
-
-        {/* Search-triggered cache banner */}
-        {searchCacheBanner && !tileCacheProgress && !tileCacheBanner?.show && (
-          <div className="download-banner">
-            <p className="download-banner-text">This area hasn't been cached. Download for better routing?</p>
-            <div className="download-banner-actions">
-              <button
-                className="download-banner-dismiss"
-                onClick={() => setSearchCacheBanner(null)}
-              >
-                Dismiss
-              </button>
-              <button className="download-banner-btn" onClick={handleSearchBannerDownload}>
-                Download
-              </button>
             </div>
           </div>
         )}

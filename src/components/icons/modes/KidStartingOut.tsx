@@ -1,41 +1,46 @@
 import type { SVGProps } from 'react'
 
-// Kid starting out — adult walking beside a kid on a bike.
-// The kid has some bike control but needs fully car-free pathways;
-// the walking adult signals "parent stays close on foot, at walking pace."
+// Kid starting out — walking adult figure beside a small kid bike.
+// The adult is on foot next to a single kid bike, signalling the earliest
+// riding stage where the parent walks alongside on car-free paths.
+// Landscape-aspect line art drawn to read as a bike at ~22px tall.
 export function KidStartingOut(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
-      viewBox="0 0 48 48"
+      width="40"
+      height="22"
+      viewBox="0 0 62 32"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.75"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-hidden="true"
       {...props}
     >
-      {/* Adult walking (left) */}
-      <circle cx="10" cy="13" r="2.4" />
-      <line x1="10" y1="15.4" x2="10" y2="28" />
-      {/* swinging arms */}
-      <line x1="10" y1="19" x2="6.5" y2="25" />
-      <line x1="10" y1="19" x2="13.5" y2="24" />
-      {/* walking legs */}
-      <line x1="10" y1="28" x2="6.5" y2="41" />
-      <line x1="10" y1="28" x2="14" y2="41" />
+      {/* Walking adult (stick figure, left) */}
+      <circle cx="9" cy="6" r="2.5" />
+      <line x1="9" y1="8.5" x2="9" y2="19" />
+      {/* arms swinging */}
+      <line x1="9" y1="12" x2="5" y2="17" />
+      <line x1="9" y1="12" x2="13" y2="16" />
+      {/* legs walking */}
+      <line x1="9" y1="19" x2="5" y2="30" />
+      <line x1="9" y1="19" x2="14" y2="30" />
 
-      {/* Kid on bike (right) */}
-      <circle cx="26" cy="38" r="3" />
-      <circle cx="38" cy="38" r="3" />
-      {/* frame V */}
-      <path d="M 26 38 L 32 30 L 38 38" />
-      {/* seat post + handlebar stem */}
-      <line x1="32" y1="30" x2="33" y2="27" />
-      <line x1="32" y1="30" x2="35" y2="28" />
-      {/* kid rider */}
-      <circle cx="33" cy="23.5" r="1.6" />
-      <line x1="33" y1="25.1" x2="32.6" y2="30" />
-      <line x1="33" y1="26.5" x2="35" y2="28" />
+      {/* Kid bike (right) */}
+      <circle cx="32" cy="25" r="5.5" strokeWidth="1.4" />
+      <circle cx="44" cy="25" r="5.5" strokeWidth="1.4" />
+      {/* Rear triangle */}
+      <path d="M32 25 L38 25 L36 17.5 Z" strokeWidth="1.3" />
+      {/* Top tube + fork */}
+      <path d="M36 17.5 L41.5 17.5 L44 25" strokeWidth="1.3" />
+      {/* Down tube */}
+      <line x1="41.5" y1="17.5" x2="38" y2="25" strokeWidth="1.3" />
+      {/* Seat */}
+      <line x1="34" y1="17.5" x2="38" y2="17.5" strokeWidth="1.3" />
+      {/* Handlebar */}
+      <line x1="39.5" y1="15.5" x2="43" y2="15.5" strokeWidth="1.3" />
     </svg>
   )
 }

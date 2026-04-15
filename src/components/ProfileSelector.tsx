@@ -7,29 +7,25 @@ import {
   Training,
 } from './icons/modes'
 
-// Map mode keys to custom SVG icon components. The icons are single-color
-// (currentColor) React components in src/components/icons/modes/. Each
-// depicts the rider situation at a glance: adult walking beside a kid bike
-// for "starting out", kid + adult both biking for "confident", kid in a
-// painted lane next to a car for "traffic-savvy", adult bike with child
-// seat for "carrying kid", and a sport rider with speed lines for training.
+// Custom SVG icons for each ride mode. Landscape-aspect line-art bikes
+// drawn to read as bikes at small icon sizes (~22px tall). Each icon
+// uses a recognizable bike silhouette — two wheel circles plus a simple
+// triangular frame — with rider context elements added on top:
 //
-// Custom icons are defined for every current ride mode; if a new mode is
-// added without a matching icon, the picker falls back to the profile's
-// emoji character from profiles.ts.
-const iconProps = {
-  width: 52,
-  height: 36,
-  strokeWidth: 1.6,
-  'aria-hidden': true as const,
-}
-
+//   kid-starting-out  — walking adult beside a small kid bike
+//   kid-confident     — adult bike + kid bike riding together
+//   kid-traffic-savvy — adult + kid bikes + dashed painted-lane stripe
+//   carrying-kid      — adult bike + child trailer
+//   training          — road bike + speed lines behind
+//
+// If a new mode is added without a matching icon the picker falls back
+// to the profile's emoji character from profiles.ts.
 const PROFILE_ICONS: Record<string, JSX.Element> = {
-  'kid-starting-out':  <KidStartingOut  {...iconProps} />,
-  'kid-confident':     <KidConfident    {...iconProps} />,
-  'kid-traffic-savvy': <KidTrafficSavvy {...iconProps} />,
-  'carrying-kid':      <CarryingKid     {...iconProps} />,
-  'training':          <Training        {...iconProps} />,
+  'kid-starting-out':  <KidStartingOut />,
+  'kid-confident':     <KidConfident />,
+  'kid-traffic-savvy': <KidTrafficSavvy />,
+  'carrying-kid':      <CarryingKid />,
+  'training':          <Training />,
 }
 
 interface Props {
@@ -55,7 +51,6 @@ export default function ProfileSelector({ profiles, selected, onSelect, isCustom
                 <span className="profile-chip-emoji">{profile.emoji}</span>
               )}
             </span>
-            <span className="profile-chip-label">{profile.label}</span>
           </button>
         ))}
         {isCustomTravelMode && (
@@ -67,7 +62,6 @@ export default function ProfileSelector({ profiles, selected, onSelect, isCustom
             <span className="profile-chip-icon">
               <span className="profile-chip-emoji" style={{ fontSize: 14 }}>✎</span>
             </span>
-            <span className="profile-chip-label">Custom</span>
           </button>
         )}
       </div>
