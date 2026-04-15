@@ -211,7 +211,13 @@ export default function App() {
   // Derived: the currently selected route (or null if none)
   const route = routes[selectedRouteIndex] ?? null
 
-  const overlayEnabled = true
+  // The overlay is always wanted, but we gate it until the per-tile IDB
+  // prime has finished so the first loadVisibleTiles pass can read already-
+  // fetched tiles from the warmed _tileCache rather than round-tripping to
+  // Overpass for tiles we already have on disk. See commit message for the
+  // race-condition rationale.
+  const [idbReady, setIdbReady] = useState(false)
+  const overlayEnabled = idbReady
   const [overlayStatus, setOverlayStatus]   = useState('idle')
   const [auditOpen, setAuditOpen]           = useState(false)
 
@@ -254,18 +260,25 @@ export default function App() {
   // Also primes the in-memory cache from the lazy per-tile IndexedDB store
   // (src/services/tileStore.ts), so any tile the user has visited in the
   // last 30 days is available instantly on this session's first render.
+  //
+  // The overlay is gated on idbReady — it only starts fetching once the
+  // per-tile IDB prime has finished (or failed), so OverlayController's
+  // initial loadVisibleTiles call reads from a warmed _tileCache instead
+  // of racing IDB with Overpass.
   useEffect(() => {
     if (tileCacheCheckedRef.current) return
     tileCacheCheckedRef.current = true
 
-    // Fire-and-forget: prime from the per-tile IDB store. Tiles loaded
-    // here will be picked up by OverlayController on its initial
-    // loadVisibleTiles call (via getCachedTile → _tileCache lookup).
-    void primeInMemoryCacheFromIdb()
-
     const loc = currentLocation ?? { lat: 52.52, lng: 13.405 }
     void (async () => {
       try {
+        // Prime the per-tile IDB store FIRST so the in-memory cache is warm
+        // before the overlay's mount effect fires.
+        await primeInMemoryCacheFromIdb()
+
+        // Also load any whole-region snapshot the location falls into. This
+        // is the legacy "Download area" feature — still supported for power
+        // users even though the banner prompt is gone.
         const { cached, regionName } = await isLocationCached(loc.lat, loc.lng, 2)
         if (cached && regionName) {
           const region = await loadRegion(regionName)
@@ -275,6 +288,11 @@ export default function App() {
         }
       } catch {
         // IndexedDB failure is non-critical
+      } finally {
+        // Always flip the gate — even on IDB failure, the overlay should
+        // work via lazy network fetch. The tileStore code paths are all
+        // wrapped in try/catch so this finally just releases the UI.
+        setIdbReady(true)
       }
     })()
   }, [currentLocation]) // eslint-disable-line react-hooks/exhaustive-deps

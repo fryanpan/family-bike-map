@@ -46,11 +46,61 @@ const MAX_TILES = 2000
 // matter much for a 30-day TTL.
 let evictionCheckedThisSession = false
 
-interface StoredTile {
+export interface StoredTile {
   key: string // `row:col`
   ways: OsmWay[]
   fetchedAt: number // Date.now()
   lastAccessed: number // Date.now(), updated on every read
+}
+
+// ── Pure helpers (exported for tests) ──────────────────────────────────────
+
+/**
+ * Is this tile older than the TTL cutoff?
+ * Compared against `fetchedAt`, not `lastAccessed` — TTL is freshness of the
+ * source data, not recency of access.
+ */
+export function isExpired(tile: StoredTile, now: number, maxAgeMs: number = MAX_AGE_MS): boolean {
+  return now - tile.fetchedAt > maxAgeMs
+}
+
+/**
+ * Given a snapshot of all stored tiles, return the set of keys that should
+ * be evicted. Two passes:
+ *   1. Every expired tile (fetchedAt older than maxAgeMs)
+ *   2. If the surviving set is still larger than maxTiles, LRU-evict by
+ *      `lastAccessed` ascending until the count is at cap.
+ *
+ * Pure function — no IDB I/O. Used by evictOldTiles() at runtime and by
+ * tileStore.test.ts for unit coverage.
+ */
+export function pickEvictionVictims(
+  tiles: StoredTile[],
+  now: number,
+  maxAgeMs: number = MAX_AGE_MS,
+  maxTiles: number = MAX_TILES,
+): string[] {
+  const toDelete: string[] = []
+
+  // Pass 1: expired
+  for (const tile of tiles) {
+    if (isExpired(tile, now, maxAgeMs)) {
+      toDelete.push(tile.key)
+    }
+  }
+
+  // Pass 2: LRU overflow
+  const expiredSet = new Set(toDelete)
+  const surviving = tiles.filter((t) => !expiredSet.has(t.key))
+  if (surviving.length > maxTiles) {
+    surviving.sort((a, b) => a.lastAccessed - b.lastAccessed)
+    const excess = surviving.length - maxTiles
+    for (let i = 0; i < excess; i++) {
+      toDelete.push(surviving[i].key)
+    }
+  }
+
+  return toDelete
 }
 
 // ── IDB setup ──────────────────────────────────────────────────────────────
@@ -104,7 +154,7 @@ export async function loadTile(row: number, col: number): Promise<OsmWay[] | nul
     // Expired — treat as miss and let the caller refetch. We don't delete
     // expired entries on read (too much write amplification); they'll be
     // cleaned up by the next eviction pass.
-    if (Date.now() - result.fetchedAt > MAX_AGE_MS) return null
+    if (isExpired(result, Date.now())) return null
 
     // Update lastAccessed (fire-and-forget — don't block the read on the write).
     void touchTile(key)
@@ -164,9 +214,9 @@ export async function loadAllTiles(): Promise<Map<string, OsmWay[]>> {
       req.onsuccess = () => resolve(req.result as StoredTile[])
       req.onerror = () => reject(req.error)
     })
-    const cutoff = Date.now() - MAX_AGE_MS
+    const now = Date.now()
     for (const row of rows) {
-      if (row.fetchedAt >= cutoff) {
+      if (!isExpired(row, now)) {
         result.set(row.key, row.ways)
       }
     }
@@ -215,26 +265,7 @@ async function evictOldTiles(): Promise<void> {
       req.onerror = () => reject(req.error)
     })
 
-    const now = Date.now()
-    const toDelete: string[] = []
-
-    // Pass 1: delete expired.
-    for (const row of rows) {
-      if (now - row.fetchedAt > MAX_AGE_MS) {
-        toDelete.push(row.key)
-      }
-    }
-
-    // Pass 2: if still over cap, LRU-evict by lastAccessed ascending.
-    const surviving = rows.filter((r) => !toDelete.includes(r.key))
-    if (surviving.length > MAX_TILES) {
-      surviving.sort((a, b) => a.lastAccessed - b.lastAccessed)
-      const excess = surviving.length - MAX_TILES
-      for (let i = 0; i < excess; i++) {
-        toDelete.push(surviving[i].key)
-      }
-    }
-
+    const toDelete = pickEvictionVictims(rows, Date.now())
     if (toDelete.length === 0) return
 
     await new Promise<void>((resolve, reject) => {
