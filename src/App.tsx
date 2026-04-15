@@ -17,7 +17,7 @@ import {
   getAllRegions, deleteRegion, bboxFromCenter, estimateTiles,
   type CachedRegion,
 } from './services/tileCache'
-import { injectCachedTile, latLngToTile, tileKey } from './services/overpass'
+import { injectCachedTile, latLngToTile, tileKey, primeInMemoryCacheFromIdb } from './services/overpass'
 import { logRoute } from './services/routeLog'
 import { reverseGeocode } from './services/geocoding'
 import {
@@ -250,9 +250,18 @@ export default function App() {
   // the client router will lazy-fetch tiles as needed when the user
   // searches or routes. Power users can still pre-cache regions explicitly
   // via the "download area" button in the bike-layer controls.
+  //
+  // Also primes the in-memory cache from the lazy per-tile IndexedDB store
+  // (src/services/tileStore.ts), so any tile the user has visited in the
+  // last 30 days is available instantly on this session's first render.
   useEffect(() => {
     if (tileCacheCheckedRef.current) return
     tileCacheCheckedRef.current = true
+
+    // Fire-and-forget: prime from the per-tile IDB store. Tiles loaded
+    // here will be picked up by OverlayController on its initial
+    // loadVisibleTiles call (via getCachedTile → _tileCache lookup).
+    void primeInMemoryCacheFromIdb()
 
     const loc = currentLocation ?? { lat: 52.52, lng: 13.405 }
     void (async () => {
