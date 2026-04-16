@@ -26,12 +26,19 @@ export function CarryingKid(props: SVGProps<SVGSVGElement>) {
       <line x1="47" y1="12" x2="42" y2="22" />
       <line x1="36" y1="12" x2="42" y2="12" />
       <line x1="45" y1="10" x2="49" y2="10" />
+      {/* Adult rider */}
+      <circle cx="43" cy="5" r="2.2" />
+      <line x1="43" y1="7.2" x2="42" y2="12" />
+      <line x1="43" y1="7.5" x2="47" y2="10" />
 
       {/* Hitch arm: rear axle → trailer coupling */}
       <line x1="34" y1="22" x2="22" y2="20" strokeWidth="1.4" />
 
       {/* Trailer body */}
       <rect x="5" y="13" width="17" height="12" rx="2" strokeWidth="1.4" />
+      {/* Kid passenger peeking out of the trailer */}
+      <circle cx="13.5" cy="16.5" r="2" strokeWidth="1.3" />
+      <line x1="13.5" y1="18.5" x2="13.5" y2="22" strokeWidth="1.3" />
       {/* Trailer wheels */}
       <circle cx="9.5"  cy="25" r="4" strokeWidth="1.4" />
       <circle cx="17.5" cy="25" r="4" strokeWidth="1.4" />

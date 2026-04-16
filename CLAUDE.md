@@ -69,3 +69,4 @@ See `docs/product/architecture.md` for full technical architecture.
 - Clean up dead code created by your changes
 
 @docs/process/learnings.md
+@.claude/rules/routing-changes.md

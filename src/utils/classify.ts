@@ -246,16 +246,20 @@ const SPEED_SENSITIVE_SURFACES = new Set([
 
 /**
  * Check if a surface is bad for a given travel mode.
- * - kid-starting-out: only universally bad surfaces (paving_stones are OK at walking pace)
- * - All other modes (kid-confident, kid-traffic-savvy, carrying-kid, training):
- *   universally bad + speed-sensitive surfaces (paving stones rough at speed)
+ * - Slow kid modes (kid-starting-out, kid-confident): only universally bad
+ *   surfaces. Paving stones are OK — Berlin's standard bike path material,
+ *   fine at 5–10 km/h on a kid bike.
+ * - Higher-speed modes (kid-traffic-savvy at 16 km/h, carrying-kid with a
+ *   trailer, training at 30 km/h): paving stones count as rough too.
  *
- * The kid-starting-out exception exists because at 3–10 km/h on Berlin paving
- * stones, even small kid wheels handle the joints fine. At 15+ km/h they don't.
+ * Invariant: the set of "fine" surfaces for kid-confident is a strict
+ * SUPERSET of kid-starting-out, so toggling from starting-out → confident
+ * never makes a green segment turn orange on the map.
  */
 export function isBadSurface(surface: string, profileKey: string): boolean {
   if (ALWAYS_BAD_SURFACES.has(surface)) return true
-  if (profileKey !== 'kid-starting-out' && SPEED_SENSITIVE_SURFACES.has(surface)) return true
+  const slowKidMode = profileKey === 'kid-starting-out' || profileKey === 'kid-confident'
+  if (!slowKidMode && SPEED_SENSITIVE_SURFACES.has(surface)) return true
   return false
 }
 

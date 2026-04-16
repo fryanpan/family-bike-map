@@ -26,6 +26,10 @@ export function KidConfident(props: SVGProps<SVGSVGElement>) {
       <line x1="22" y1="12" x2="17" y2="22" />
       <line x1="11" y1="12" x2="17" y2="12" />
       <line x1="20" y1="10" x2="24" y2="10" />
+      {/* Adult rider */}
+      <circle cx="18" cy="5" r="2.2" />
+      <line x1="18" y1="7.2" x2="17" y2="12" />
+      <line x1="18" y1="7.5" x2="22" y2="10" />
 
       {/* Kid bike (right, smaller) */}
       <circle cx="44" cy="25" r="5.5" strokeWidth="1.4" />
@@ -35,6 +39,10 @@ export function KidConfident(props: SVGProps<SVGSVGElement>) {
       <line x1="53.5" y1="17.5" x2="50" y2="25" strokeWidth="1.3" />
       <line x1="46" y1="17.5" x2="50" y2="17.5" strokeWidth="1.3" />
       <line x1="51.5" y1="15.5" x2="55" y2="15.5" strokeWidth="1.3" />
+      {/* Kid rider */}
+      <circle cx="49" cy="11" r="1.8" strokeWidth="1.3" />
+      <line x1="49" y1="12.8" x2="48" y2="17.5" strokeWidth="1.3" />
+      <line x1="49" y1="13" x2="53" y2="15.5" strokeWidth="1.3" />
     </svg>
   )
 }

@@ -1,8 +1,8 @@
 import type { SVGProps } from 'react'
 
-// Training — road bike with speed lines trailing behind. Sporty frame
-// geometry (lower bars, longer reach) signals adult fitness riding.
-// Single bike, no rider — the speed lines do the "fast" signalling.
+// Training — adult on a road bike with speed lines trailing behind.
+// Sporty frame geometry (lower drop bars, longer reach) signals adult
+// fitness riding; the leaned-forward rider silhouette reinforces it.
 export function Training(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -31,6 +31,10 @@ export function Training(props: SVGProps<SVGSVGElement>) {
       <line x1="29.5" y1="12" x2="35" y2="12" />
       {/* Drop handlebars — lower than seat, road style */}
       <line x1="40" y1="16" x2="44" y2="16" />
+      {/* Rider leaning forward into the drops */}
+      <circle cx="38" cy="6" r="2.2" />
+      <line x1="38" y1="8.2" x2="35" y2="12" />
+      <line x1="38" y1="8.5" x2="42" y2="16" />
     </svg>
   )
 }

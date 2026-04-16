@@ -52,12 +52,25 @@ describe('buildRoutingGraph', () => {
     expect(graph.getLinkCount()).toBe(6)
   })
 
-  test('kid-starting-out rejects mixed-traffic residential (requireCarFree)', () => {
-    // With requireCarFree, the residential way is excluded entirely.
-    // Only the car-free cycleway remains: 3 nodes, 4 edges (2 segs × 2 dirs).
+  test('kid-starting-out bridge-walks mixed-traffic residential (not accepted for riding)', () => {
+    // The residential way is rejected for RIDING under requireLowCarRisk,
+    // but stays in the graph as a bridge-walk edge at walkingSpeedKmh so
+    // the router can still reach destinations through bad-infra gaps.
+    // 4 nodes (3 from cycleway + 1 new on the residential spur).
+    // 6 edges (2 cycleway segs × 2 dirs + 1 residential seg × 2 dirs).
     const graph = buildRoutingGraph(ways, 'kid-starting-out', new Set(['Bike path']))
-    expect(graph.getNodeCount()).toBe(3)
-    expect(graph.getLinkCount()).toBe(4)
+    expect(graph.getNodeCount()).toBe(4)
+    expect(graph.getLinkCount()).toBe(6)
+
+    // The residential edge should be flagged as walking.
+    const residentialLink = graph.getLink('52.50200,13.40000', '52.50200,13.40100')
+    expect(residentialLink).toBeTruthy()
+    expect(residentialLink!.data.isWalking).toBe(true)
+
+    // The cycleway edge should be riding, not walking.
+    const cyclewayLink = graph.getLink('52.50000,13.40000', '52.50100,13.40000')
+    expect(cyclewayLink).toBeTruthy()
+    expect(cyclewayLink!.data.isWalking).toBe(false)
   })
 
   test('respects oneway', () => {
@@ -185,11 +198,13 @@ describe('routeOnGraph', () => {
     expect(walkingSegs.length).toBeGreaterThan(0)
   })
 
-  test('kid-starting-out accepts Fahrradstrasse (bike-priority) but rejects secondary-road painted lanes', () => {
+  test('kid-starting-out rides Fahrradstrasse, bridge-walks secondary painted lanes', () => {
     // Under Option C, kid-starting-out requires low car risk: either
     // physically car-free OR bike-prioritized infrastructure. Fahrradstraßen
     // qualify because cars are legally guests and in practice yield.
-    // Secondary-road painted lanes don't — ordinary traffic at speed.
+    // Secondary-road painted lanes don't — ordinary traffic at speed — so
+    // they're not accepted for RIDING, but they're still walkable on the
+    // sidewalk, so they enter the graph as bridge-walk edges.
     const fahrradWays: OsmWay[] = [{
       osmId: 40,
       itemName: null,
@@ -207,9 +222,33 @@ describe('routeOnGraph', () => {
     const gFahr = buildRoutingGraph(fahrradWays, 'kid-starting-out', preferred)
     const gPaint = buildRoutingGraph(paintedWays, 'kid-starting-out', preferred)
 
-    // Fahrradstraße accepted (bikePriority), secondary painted lane rejected.
-    expect(gFahr.getLinkCount()).toBe(2)  // both directions
-    expect(gPaint.getLinkCount()).toBe(0)
+    // Fahrradstraße: accepted for riding.
+    const fahrLink = gFahr.getLink('52.50000,13.40000', '52.50100,13.40000')
+    expect(fahrLink!.data.isWalking).toBe(false)
+
+    // Secondary painted lane: bridge-walk only.
+    const paintLink = gPaint.getLink('52.50000,13.40000', '52.50100,13.40000')
+    expect(paintLink).toBeTruthy()
+    expect(paintLink!.data.isWalking).toBe(true)
+  })
+
+  test('hard-rejects motorways and sidewalk=no roads (not even bridge-walkable)', () => {
+    const motorway: OsmWay[] = [{
+      osmId: 80,
+      itemName: null,
+      tags: { highway: 'motorway' },
+      coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+    }]
+    const noSidewalk: OsmWay[] = [{
+      osmId: 81,
+      itemName: null,
+      tags: { highway: 'primary', sidewalk: 'no' },
+      coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+    }]
+    const gMoto = buildRoutingGraph(motorway, 'kid-starting-out', new Set())
+    const gNoSw = buildRoutingGraph(noSidewalk, 'kid-starting-out', new Set())
+    expect(gMoto.getLinkCount()).toBe(0)
+    expect(gNoSw.getLinkCount()).toBe(0)
   })
 
   test('kid-starting-out accepts SF Slow Streets (residential + motor_vehicle=destination)', () => {
@@ -229,10 +268,11 @@ describe('routeOnGraph', () => {
     expect(graph.getLinkCount()).toBe(2)
   })
 
-  test('kid-starting-out rejects ordinary quiet residential (not bike-prioritized)', () => {
-    // Just a quiet residential street with no bike-priority designation.
-    // kid-confident would accept (full Furth LTS 1), kid-starting-out rejects
-    // because cars are neither absent nor structurally constrained.
+  test('kid-starting-out bridge-walks ordinary quiet residential; kid-confident rides it', () => {
+    // Quiet residential street with no bike-priority designation.
+    // kid-confident accepts it for riding (full Furth LTS 1), kid-starting-out
+    // only bridge-walks it (cars aren't structurally constrained so riding
+    // isn't safe at this level, but the sidewalk lets the rider walk across).
     const residentialWays: OsmWay[] = [{
       osmId: 43,
       itemName: null,
@@ -240,14 +280,19 @@ describe('routeOnGraph', () => {
       coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
     }]
     const gStart = buildRoutingGraph(residentialWays, 'kid-starting-out', new Set())
-    const gConf = buildRoutingGraph(residentialWays, 'kid-confident', new Set())
-    expect(gStart.getLinkCount()).toBe(0)  // kid-starting-out rejects
-    expect(gConf.getLinkCount()).toBe(2)   // kid-confident accepts
+    const gConf  = buildRoutingGraph(residentialWays, 'kid-confident',    new Set())
+
+    const startLink = gStart.getLink('52.50000,13.40000', '52.50100,13.40000')
+    const confLink  = gConf.getLink('52.50000,13.40000', '52.50100,13.40000')
+
+    expect(startLink!.data.isWalking).toBe(true)
+    expect(confLink!.data.isWalking).toBe(false)
   })
 
-  test('kid-confident accepts Fahrradstrasse but still rejects secondary-road painted lanes', () => {
+  test('kid-confident rides Fahrradstrasse, bridge-walks secondary painted lanes', () => {
     // kid-confident accepts full Furth LTS 1 including Fahrradstraßen.
-    // A secondary-road painted lane is LTS 2–3 — too stressful for confident.
+    // A secondary-road painted lane is LTS 2–3 — too stressful to RIDE for
+    // confident — but still walkable on the sidewalk.
     const fahrradWays: OsmWay[] = [{
       osmId: 42,
       itemName: null,
@@ -261,11 +306,15 @@ describe('routeOnGraph', () => {
       coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
     }]
 
-    const gFahr = buildRoutingGraph(fahrradWays, 'kid-confident', new Set(['Fahrradstrasse']))
+    const gFahr  = buildRoutingGraph(fahrradWays, 'kid-confident', new Set(['Fahrradstrasse']))
     const gPaint = buildRoutingGraph(paintedWays, 'kid-confident', new Set(['Painted bike lane']))
 
-    expect(gFahr.getLinkCount()).toBe(2)   // accepted, both directions
-    expect(gPaint.getLinkCount()).toBe(0)  // rejected
+    const fahrLink  = gFahr.getLink('52.50000,13.40000', '52.50100,13.40000')
+    const paintLink = gPaint.getLink('52.50000,13.40000', '52.50100,13.40000')
+
+    expect(fahrLink!.data.isWalking).toBe(false)
+    expect(paintLink).toBeTruthy()
+    expect(paintLink!.data.isWalking).toBe(true)
   })
 
   test('prefers lower-cost edges', () => {

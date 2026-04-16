@@ -18,8 +18,14 @@ import type { OsmWay } from '../src/utils/types'
 
 const OVERPASS_URL = 'https://bike-map.fryanpan.com/api/overpass'
 const TILE_DEGREES = 0.1
-const PROFILE_KEY = 'toddler'
-const PREFERRED = getDefaultPreferredItems(PROFILE_KEY)
+
+// All 5 modes after the Layer 1.5 refactor. External engines (Valhalla /
+// BRouter) are mode-blind, so they're compared against a single reference
+// mode (kid-confident) — the per-mode client comparison is the meaningful
+// signal after the mode-rules work.
+const MODES = ['kid-starting-out', 'kid-confident', 'kid-traffic-savvy', 'carrying-kid', 'training'] as const
+const REFERENCE_MODE = 'kid-confident'
+type ModeKey = typeof MODES[number]
 
 // ── Tile fetching (via Cloudflare Worker proxy with 30-day cache) ────────
 
@@ -98,14 +104,18 @@ async function fetchBerlinTiles(): Promise<OsmWay[]> {
 
 // ── Score external routes using Overpass data ────────────────────────────
 
-function scoreRouteCoords(coords: [number, number][], allWays: OsmWay[]): { preferredPct: number } {
+function scoreRouteCoords(
+  coords: [number, number][],
+  allWays: OsmWay[],
+  profileKey: string,
+  preferred: Set<string>,
+): { preferredPct: number } {
   let totalDist = 0, preferredDist = 0
 
   for (let i = 1; i < coords.length; i++) {
     const d = haversineM(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1])
     totalDist += d
 
-    // Find nearest way to classify this segment
     let nearestWay: OsmWay | null = null, nearestDist = Infinity
     for (const way of allWays) {
       for (const [wLat, wLng] of way.coordinates) {
@@ -114,8 +124,8 @@ function scoreRouteCoords(coords: [number, number][], allWays: OsmWay[]): { pref
       }
     }
     if (nearestWay) {
-      const item = classifyOsmTagsToItem(nearestWay.tags, PROFILE_KEY)
-      if (item && PREFERRED.has(item)) preferredDist += d
+      const item = classifyOsmTagsToItem(nearestWay.tags, profileKey)
+      if (item && preferred.has(item)) preferredDist += d
     }
   }
 
@@ -132,7 +142,7 @@ interface RouteResult {
   walkingPct: number
 }
 
-async function valhallaRoute(startLat: number, startLng: number, endLat: number, endLng: number, allWays: OsmWay[]): Promise<RouteResult | null> {
+async function valhallaRoute(startLat: number, startLng: number, endLat: number, endLng: number, allWays: OsmWay[], profileKey: string, preferred: Set<string>): Promise<RouteResult | null> {
   const body = {
     locations: [
       { lat: startLat, lon: startLng },
@@ -178,7 +188,7 @@ async function valhallaRoute(startLat: number, startLng: number, endLat: number,
       return points
     })
 
-    const { preferredPct } = scoreRouteCoords(coords, allWays)
+    const { preferredPct } = scoreRouteCoords(coords, allWays, profileKey, preferred)
 
     return {
       engine: 'valhalla',
@@ -195,7 +205,7 @@ async function valhallaRoute(startLat: number, startLng: number, endLat: number,
 
 // ── BRouter routing ──────────────────────────────────────────────────────
 
-async function brouterRoute(startLat: number, startLng: number, endLat: number, endLng: number, allWays: OsmWay[]): Promise<RouteResult | null> {
+async function brouterRoute(startLat: number, startLng: number, endLat: number, endLng: number, allWays: OsmWay[], profileKey: string, preferred: Set<string>): Promise<RouteResult | null> {
   try {
     const url = `https://brouter.de/brouter?lonlats=${startLng},${startLat}|${endLng},${endLat}&profile=safety&alternativeidx=0&format=geojson`
     const resp = await fetch(url)
@@ -206,7 +216,7 @@ async function brouterRoute(startLat: number, startLng: number, endLat: number, 
     const geom = feature.geometry.coordinates as [number, number, number][]
     const coords: [number, number][] = geom.map(([lng, lat]) => [lat, lng])
 
-    const { preferredPct } = scoreRouteCoords(coords, allWays)
+    const { preferredPct } = scoreRouteCoords(coords, allWays, profileKey, preferred)
 
     return {
       engine: 'brouter-safety',
@@ -249,121 +259,107 @@ const EXTRA_ROUTES: Array<{ origin: typeof HOME; dest: typeof HOME }> = [
 
 // ── Main ─────────────────────────────────────────────────────────────────
 
-async function main() {
-  console.log('=== Routing Benchmark: Client vs Valhalla vs BRouter (toddler mode) ===\n')
+interface RoutePair { origin: { lat: number; lng: number; label: string }; dest: { lat: number; lng: number; label: string } }
 
-  // Fetch Berlin tiles
+async function main() {
+  const skipExternal = process.argv.includes('--no-external')
+  console.log(`=== Routing Benchmark: Client (5 modes)${skipExternal ? '' : ' + Valhalla + BRouter'} ===\n`)
+
   const allWays = await fetchBerlinTiles()
 
-  // Build graph using the app's actual buildRoutingGraph
-  console.log('\nBuilding routing graph...')
-  const t0 = performance.now()
-  const graph = buildRoutingGraph(allWays, PROFILE_KEY, PREFERRED)
-  const buildMs = performance.now() - t0
-  console.log(`  Nodes: ${graph.getNodeCount()}, Edges: ${graph.getLinkCount()}, Built in ${buildMs.toFixed(0)}ms\n`)
-
-  // Run benchmarks
-  const origins = [HOME, SCHOOL]
-  const results: Array<{
-    origin: string; dest: string
-    client: RouteResult | null
-    valhalla: RouteResult | null
-    brouter: RouteResult | null
-  }> = []
-
-  for (const origin of origins) {
-    for (const dest of DESTINATIONS) {
-      console.log(`${origin.label} -> ${dest.label}`)
-
-      // Client route using the app's actual routeOnGraph
-      const t1 = performance.now()
-      const clientResult = routeOnGraph(graph, origin.lat, origin.lng, dest.lat, dest.lng, PROFILE_KEY, PREFERRED)
-      const routeMs = performance.now() - t1
-      let client: RouteResult | null = null
-      if (clientResult) {
-        console.log(`    Client route: ${routeMs.toFixed(0)}ms`)
-        client = {
-          engine: 'client',
-          distance: clientResult.distanceKm,
-          duration: clientResult.durationS / 60,
-          preferredPct: scoreRouteCoords(clientResult.coordinates, allWays).preferredPct,
-          walkingPct: clientResult.walkingPct,
-        }
-      }
-
-      const valhalla = await valhallaRoute(origin.lat, origin.lng, dest.lat, dest.lng, allWays)
-      await new Promise((r) => setTimeout(r, 2000)) // rate limit
-      const brouter = await brouterRoute(origin.lat, origin.lng, dest.lat, dest.lng, allWays)
-      await new Promise((r) => setTimeout(r, 2000))
-
-      results.push({ origin: origin.label, dest: dest.label, client, valhalla, brouter })
-    }
+  // Build all the pairs we want to test.
+  const pairs: RoutePair[] = []
+  for (const origin of [HOME, SCHOOL]) {
+    for (const dest of DESTINATIONS) pairs.push({ origin, dest })
   }
+  for (const p of EXTRA_ROUTES) pairs.push(p)
 
-  // Run extra specific route pairs
-  for (const { origin, dest } of EXTRA_ROUTES) {
-    console.log(`${origin.label} -> ${dest.label}`)
+  // Per-mode client routing: build a graph per mode and route every pair.
+  interface ModeRow { mode: ModeKey; pair: string; found: boolean; distanceKm: number; durationMin: number; preferredPct: number; walkingPct: number }
+  const modeRows: ModeRow[] = []
+  const modeGraphStats: Record<string, { nodes: number; edges: number; buildMs: number }> = {}
 
-    const t1 = performance.now()
-    const clientResult = routeOnGraph(graph, origin.lat, origin.lng, dest.lat, dest.lng, PROFILE_KEY, PREFERRED)
-    const routeMs = performance.now() - t1
-    let client: RouteResult | null = null
-    if (clientResult) {
-      console.log(`    Client route: ${routeMs.toFixed(0)}ms`)
-      client = {
-        engine: 'client',
-        distance: clientResult.distanceKm,
-        duration: clientResult.durationS / 60,
-        preferredPct: scoreRouteCoords(clientResult.coordinates, allWays).preferredPct,
-        walkingPct: clientResult.walkingPct,
-        coordinates: clientResult.coordinates,
-      }
-    }
+  for (const mode of MODES) {
+    const preferred = getDefaultPreferredItems(mode)
+    console.log(`\n[${mode}] Building graph...`)
+    const t0 = performance.now()
+    const graph = buildRoutingGraph(allWays, mode, preferred)
+    const buildMs = performance.now() - t0
+    modeGraphStats[mode] = { nodes: graph.getNodeCount(), edges: graph.getLinkCount(), buildMs }
+    console.log(`  Nodes: ${graph.getNodeCount()}, Edges: ${graph.getLinkCount()}, Built in ${buildMs.toFixed(0)}ms`)
 
-    const valhalla = await valhallaRoute(origin.lat, origin.lng, dest.lat, dest.lng, allWays)
-    await new Promise((r) => setTimeout(r, 2000))
-    const brouter = await brouterRoute(origin.lat, origin.lng, dest.lat, dest.lng, allWays)
-    await new Promise((r) => setTimeout(r, 2000))
-
-    results.push({ origin: origin.label, dest: dest.label, client, valhalla, brouter })
-  }
-
-  // Print results
-  console.log('\n=== RESULTS ===\n')
-  console.log('| Origin | Destination | Engine | Distance | Time | Preferred % | Walking % |')
-  console.log('|--------|-------------|--------|----------|------|-------------|-----------|')
-
-  for (const r of results) {
-    for (const [engine, result] of [['Client', r.client], ['Valhalla', r.valhalla], ['BRouter', r.brouter]] as const) {
+    let found = 0
+    for (const { origin, dest } of pairs) {
+      const result = routeOnGraph(graph, origin.lat, origin.lng, dest.lat, dest.lng, mode, preferred)
+      const pairLabel = `${origin.label} -> ${dest.label}`
       if (result) {
-        console.log(
-          `| ${r.origin} | ${r.dest} | ${engine} | ${result.distance.toFixed(1)} km | ${result.duration.toFixed(0)} min | ${(result.preferredPct * 100).toFixed(0)}% | ${(result.walkingPct * 100).toFixed(0)}% |`
-        )
+        found++
+        modeRows.push({
+          mode, pair: pairLabel, found: true,
+          distanceKm: result.distanceKm,
+          durationMin: result.durationS / 60,
+          preferredPct: scoreRouteCoords(result.coordinates, allWays, mode, preferred).preferredPct,
+          walkingPct: result.walkingPct,
+        })
       } else {
-        console.log(`| ${r.origin} | ${r.dest} | ${engine} | FAILED | - | - | - |`)
+        modeRows.push({ mode, pair: pairLabel, found: false, distanceKm: 0, durationMin: 0, preferredPct: 0, walkingPct: 0 })
       }
+    }
+    console.log(`  Routes found: ${found}/${pairs.length}`)
+  }
+
+  // External routers (Valhalla / BRouter) scored against the reference mode only.
+  interface ExtRow { pair: string; valhalla: RouteResult | null; brouter: RouteResult | null }
+  const extRows: ExtRow[] = []
+  if (!skipExternal) {
+    const refPreferred = getDefaultPreferredItems(REFERENCE_MODE)
+    console.log(`\n=== External routers (scored against ${REFERENCE_MODE}) ===\n`)
+    for (const { origin, dest } of pairs) {
+      console.log(`${origin.label} -> ${dest.label}`)
+      const valhalla = await valhallaRoute(origin.lat, origin.lng, dest.lat, dest.lng, allWays, REFERENCE_MODE, refPreferred)
+      await new Promise((r) => setTimeout(r, 2000))
+      const brouter = await brouterRoute(origin.lat, origin.lng, dest.lat, dest.lng, allWays, REFERENCE_MODE, refPreferred)
+      await new Promise((r) => setTimeout(r, 2000))
+      extRows.push({ pair: `${origin.label} -> ${dest.label}`, valhalla, brouter })
     }
   }
 
-  // Summary
-  console.log('\n=== SUMMARY ===\n')
-  const clientResults = results.map((r) => r.client).filter(Boolean) as RouteResult[]
-  const valhallaResults = results.map((r) => r.valhalla).filter(Boolean) as RouteResult[]
-  const brouterResults = results.map((r) => r.brouter).filter(Boolean) as RouteResult[]
-
+  // ── Results ──
+  console.log('\n=== PER-MODE SUMMARY ===\n')
+  console.log('| Mode | Found | Avg Distance | Avg Time | Avg Preferred | Avg Walk | Graph Nodes | Graph Edges |')
+  console.log('|------|-------|--------------|----------|---------------|----------|-------------|-------------|')
   const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0
+  for (const mode of MODES) {
+    const rows = modeRows.filter((r) => r.mode === mode && r.found)
+    const total = modeRows.filter((r) => r.mode === mode).length
+    const stats = modeGraphStats[mode]
+    console.log(
+      `| ${mode} | ${rows.length}/${total} | ${avg(rows.map((r) => r.distanceKm)).toFixed(1)} km | ${avg(rows.map((r) => r.durationMin)).toFixed(0)} min | ${(avg(rows.map((r) => r.preferredPct)) * 100).toFixed(0)}% | ${(avg(rows.map((r) => r.walkingPct)) * 100).toFixed(0)}% | ${stats.nodes} | ${stats.edges} |`
+    )
+  }
 
-  console.log(`Client:   ${clientResults.length}/${results.length} routes found, avg preferred: ${(avg(clientResults.map((r) => r.preferredPct)) * 100).toFixed(0)}%, avg walk: ${(avg(clientResults.map((r) => r.walkingPct)) * 100).toFixed(0)}%`)
-  console.log(`Valhalla: ${valhallaResults.length}/${results.length} routes found, avg preferred: ${(avg(valhallaResults.map((r) => r.preferredPct)) * 100).toFixed(0)}%`)
-  console.log(`BRouter:  ${brouterResults.length}/${results.length} routes found, avg preferred: ${(avg(brouterResults.map((r) => r.preferredPct)) * 100).toFixed(0)}%`)
+  console.log('\n=== PER-ROUTE × MODE (preferred %) ===\n')
+  const header = ['Pair', ...MODES]
+  console.log('| ' + header.join(' | ') + ' |')
+  console.log('|' + header.map(() => '---').join('|') + '|')
+  const uniquePairs = Array.from(new Set(modeRows.map((r) => r.pair)))
+  for (const pair of uniquePairs) {
+    const cells = [pair]
+    for (const mode of MODES) {
+      const row = modeRows.find((r) => r.mode === mode && r.pair === pair)!
+      cells.push(row.found ? `${(row.preferredPct * 100).toFixed(0)}%` : 'FAIL')
+    }
+    console.log('| ' + cells.join(' | ') + ' |')
+  }
 
-  // Per-route comparison
-  console.log('\n=== CLIENT vs VALHALLA (preferred % difference) ===\n')
-  for (const r of results) {
-    if (r.client && r.valhalla) {
-      const diff = (r.client.preferredPct - r.valhalla.preferredPct) * 100
-      const marker = diff > 5 ? '+' : diff < -5 ? '-' : '='
-      console.log(`[${marker}] ${r.origin} -> ${r.dest}: Client ${(r.client.preferredPct * 100).toFixed(0)}% vs Valhalla ${(r.valhalla.preferredPct * 100).toFixed(0)}% (${diff > 0 ? '+' : ''}${diff.toFixed(0)}pp)`)
+  if (!skipExternal) {
+    console.log('\n=== CLIENT (kid-confident) vs VALHALLA vs BROUTER ===\n')
+    for (const ext of extRows) {
+      const clientRow = modeRows.find((r) => r.mode === REFERENCE_MODE && r.pair === ext.pair)
+      const c = clientRow?.found ? `${(clientRow.preferredPct * 100).toFixed(0)}%` : 'FAIL'
+      const v = ext.valhalla ? `${(ext.valhalla.preferredPct * 100).toFixed(0)}%` : 'FAIL'
+      const b = ext.brouter ? `${(ext.brouter.preferredPct * 100).toFixed(0)}%` : 'FAIL'
+      console.log(`${ext.pair}: client=${c} valhalla=${v} brouter=${b}`)
     }
   }
 }

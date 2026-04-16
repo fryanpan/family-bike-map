@@ -1,7 +1,7 @@
 import type { SVGProps } from 'react'
 
-// Kid starting out — walking adult figure beside a small kid bike.
-// The adult is on foot next to a single kid bike, signalling the earliest
+// Kid starting out — walking adult figure beside a small kid on a bike.
+// The adult is on foot next to the kid's bike, signalling the earliest
 // riding stage where the parent walks alongside on car-free paths.
 // Landscape-aspect line art drawn to read as a bike at ~22px tall.
 export function KidStartingOut(props: SVGProps<SVGSVGElement>) {
@@ -41,6 +41,11 @@ export function KidStartingOut(props: SVGProps<SVGSVGElement>) {
       <line x1="34" y1="17.5" x2="38" y2="17.5" strokeWidth="1.3" />
       {/* Handlebar */}
       <line x1="39.5" y1="15.5" x2="43" y2="15.5" strokeWidth="1.3" />
+
+      {/* Kid rider: head above seat, torso leaning toward handlebar */}
+      <circle cx="37" cy="11" r="2" strokeWidth="1.3" />
+      <line x1="37" y1="13" x2="36" y2="17.5" strokeWidth="1.3" />
+      <line x1="37" y1="13.5" x2="41" y2="15.5" strokeWidth="1.3" />
     </svg>
   )
 }
