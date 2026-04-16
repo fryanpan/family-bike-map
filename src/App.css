@@ -1784,102 +1784,122 @@ button { font-family: inherit; cursor: pointer; }
 }
 
 /* ── Samples tab (audit panel) ────────────────────────── */
+/*
+ * Layout: single-column stack of "class cards" — each card shows one
+ * infrastructure type with 3 large images (collapsed) or up to 12
+ * (expanded). You see 3-4 types on screen at once and scroll for more.
+ * Click any thumbnail → lightbox with prev/next arrows + swipe.
+ */
 
-.samples-tab { padding: 0 4px; }
-.samples-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.samples-label { font-size: 12px; font-weight: 600; color: #374151; white-space: nowrap; }
+.st { padding: 0 2px; }
+.st-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.st-label { font-size: 12px; font-weight: 600; color: #374151; white-space: nowrap; }
 
-.samples-section { margin-bottom: 16px; }
-.samples-section-title {
-  font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
-  margin: 0 0 8px; padding: 4px 8px; border-radius: 4px;
+.st-section { margin-bottom: 18px; }
+.st-heading {
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+  margin: 0 0 8px; padding: 3px 8px; border-radius: 4px; display: inline-block;
 }
-.samples-section-preferred { color: #059669; background: #ecfdf5; }
-.samples-section-other { color: #d97706; background: #fffbeb; }
+.st-heading-pref { color: #059669; background: #ecfdf5; }
+.st-heading-other { color: #d97706; background: #fffbeb; }
 
-.samples-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 10px;
-}
-
-.samples-card {
+/* ── Class card ──────────────────────────────────────── */
+.sc {
   border: 1px solid #e5e7eb; border-radius: 8px; background: #fff;
-  overflow: hidden; transition: box-shadow 0.15s;
+  margin-bottom: 10px; overflow: hidden;
 }
-.samples-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-.samples-card-preferred { border-left: 3px solid #10b981; }
-
-.samples-card-header {
+.sc-preferred { border-left: 3px solid #10b981; }
+.sc-header {
   display: flex; align-items: center; gap: 6px;
-  padding: 6px 10px; cursor: pointer; user-select: none;
-  border-bottom: 1px solid #f3f4f6;
+  padding: 7px 10px; border-bottom: 1px solid #f3f4f6;
 }
-.samples-card-title { font-size: 13px; font-weight: 600; color: #111827; flex: 1; }
-.samples-card-count { font-size: 11px; color: #9ca3af; }
-.samples-card-expand {
+.sc-title { font-size: 13px; font-weight: 600; color: #111827; flex: 1; min-width: 0; }
+.sc-count { font-size: 11px; color: #9ca3af; white-space: nowrap; }
+.sc-toggle {
   font-size: 11px; color: #6366f1; font-weight: 500; cursor: pointer;
+  background: none; border: none; padding: 0; white-space: nowrap;
 }
-.samples-card-expand:hover { text-decoration: underline; }
+.sc-toggle:hover { text-decoration: underline; }
 
-.samples-card-grid {
+/* Image grid — 3-col, each image fills its cell with a generous height.
+   The card takes full width of the panel, so on a ~400px-wide audit
+   panel each image is ~125px wide × ~95px tall. On wider panels they
+   grow proportionally. */
+.sc-images {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;
   padding: 3px;
 }
-.samples-card-grid-expanded {
-  grid-template-columns: repeat(4, 1fr);
-}
-
-.samples-thumb {
+.sc-img-wrap {
   position: relative; aspect-ratio: 4/3; overflow: hidden;
   border-radius: 4px; cursor: pointer; background: #f3f4f6;
   display: flex; align-items: center; justify-content: center;
 }
-.samples-thumb img {
+.sc-img-wrap img {
   width: 100%; height: 100%; object-fit: cover;
   transition: transform 0.15s;
 }
-.samples-thumb:hover img { transform: scale(1.05); }
-.samples-thumb-overlay {
+.sc-img-wrap:hover img { transform: scale(1.05); }
+.sc-img-label {
   position: absolute; bottom: 0; left: 0; right: 0;
-  padding: 2px 4px; background: linear-gradient(transparent, rgba(0,0,0,0.55));
+  padding: 2px 5px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.55));
   pointer-events: none;
 }
-.samples-thumb-name {
+.sc-img-label span {
   font-size: 10px; color: #fff; font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   display: block;
 }
-.samples-thumb-loading {
-  background: #f9fafb; color: #9ca3af; font-size: 11px;
+.sc-img-loading { background: #f9fafb; }
+
+/* ── Lightbox carousel ───────────────────────────────── */
+.lb-backdrop {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.8);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.lb-container {
+  position: relative; background: #fff; border-radius: 10px;
+  overflow: hidden; max-width: 780px; width: 100%; max-height: 90vh;
+  display: flex; flex-direction: column;
+}
+.lb-close {
+  position: absolute; top: 8px; right: 10px; z-index: 2;
+  background: rgba(0,0,0,0.5); color: #fff; border: none;
+  width: 32px; height: 32px; border-radius: 50%; font-size: 20px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+}
+.lb-close:hover { background: rgba(0,0,0,0.7); }
+
+.lb-counter {
+  position: absolute; top: 10px; left: 12px; z-index: 2;
+  font-size: 12px; font-weight: 600; color: #fff;
+  background: rgba(0,0,0,0.45); padding: 3px 10px; border-radius: 12px;
 }
 
-/* Lightbox */
-.samples-lightbox {
-  position: fixed; inset: 0; z-index: 9999;
-  background: rgba(0,0,0,0.75); display: flex;
-  align-items: center; justify-content: center;
-  padding: 24px;
-}
-.samples-lightbox-inner {
-  background: #fff; border-radius: 10px; overflow: hidden;
-  max-width: 720px; width: 100%; max-height: 90vh;
-  display: flex; flex-direction: column; position: relative;
-}
-.samples-lightbox-close {
-  position: absolute; top: 8px; right: 10px; z-index: 1;
-  background: rgba(0,0,0,0.5); color: #fff; border: none;
-  width: 28px; height: 28px; border-radius: 50%; font-size: 18px;
+.lb-arrow {
+  position: absolute; top: 50%; transform: translateY(-70%); z-index: 2;
+  background: rgba(255,255,255,0.85); color: #111; border: none;
+  width: 36px; height: 36px; border-radius: 50%; font-size: 22px;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15); line-height: 1;
+  transition: background 0.12s;
 }
-.samples-lightbox-close:hover { background: rgba(0,0,0,0.7); }
-.samples-lightbox-img {
-  width: 100%; max-height: 60vh; object-fit: contain; background: #000;
+.lb-arrow:hover { background: #fff; }
+.lb-arrow-left { left: 10px; }
+.lb-arrow-right { right: 10px; }
+
+.lb-img {
+  width: 100%; max-height: 65vh; object-fit: contain; background: #000;
+  -webkit-user-select: none; user-select: none;
 }
-.samples-lightbox-meta { padding: 12px 16px; }
-.samples-lightbox-name { font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 6px; }
-.samples-lightbox-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-.samples-tag {
+
+.lb-meta { padding: 10px 14px; }
+.lb-name { font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 5px; }
+.lb-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.lb-tag {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 11px; color: #4b5563; background: #f3f4f6;
   padding: 2px 6px; border-radius: 3px;

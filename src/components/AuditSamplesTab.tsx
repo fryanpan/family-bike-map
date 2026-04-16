@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { getStreetImage } from '../services/mapillary'
 import { getDefaultPreferredItems } from '../utils/classify'
 import type { MapillaryImage } from '../services/mapillary'
@@ -29,26 +29,84 @@ interface FoundImage {
   image: MapillaryImage
 }
 
-// ── Lightbox: full-screen image + tags ──────────────────────────────────
+// ── Lightbox with prev/next carousel ────────────────────────────────────
 
-function Lightbox({ item, onClose }: { item: FoundImage; onClose: () => void }) {
+function Lightbox({
+  items,
+  index,
+  onClose,
+  onNav,
+}: {
+  items: FoundImage[]
+  index: number
+  onClose: () => void
+  onNav: (idx: number) => void
+}) {
+  const touchStartX = useRef<number | null>(null)
+  const item = items[index]
+
+  const goPrev = useCallback(() => {
+    if (index > 0) onNav(index - 1)
+  }, [index, onNav])
+
+  const goNext = useCallback(() => {
+    if (index < items.length - 1) onNav(index + 1)
+  }, [index, items.length, onNav])
+
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowLeft') goPrev()
+      if (e.key === 'ArrowRight') goNext()
+    }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  }, [onClose, goPrev, goNext])
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX
+  }
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return
+    const dx = e.changedTouches[0].clientX - touchStartX.current
+    if (dx > 60) goPrev()
+    else if (dx < -60) goNext()
+    touchStartX.current = null
+  }
 
   const tags = TAG_KEYS.filter((k) => item.way.tags[k]).map((k) => `${k}=${item.way.tags[k]}`)
 
   return (
-    <div className="samples-lightbox" onClick={onClose}>
-      <div className="samples-lightbox-inner" onClick={(e) => e.stopPropagation()}>
-        <button className="samples-lightbox-close" onClick={onClose}>×</button>
-        <img src={item.image.thumbUrl} alt="" className="samples-lightbox-img" />
-        <div className="samples-lightbox-meta">
-          {item.way.tags.name && <div className="samples-lightbox-name">{item.way.tags.name}</div>}
-          <div className="samples-lightbox-tags">
-            {tags.map((t, i) => <span key={i} className="samples-tag">{t}</span>)}
+    <div className="lb-backdrop" onClick={onClose}>
+      <div
+        className="lb-container"
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+      >
+        <button className="lb-close" onClick={onClose}>×</button>
+
+        {/* Counter */}
+        <div className="lb-counter">{index + 1} / {items.length}</div>
+
+        {/* Prev arrow */}
+        {index > 0 && (
+          <button className="lb-arrow lb-arrow-left" onClick={goPrev}>‹</button>
+        )}
+
+        {/* Image */}
+        <img src={item.image.thumbUrl} alt="" className="lb-img" />
+
+        {/* Next arrow */}
+        {index < items.length - 1 && (
+          <button className="lb-arrow lb-arrow-right" onClick={goNext}>›</button>
+        )}
+
+        {/* Meta bar */}
+        <div className="lb-meta">
+          {item.way.tags.name && <div className="lb-name">{item.way.tags.name}</div>}
+          <div className="lb-tags">
+            {tags.map((t, i) => <span key={i} className="lb-tag">{t}</span>)}
           </div>
         </div>
       </div>
@@ -56,7 +114,7 @@ function Lightbox({ item, onClose }: { item: FoundImage; onClose: () => void }) 
   )
 }
 
-// ── ClassCard: one infrastructure type as a compact card ────────────────
+// ── ClassCard: one infrastructure type ──────────────────────────────────
 
 function ClassCard({
   classification,
@@ -72,7 +130,6 @@ function ClassCard({
   const [expanded, setExpanded] = useState(false)
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
 
-  const target = expanded ? EXPANDED_IMAGES : INITIAL_IMAGES
   const candidates = useMemo(() => shuffle(ways.filter((w) => w.center)), [ways])
 
   useEffect(() => {
@@ -101,37 +158,51 @@ function ClassCard({
     return () => { cancelled = true }
   }, [candidates])
 
+  const target = expanded ? EXPANDED_IMAGES : INITIAL_IMAGES
   const visible = found.slice(0, target)
   const hasMore = found.length > INITIAL_IMAGES && !expanded
+
+  const openLightbox = useCallback((i: number) => setLightboxIdx(i), [])
   const closeLightbox = useCallback(() => setLightboxIdx(null), [])
+  const navLightbox = useCallback((i: number) => setLightboxIdx(i), [])
 
   return (
-    <div className={`samples-card${isPreferred ? ' samples-card-preferred' : ''}`}>
-      <div className="samples-card-header" onClick={() => setExpanded(!expanded)}>
-        <span className="samples-card-title">{classification}</span>
-        <span className="samples-card-count">{ways.length} ways</span>
-        {hasMore && <span className="samples-card-expand">Show more</span>}
-        {expanded && <span className="samples-card-expand">Show less</span>}
+    <div className={`sc${isPreferred ? ' sc-preferred' : ''}`}>
+      {/* Header row */}
+      <div className="sc-header">
+        <span className="sc-title">{classification}</span>
+        <span className="sc-count">{ways.length} ways</span>
+        {(hasMore || expanded) && (
+          <button className="sc-toggle" onClick={() => setExpanded(!expanded)}>
+            {expanded ? 'Show less' : `Show more (${found.length})`}
+          </button>
+        )}
       </div>
 
-      <div className={`samples-card-grid${expanded ? ' samples-card-grid-expanded' : ''}`}>
+      {/* Image grid: 3 columns collapsed, 3 columns expanded (but more rows) */}
+      <div className="sc-images">
         {visible.map((s, i) => (
-          <div key={i} className="samples-thumb" onClick={() => setLightboxIdx(i)}>
+          <div key={i} className="sc-img-wrap" onClick={() => openLightbox(i)}>
             <img src={s.image.thumbUrl} alt={classification} loading="lazy" />
-            <div className="samples-thumb-overlay">
-              {s.way.tags.name && <span className="samples-thumb-name">{s.way.tags.name}</span>}
+            <div className="sc-img-label">
+              {s.way.tags.name && <span>{s.way.tags.name}</span>}
             </div>
           </div>
         ))}
         {searching && visible.length < target && (
-          <div className="samples-thumb samples-thumb-loading">
-            <div className="spinner" style={{ width: 18, height: 18 }} />
+          <div className="sc-img-wrap sc-img-loading">
+            <div className="spinner" style={{ width: 20, height: 20 }} />
           </div>
         )}
       </div>
 
       {lightboxIdx !== null && visible[lightboxIdx] && (
-        <Lightbox item={visible[lightboxIdx]} onClose={closeLightbox} />
+        <Lightbox
+          items={visible}
+          index={lightboxIdx}
+          onClose={closeLightbox}
+          onNav={navLightbox}
+        />
       )}
     </div>
   )
@@ -173,9 +244,9 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
   }
 
   return (
-    <div className="samples-tab">
-      <div className="samples-controls">
-        <label className="samples-label">Travel Mode</label>
+    <div className="st">
+      <div className="st-controls">
+        <label className="st-label">Travel Mode</label>
         <select
           className="audit-select"
           value={travelMode}
@@ -190,24 +261,20 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
       </div>
 
       {preferred.size > 0 && (
-        <div className="samples-section">
-          <h2 className="samples-section-title samples-section-preferred">Preferred</h2>
-          <div className="samples-grid">
-            {[...preferred.entries()].map(([cls, ways]) => (
-              <ClassCard key={cls} classification={cls} ways={ways} isPreferred />
-            ))}
-          </div>
+        <div className="st-section">
+          <h2 className="st-heading st-heading-pref">Preferred</h2>
+          {[...preferred.entries()].map(([cls, ways]) => (
+            <ClassCard key={cls} classification={cls} ways={ways} isPreferred />
+          ))}
         </div>
       )}
 
       {other.size > 0 && (
-        <div className="samples-section">
-          <h2 className="samples-section-title samples-section-other">Other</h2>
-          <div className="samples-grid">
-            {[...other.entries()].map(([cls, ways]) => (
-              <ClassCard key={cls} classification={cls} ways={ways} isPreferred={false} />
-            ))}
-          </div>
+        <div className="st-section">
+          <h2 className="st-heading st-heading-other">Other</h2>
+          {[...other.entries()].map(([cls, ways]) => (
+            <ClassCard key={cls} classification={cls} ways={ways} isPreferred={false} />
+          ))}
         </div>
       )}
     </div>
