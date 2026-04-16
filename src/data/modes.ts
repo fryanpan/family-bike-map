@@ -105,7 +105,12 @@ export interface ModeRule {
 // Surfaces universally OK for paved riding across all modes.
 const PAVED = new Set(['asphalt', 'concrete', 'paving_stones', 'compacted'])
 
-// Kid modes additionally tolerate softer natural surfaces at low speed.
+// Slow kid modes additionally tolerate softer natural surfaces (wooden
+// boardwalks, fine gravel park paths). Both kid-starting-out and
+// kid-confident use this set — the invariant is that as kid skill
+// increases, the accepted-for-riding surface set grows monotonically,
+// so toggling from starting-out → confident can never turn a rideable
+// surface into a walking bridge.
 const PAVED_AND_SOFT = new Set([...PAVED, 'wood', 'fine_gravel'])
 
 // Training and carrying-kid are strictest — no paving stones (too bumpy).
@@ -160,7 +165,10 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
       'designation. Can ride short cobblestone stretches slowly as a learning opportunity.',
     ltsAccept: [1],
     // No requireLowCarRisk — accepts full Furth LTS 1 including ordinary quiet residential.
-    surfaceOk: PAVED,
+    // Uses PAVED_AND_SOFT (superset of kid-starting-out's surface set) so
+    // toggling up in skill never rejects an edge that the stricter mode
+    // was willing to ride.
+    surfaceOk: PAVED_AND_SOFT,
     cobbleHandling: 'slow_pace',
     // Kid-pedal bikes often max out around 10 km/h — kid has to move their legs fast
     ridingSpeedKmh: 10,
