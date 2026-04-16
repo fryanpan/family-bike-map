@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { getStreetImage } from '../services/mapillary'
 import { getDefaultPreferredItems } from '../utils/classify'
 import type { MapillaryImage } from '../services/mapillary'
@@ -20,31 +20,69 @@ function shuffle<T>(arr: T[]): T[] {
   return out
 }
 
-const TARGET_PER_CLASS = 25
-const TAG_KEYS = ['highway', 'cycleway', 'cycleway:right', 'cycleway:left', 'cycleway:both', 'surface', 'smoothness', 'maxspeed', 'bicycle', 'segregated']
+const INITIAL_IMAGES = 3
+const EXPANDED_IMAGES = 12
+const TAG_KEYS = ['highway', 'cycleway', 'cycleway:right', 'cycleway:left', 'cycleway:both', 'surface', 'smoothness', 'maxspeed', 'bicycle', 'segregated', 'bicycle_road']
 
 interface FoundImage {
   way: AuditWay
   image: MapillaryImage
 }
 
-function ClassSection({ classification, ways }: { classification: string; ways: AuditWay[] }) {
+// ── Lightbox: full-screen image + tags ──────────────────────────────────
+
+function Lightbox({ item, onClose }: { item: FoundImage; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const tags = TAG_KEYS.filter((k) => item.way.tags[k]).map((k) => `${k}=${item.way.tags[k]}`)
+
+  return (
+    <div className="samples-lightbox" onClick={onClose}>
+      <div className="samples-lightbox-inner" onClick={(e) => e.stopPropagation()}>
+        <button className="samples-lightbox-close" onClick={onClose}>×</button>
+        <img src={item.image.thumbUrl} alt="" className="samples-lightbox-img" />
+        <div className="samples-lightbox-meta">
+          {item.way.tags.name && <div className="samples-lightbox-name">{item.way.tags.name}</div>}
+          <div className="samples-lightbox-tags">
+            {tags.map((t, i) => <span key={i} className="samples-tag">{t}</span>)}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── ClassCard: one infrastructure type as a compact card ────────────────
+
+function ClassCard({
+  classification,
+  ways,
+  isPreferred,
+}: {
+  classification: string
+  ways: AuditWay[]
+  isPreferred: boolean
+}) {
   const [found, setFound] = useState<FoundImage[]>([])
   const [searching, setSearching] = useState(false)
-  const [done, setDone] = useState(false)
-  const [expanded, setExpanded] = useState<number | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
 
+  const target = expanded ? EXPANDED_IMAGES : INITIAL_IMAGES
   const candidates = useMemo(() => shuffle(ways.filter((w) => w.center)), [ways])
 
   useEffect(() => {
     let cancelled = false
     setFound([])
-    setDone(false)
     setSearching(true)
 
     async function search() {
       const results: FoundImage[] = []
-      for (let i = 0; i < candidates.length && results.length < TARGET_PER_CLASS; i += 5) {
+      for (let i = 0; i < candidates.length && results.length < EXPANDED_IMAGES; i += 5) {
         const batch = candidates.slice(i, i + 5)
         const images = await Promise.all(
           batch.map((w) => getStreetImage(w.center!.lat, w.center!.lon))
@@ -54,65 +92,56 @@ function ClassSection({ classification, ways }: { classification: string; ways: 
           if (images[j]) results.push({ way: batch[j], image: images[j]! })
         }
         if (!cancelled) setFound([...results])
+        if (results.length >= EXPANDED_IMAGES) break
       }
-      if (!cancelled) { setSearching(false); setDone(true) }
+      if (!cancelled) setSearching(false)
     }
 
     search()
     return () => { cancelled = true }
   }, [candidates])
 
+  const visible = found.slice(0, target)
+  const hasMore = found.length > INITIAL_IMAGES && !expanded
+  const closeLightbox = useCallback(() => setLightboxIdx(null), [])
+
   return (
-    <div className="audit-class-section">
-      <h3 className="audit-class-title">
-        {classification}
-        <span className="audit-class-count">
-          {found.length}{searching ? '+' : ''} / {TARGET_PER_CLASS}
-        </span>
-      </h3>
-      <div className="audit-class-grid">
-        {found.map((s, i) => {
-          const isExpanded = expanded === i
-          const allTags = TAG_KEYS
-            .filter((k) => s.way.tags[k])
-            .map((k) => `${k}=${s.way.tags[k]}`)
-          const visibleTags = isExpanded ? allTags : allTags.slice(0, 3)
-          const hiddenCount = allTags.length - 3
-          return (
-            <div
-              key={i}
-              className={`audit-class-card${isExpanded ? ' audit-class-card-expanded' : ''}`}
-              onClick={() => setExpanded(isExpanded ? null : i)}
-            >
-              <img
-                src={s.image.thumbUrl}
-                alt={classification}
-                className="audit-class-img"
-                loading="lazy"
-              />
-              <div className="audit-class-card-meta">
-                {s.way.tags.name && <span className="audit-class-name">{s.way.tags.name}</span>}
-                {visibleTags.map((t, ti) => (
-                  <span key={ti} className="audit-class-tag">{t}</span>
-                ))}
-                {!isExpanded && hiddenCount > 0 && (
-                  <span className="audit-class-more">+{hiddenCount} more</span>
-                )}
-              </div>
-            </div>
-          )
-        })}
+    <div className={`samples-card${isPreferred ? ' samples-card-preferred' : ''}`}>
+      <div className="samples-card-header" onClick={() => setExpanded(!expanded)}>
+        <span className="samples-card-title">{classification}</span>
+        <span className="samples-card-count">{ways.length} ways</span>
+        {hasMore && <span className="samples-card-expand">Show more</span>}
+        {expanded && <span className="samples-card-expand">Show less</span>}
       </div>
-      {searching && <div className="audit-class-loading">Searching for images…</div>}
-      {done && found.length === 0 && <div className="audit-class-loading">No Mapillary images found</div>}
+
+      <div className={`samples-card-grid${expanded ? ' samples-card-grid-expanded' : ''}`}>
+        {visible.map((s, i) => (
+          <div key={i} className="samples-thumb" onClick={() => setLightboxIdx(i)}>
+            <img src={s.image.thumbUrl} alt={classification} loading="lazy" />
+            <div className="samples-thumb-overlay">
+              {s.way.tags.name && <span className="samples-thumb-name">{s.way.tags.name}</span>}
+            </div>
+          </div>
+        ))}
+        {searching && visible.length < target && (
+          <div className="samples-thumb samples-thumb-loading">
+            <div className="spinner" style={{ width: 18, height: 18 }} />
+          </div>
+        )}
+      </div>
+
+      {lightboxIdx !== null && visible[lightboxIdx] && (
+        <Lightbox item={visible[lightboxIdx]} onClose={closeLightbox} />
+      )}
     </div>
   )
 }
 
+// ── Main tab ────────────────────────────────────────────────────────────
+
 export default function AuditSamplesTab({ scan, regionRules }: Props) {
   const [travelMode, setTravelMode] = useState('kid-starting-out')
 
-  // Group ways by classification for the selected travel mode, split into preferred/other
   const { preferred, other } = useMemo(() => {
     if (!scan) return { preferred: new Map<string, AuditWay[]>(), other: new Map<string, AuditWay[]>() }
 
@@ -121,7 +150,6 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
     const otherMap = new Map<string, AuditWay[]>()
 
     for (const group of scan.groups) {
-      // Reclassify with the selected travel mode
       const sampleTags = group.samples[0]?.tags
       const cls = sampleTags
         ? (classifyOsmTagsToItem(sampleTags, travelMode, regionRules) ?? 'Unclassified')
@@ -145,9 +173,9 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
   }
 
   return (
-    <div className="audit-samples-tab">
-      <div className="audit-samples-controls">
-        <label className="audit-samples-label">Travel Mode</label>
+    <div className="samples-tab">
+      <div className="samples-controls">
+        <label className="samples-label">Travel Mode</label>
         <select
           className="audit-select"
           value={travelMode}
@@ -162,20 +190,24 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
       </div>
 
       {preferred.size > 0 && (
-        <div className="audit-samples-group">
-          <h2 className="audit-samples-group-title audit-samples-preferred">Preferred</h2>
-          {[...preferred.entries()].map(([cls, ways]) => (
-            <ClassSection key={cls} classification={cls} ways={ways} />
-          ))}
+        <div className="samples-section">
+          <h2 className="samples-section-title samples-section-preferred">Preferred</h2>
+          <div className="samples-grid">
+            {[...preferred.entries()].map(([cls, ways]) => (
+              <ClassCard key={cls} classification={cls} ways={ways} isPreferred />
+            ))}
+          </div>
         </div>
       )}
 
       {other.size > 0 && (
-        <div className="audit-samples-group">
-          <h2 className="audit-samples-group-title audit-samples-other">Other</h2>
-          {[...other.entries()].map(([cls, ways]) => (
-            <ClassSection key={cls} classification={cls} ways={ways} />
-          ))}
+        <div className="samples-section">
+          <h2 className="samples-section-title samples-section-other">Other</h2>
+          <div className="samples-grid">
+            {[...other.entries()].map(([cls, ways]) => (
+              <ClassCard key={cls} classification={cls} ways={ways} isPreferred={false} />
+            ))}
+          </div>
         </div>
       )}
     </div>
