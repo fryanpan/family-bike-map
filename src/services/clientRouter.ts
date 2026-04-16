@@ -80,10 +80,20 @@ function coordId(lat: number, lng: number): string {
 //      drops to the mode's slowSpeedKmh (light user-level override —
 //      doesn't reject, just nudges).
 //
-// Walking-only OSM ways (highway=footway without bicycle=yes) bypass the
-// mode rule and enter the graph as bridge-walk edges at the mode's
-// walkingSpeedKmh — this lets the router use a short sidewalk detour to
-// cross bad-infra gaps when no cycling alternative exists.
+// Bridge-walking is a core innovation: any edge a mode does NOT want to
+// ride on — either because the LTS is too high for that rider, the
+// surface is rejected (e.g. cobbles for training), or it's a
+// pedestrian-only footway — still enters the graph at walkingSpeedKmh
+// with isWalking=true. The rider "dismounts and walks the bike on the
+// sidewalk" across the bad segment. Speed-based cost (cost = dist/speed)
+// makes these edges very expensive per meter so the router only uses
+// them for short unavoidable gaps, but crucially they keep the graph
+// connected. Without this, a kid-confident trip across Berlin fails
+// the moment it needs to cross a Hauptstraße.
+//
+// Exception: motorway/trunk-class highways. These legally prohibit foot
+// traffic and often have no sidewalk — you genuinely can't walk them.
+// These stay hard-rejected.
 
 function resolveRule(profileKey: string) {
   return MODE_RULES[profileKey as RideMode] ?? MODE_RULES['kid-starting-out']
@@ -105,6 +115,55 @@ function isWalkingOnly(tags: Record<string, string>): boolean {
     return true
   }
   return false
+}
+
+/**
+ * Whether an edge rejected by the mode rule can still be used as a
+ * bridge-walk fallback (dismount and walk the bike on the sidewalk).
+ *
+ * A bad road is only walkable if there's somewhere to put your feet.
+ *
+ * Hard-reject:
+ *   - Motorway / trunk class: legally forbidden to pedestrians.
+ *   - Explicit `foot=no` / `access=no|private` / construction / raceway.
+ *   - Motor-traffic road classes where `sidewalk=no|none` (or both sides
+ *     explicitly `no`). Untagged sidewalk defaults to "present" because
+ *     that's the urban norm and OSM convention is to tag `sidewalk=no`
+ *     explicitly when absent.
+ *
+ * Self-walkable (no sidewalk needed — you walk on the way itself):
+ *   cycleway, path, track, footway, pedestrian, steps, living_street,
+ *   bridleway, service.
+ */
+function isBridgeWalkable(tags: Record<string, string>): boolean {
+  const hw = tags.highway ?? ''
+
+  // Hard-reject pedestrian-hostile road classes and explicit bans.
+  if (hw === 'motorway' || hw === 'motorway_link') return false
+  if (hw === 'trunk' || hw === 'trunk_link') return false
+  if (hw === 'raceway' || hw === 'construction' || hw === 'proposed') return false
+  if (tags.foot === 'no') return false
+  if (tags.access === 'no' || tags.access === 'private') return false
+
+  // Ways you walk on directly — no separate sidewalk needed.
+  if (
+    hw === 'cycleway' || hw === 'path' || hw === 'track' ||
+    hw === 'footway' || hw === 'pedestrian' || hw === 'steps' ||
+    hw === 'living_street' || hw === 'bridleway' || hw === 'service'
+  ) return true
+
+  // Motor-traffic road classes: require a sidewalk tag that isn't "no".
+  const sidewalk      = tags.sidewalk          ?? ''
+  const sidewalkBoth  = tags['sidewalk:both']  ?? ''
+  const sidewalkLeft  = tags['sidewalk:left']  ?? ''
+  const sidewalkRight = tags['sidewalk:right'] ?? ''
+  const explicitlyNone =
+    sidewalk === 'no' || sidewalk === 'none' ||
+    sidewalkBoth === 'no' ||
+    (sidewalkLeft === 'no' && sidewalkRight === 'no')
+  if (explicitlyNone) return false
+
+  return true
 }
 
 /**
@@ -151,9 +210,20 @@ export function buildRoutingGraph(
       // accepted and at what speed.
       const classification = classifyEdge(tags)
       const decision = applyModeRule(rule, classification)
-      if (!decision.accepted) continue  // mode rule rejects this edge
-      speedKmh = decision.speedKmh
-      isWalking = decision.isWalking
+      if (decision.accepted) {
+        speedKmh = decision.speedKmh
+        isWalking = decision.isWalking
+      } else if (isBridgeWalkable(tags)) {
+        // Mode rule rejected this edge (too stressful, bad surface, …)
+        // but it's still walkable on the sidewalk. Add as a bridge-walk
+        // edge at walkingSpeedKmh. The router will only pick it for
+        // short unavoidable gaps because walking cost dominates.
+        speedKmh = rule.walkingSpeedKmh
+        isWalking = true
+      } else {
+        // Motorway / trunk / explicit no-foot — genuinely unusable.
+        continue
+      }
     }
 
     // Light user-preference nudge: if the user has toggled off the legend
