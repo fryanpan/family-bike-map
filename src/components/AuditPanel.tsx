@@ -11,13 +11,22 @@ import { fetchRules } from '../services/rules'
 import type { RegionRules } from '../services/rules'
 
 type FilterStatus = 'all' | 'classified' | 'unclassified'
-type ActiveTab = 'groups' | 'rules' | 'legend' | 'samples' | 'eval'
+type ActiveTab = 'samples' | 'groups' | 'rules' | 'legend' | 'eval'
+const VALID_TABS: ActiveTab[] = ['samples', 'groups', 'rules', 'legend', 'eval']
+
+function parseTabFromUrl(): ActiveTab {
+  const params = new URLSearchParams(window.location.search)
+  const val = params.get('admin')
+  if (val && VALID_TABS.includes(val as ActiveTab)) return val as ActiveTab
+  return 'samples'
+}
 
 interface Props {
   onClose: () => void
+  initialTab?: ActiveTab
 }
 
-export default function AuditPanel({ onClose }: Props) {
+export default function AuditPanel({ onClose, initialTab }: Props) {
   const [selectedCity, setSelectedCity] = useState(CITY_PRESETS[0].name)
   const [scan, setScan] = useState<CityScan | null>(null)
   const [scanning, setScanning] = useState(false)
@@ -30,8 +39,15 @@ export default function AuditPanel({ onClose }: Props) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const [filterText, setFilterText] = useState('')
 
-  // Tabs
-  const [activeTab, setActiveTab] = useState<ActiveTab>('groups')
+  // Tabs — default to samples (the main admin view)
+  const [activeTab, setActiveTabRaw] = useState<ActiveTab>(initialTab ?? parseTabFromUrl())
+
+  const setActiveTab = useCallback((tab: ActiveTab) => {
+    setActiveTabRaw(tab)
+    const params = new URLSearchParams(window.location.search)
+    params.set('admin', tab)
+    window.history.replaceState({}, '', `?${params.toString()}`)
+  }, [])
 
   // Region rules (KV-backed)
   const [rules, setRulesRaw] = useState<RegionRules>({ rules: [], legendItems: [] })
@@ -144,6 +160,12 @@ export default function AuditPanel({ onClose }: Props) {
 
       <div className="audit-tabs">
         <button
+          className={`audit-tab${activeTab === 'samples' ? ' audit-tab-active' : ''}`}
+          onClick={() => setActiveTab('samples')}
+        >
+          Samples
+        </button>
+        <button
           className={`audit-tab${activeTab === 'groups' ? ' audit-tab-active' : ''}`}
           onClick={() => setActiveTab('groups')}
         >
@@ -160,12 +182,6 @@ export default function AuditPanel({ onClose }: Props) {
           onClick={() => setActiveTab('legend')}
         >
           Legend Items
-        </button>
-        <button
-          className={`audit-tab${activeTab === 'samples' ? ' audit-tab-active' : ''}`}
-          onClick={() => setActiveTab('samples')}
-        >
-          Samples
         </button>
         <button
           className={`audit-tab${activeTab === 'eval' ? ' audit-tab-active' : ''}`}

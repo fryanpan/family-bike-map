@@ -174,7 +174,10 @@ export default function App() {
   const [idbReady, setIdbReady] = useState(false)
   const overlayEnabled = idbReady
   const [overlayStatus, setOverlayStatus]   = useState('idle')
-  const [auditOpen, setAuditOpen]           = useState(false)
+  const [auditOpen, setAuditOpen]           = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.has('admin')
+  })
 
   // Region classification rules (fetched from KV based on map viewport)
   const [regionRules, setRegionRules] = useState<ClassificationRule[]>([])
@@ -603,7 +606,14 @@ export default function App() {
           <div className="map-bike-layer-buttons">
             <button
               className="audit-gear-btn"
-              onClick={() => setAuditOpen(true)}
+              onClick={() => {
+                setAuditOpen(true)
+                const params = new URLSearchParams(window.location.search)
+                if (!params.has('admin')) {
+                  params.set('admin', 'samples')
+                  window.history.pushState({}, '', `?${params.toString()}`)
+                }
+              }}
               title="Classification audit"
             >
               ⚙️
@@ -698,7 +708,12 @@ export default function App() {
 
       {auditOpen && (
         <Suspense fallback={null}>
-          <AuditPanel onClose={() => setAuditOpen(false)} />
+          <AuditPanel onClose={() => {
+            setAuditOpen(false)
+            const params = new URLSearchParams(window.location.search)
+            params.delete('admin')
+            window.history.pushState({}, '', params.toString() ? `?${params.toString()}` : window.location.pathname)
+          }} />
         </Suspense>
       )}
     </div>
