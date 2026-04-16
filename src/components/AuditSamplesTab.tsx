@@ -196,9 +196,9 @@ function ClassCard({
         )}
       </div>
 
-      {lightboxIdx !== null && visible[lightboxIdx] && (
+      {lightboxIdx !== null && found[lightboxIdx] && (
         <Lightbox
-          items={visible}
+          items={found}
           index={lightboxIdx}
           onClose={closeLightbox}
           onNav={navLightbox}
