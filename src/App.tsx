@@ -8,7 +8,10 @@ import type { QuickOption } from './components/SearchBar'
 import PlaceCard from './components/PlaceCard'
 import RoutingHeader from './components/RoutingHeader'
 import FlagSegmentModal from './components/FlagSegmentModal'
+import PreferencesModal from './components/PreferencesModal'
 import { saveFeedbackEntry, type FeedbackVerdict } from './services/feedbackQueue'
+import { loadActivePreference } from './services/preferencesStore'
+import type { RiderPreference } from './data/preferences'
 import ProfileSelector from './components/ProfileSelector'
 import DirectionsPanel from './components/DirectionsPanel'
 import { DEFAULT_PROFILES } from './data/profiles'
@@ -175,6 +178,14 @@ export default function App() {
 
   // Segment flag modal state
   const [flagSegmentTarget, setFlagSegmentTarget] = useState<RouteSegment | null>(null)
+
+  // Active rider preference (Layer 3). Null on first load until the
+  // user saves + activates one via the PreferencesModal.
+  const [activePreference, setActivePreference] = useState<RiderPreference | null>(() => loadActivePreference())
+  const [prefsModalOpen, setPrefsModalOpen] = useState(false)
+  const refreshActivePreference = useCallback(() => {
+    setActivePreference(loadActivePreference())
+  }, [])
 
   // User-configurable home/school. Null on first launch; set via the
   // "Save as Home/School" button in the place card. Persisted to
@@ -400,6 +411,7 @@ export default function App() {
         const leg = await clientRoute(
           a.lat, a.lng, b.lat, b.lng,
           profileKey, preferredItemNames, regionRules, regionProfile, avoids,
+          activePreference,
         )
         if (!leg) throw new Error('No route found for this segment')
         legs.push(leg)
@@ -709,9 +721,18 @@ export default function App() {
           />
         </div>
 
-        {/* Bike layer status + audit gear */}
+        {/* Bike layer status + audit gear + preferences */}
         <div className="map-bike-layer-toggle">
           <div className="map-bike-layer-buttons">
+            <button
+              className="audit-gear-btn"
+              onClick={() => setPrefsModalOpen(true)}
+              title={activePreference
+                ? `Personal preferences — active: ${activePreference.name}`
+                : 'Personal preferences (tap to add)'}
+            >
+              {activePreference ? '🧑' : '🙂'}
+            </button>
             <button
               className="audit-gear-btn"
               onClick={() => {
@@ -817,6 +838,13 @@ export default function App() {
           </>
         )}
       </div>
+
+      {prefsModalOpen && (
+        <PreferencesModal
+          onClose={() => setPrefsModalOpen(false)}
+          onChange={refreshActivePreference}
+        />
+      )}
 
       {flagSegmentTarget && (
         <FlagSegmentModal

@@ -24,6 +24,8 @@ import type { OsmWay, Route, RouteSegment } from '../utils/types'
 import type { ClassificationRule } from './rules'
 import { applyRegionOverlay } from '../data/cityProfiles/overlay'
 import type { RegionProfile } from '../data/cityProfiles/overlay'
+import { applyPreferenceAdjustments } from '../data/preferences'
+import type { RiderPreference } from '../data/preferences'
 
 // ── Haversine ──────────────────────────────────────────────────────────────
 
@@ -189,6 +191,7 @@ export function buildRoutingGraph(
   regionRules?: ClassificationRule[],
   regionProfile?: RegionProfile | null,
   avoidedWayIds?: Set<number> | null,
+  riderPreference?: RiderPreference | null,
 ): Graph<NodeData, EdgeData> {
   const graph = createGraph<NodeData, EdgeData>()
   const rule = resolveRule(profileKey)
@@ -222,13 +225,18 @@ export function buildRoutingGraph(
       // city (see src/data/cityProfiles/overlay.ts).
       const rawClassification = classifyEdge(tags)
       const midpoint = coords[Math.floor(coords.length / 2)]
-      const classification = applyRegionOverlay(
+      // Layer 2: region overlay (city-specific corridor + zone rules).
+      const regionAdjusted = applyRegionOverlay(
         rawClassification,
         tags,
         regionProfile ?? null,
         midpoint?.[0],
         midpoint?.[1],
       )
+      // Layer 3: rider preference (per-rider taste within a mode).
+      // Runs before applyModeRule so "cobbles are fine" flips surface
+      // BEFORE the mode rule decides whether to ride or walk.
+      const classification = applyPreferenceAdjustments(regionAdjusted, riderPreference ?? null)
       const decision = applyModeRule(rule, classification)
       if (decision.accepted) {
         speedKmh = decision.speedKmh
@@ -558,6 +566,7 @@ export async function clientRoute(
   regionRules?: ClassificationRule[],
   regionProfile?: RegionProfile | null,
   avoidedWayIds?: Set<number> | null,
+  riderPreference?: RiderPreference | null,
 ): Promise<Route | null> {
   // Collect ways from cached tiles covering the corridor
   const tiles = getTilesForCorridor(startLat, startLng, endLat, endLng)
@@ -578,7 +587,7 @@ export async function clientRoute(
 
   if (allWays.length === 0) return null
 
-  const graph = buildRoutingGraph(allWays, profileKey, preferredItemNames, regionRules, regionProfile, avoidedWayIds)
+  const graph = buildRoutingGraph(allWays, profileKey, preferredItemNames, regionRules, regionProfile, avoidedWayIds, riderPreference)
   const result = routeOnGraph(
     graph, startLat, startLng, endLat, endLng,
     profileKey, preferredItemNames, regionRules,
