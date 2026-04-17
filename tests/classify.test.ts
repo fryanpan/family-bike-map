@@ -187,11 +187,12 @@ describe('getDefaultPreferredItems', () => {
   it('returns physically car-separated infra for kid-starting-out', () => {
     const items = getDefaultPreferredItems('kid-starting-out')
     expect(items.has('Bike path')).toBe(true)
-    expect(items.has('Fahrradstrasse')).toBe(true)
     expect(items.has('Shared foot path')).toBe(true)
     expect(items.has('Elevated sidewalk path')).toBe(true)
-    // Living streets, painted lanes, residential are NOT preferred for the
-    // strictest mode — kid is just starting out and needs separation from cars.
+    // Fahrradstraßen, living streets, painted lanes, residential are NOT
+    // preferred — kid is just starting out and cars are still present on
+    // bike-priority streets.
+    expect(items.has('Fahrradstrasse')).toBe(false)
     expect(items.has('Living street')).toBe(false)
     expect(items.has('Painted bike lane')).toBe(false)
     expect(items.has('Residential/local road')).toBe(false)

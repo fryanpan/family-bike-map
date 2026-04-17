@@ -53,7 +53,7 @@ describe('buildRoutingGraph', () => {
   })
 
   test('kid-starting-out bridge-walks mixed-traffic residential (not accepted for riding)', () => {
-    // The residential way is rejected for RIDING under requireLowCarRisk,
+    // The residential way is rejected for RIDING under requireCarFree,
     // but stays in the graph as a bridge-walk edge at walkingSpeedKmh so
     // the router can still reach destinations through bad-infra gaps.
     // 4 nodes (3 from cycleway + 1 new on the residential spur).
@@ -198,17 +198,21 @@ describe('routeOnGraph', () => {
     expect(walkingSegs.length).toBeGreaterThan(0)
   })
 
-  test('kid-starting-out rides Fahrradstrasse, bridge-walks secondary painted lanes', () => {
-    // Under Option C, kid-starting-out requires low car risk: either
-    // physically car-free OR bike-prioritized infrastructure. Fahrradstraßen
-    // qualify because cars are legally guests and in practice yield.
-    // Secondary-road painted lanes don't — ordinary traffic at speed — so
-    // they're not accepted for RIDING, but they're still walkable on the
-    // sidewalk, so they enter the graph as bridge-walk edges.
+  test('kid-starting-out bridge-walks Fahrradstrasse AND secondary painted lanes (car-free only)', () => {
+    // kid-starting-out now requires PHYSICALLY car-free infra only.
+    // Fahrradstraßen are legally bike-priority but still have car traffic
+    // (cars are guests), which this mode can't handle. Both fahrrad and
+    // painted-lane edges bridge-walk at walking speed rather than ride.
     const fahrradWays: OsmWay[] = [{
       osmId: 40,
       itemName: null,
       tags: { highway: 'residential', bicycle_road: 'yes' },
+      coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
+    }]
+    const cyclewayWays: OsmWay[] = [{
+      osmId: 40,
+      itemName: null,
+      tags: { highway: 'cycleway' },
       coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
     }]
     const paintedWays: OsmWay[] = [{
@@ -218,15 +222,20 @@ describe('routeOnGraph', () => {
       coordinates: [[52.5000, 13.4000], [52.5010, 13.4000]],
     }]
 
-    const preferred = new Set(['Fahrradstrasse', 'Painted bike lane'])
+    const preferred = new Set(['Fahrradstrasse', 'Bike path', 'Painted bike lane'])
     const gFahr = buildRoutingGraph(fahrradWays, 'kid-starting-out', preferred)
+    const gCycle = buildRoutingGraph(cyclewayWays, 'kid-starting-out', preferred)
     const gPaint = buildRoutingGraph(paintedWays, 'kid-starting-out', preferred)
 
-    // Fahrradstraße: accepted for riding.
-    const fahrLink = gFahr.getLink('52.50000,13.40000', '52.50100,13.40000')
-    expect(fahrLink!.data.isWalking).toBe(false)
+    // Cycleway: truly car-free, accepted for riding.
+    const cycleLink = gCycle.getLink('52.50000,13.40000', '52.50100,13.40000')
+    expect(cycleLink!.data.isWalking).toBe(false)
 
-    // Secondary painted lane: bridge-walk only.
+    // Fahrradstraße: bike-priority but still has cars → bridge-walk.
+    const fahrLink = gFahr.getLink('52.50000,13.40000', '52.50100,13.40000')
+    expect(fahrLink!.data.isWalking).toBe(true)
+
+    // Secondary painted lane: bridge-walk only (was already rejected before).
     const paintLink = gPaint.getLink('52.50000,13.40000', '52.50100,13.40000')
     expect(paintLink).toBeTruthy()
     expect(paintLink!.data.isWalking).toBe(true)
@@ -251,9 +260,10 @@ describe('routeOnGraph', () => {
     expect(gNoSw.getLinkCount()).toBe(0)
   })
 
-  test('kid-starting-out accepts SF Slow Streets (residential + motor_vehicle=destination)', () => {
-    // SF-style Slow Street: residential street restricted to local access.
-    // OSM pattern: highway=residential + motor_vehicle=destination.
+  test('kid-starting-out bridge-walks SF Slow Streets (still has car access)', () => {
+    // SF-style Slow Street: residential with motor_vehicle=destination.
+    // bikePriority is true, but cars are still present (residents + delivery),
+    // so kid-starting-out won't ride it — bridge-walks instead.
     const slowStreetWays: OsmWay[] = [{
       osmId: 42,
       itemName: null,
@@ -265,7 +275,8 @@ describe('routeOnGraph', () => {
       coordinates: [[37.7600, -122.4300], [37.7610, -122.4300]],
     }]
     const graph = buildRoutingGraph(slowStreetWays, 'kid-starting-out', new Set())
-    expect(graph.getLinkCount()).toBe(2)
+    const link = graph.getLink('37.76000,-122.43000', '37.76100,-122.43000')
+    expect(link!.data.isWalking).toBe(true)
   })
 
   test('kid-starting-out bridge-walks ordinary quiet residential; kid-confident rides it', () => {

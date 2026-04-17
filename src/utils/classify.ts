@@ -34,11 +34,11 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
   'kid-starting-out': [
     { defaultPreferred: true, items: [
       { icon: '🚴', name: 'Bike path',              defaultPreferred: true },
-      { icon: '🚲', name: 'Fahrradstrasse',         defaultPreferred: true },
       { icon: '🛤️', name: 'Shared foot path',      defaultPreferred: true },
       { icon: '🛡️', name: 'Elevated sidewalk path', defaultPreferred: true },
     ]},
     { defaultPreferred: false, items: [
+      { icon: '🚲', name: 'Fahrradstrasse',         defaultPreferred: false },
       { icon: '🏘️', name: 'Living street',          defaultPreferred: false },
       { icon: '〰️', name: 'Painted bike lane',      defaultPreferred: false },
       { icon: '🚌', name: 'Shared bus lane',        defaultPreferred: false },

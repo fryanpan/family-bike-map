@@ -53,27 +53,26 @@ export interface ModeRule {
   // LTS bands this mode accepts. Non-contiguous profiles are expressible.
   ltsAccept: LtsLevel[]
 
-  // Stricter-than-Furth-LTS-1 constraint. When true, the edge must offer
-  // "minimal risk of bad car interactions" — either physically car-free,
-  // OR legally/structurally engineered to give bikes priority so that cars,
-  // when present, yield by default. Accepted infrastructure:
+  // Stricter-than-Furth-LTS-1 constraint. When true, the edge must be
+  // physically car-free (carFree === true). Bike-prioritized shared surfaces
+  // (Fahrradstraßen, living streets, SF Slow Streets, Dutch fietsstraten) are
+  // NOT accepted even though they're engineered to give bikes priority,
+  // because cars are still legally allowed on them and a kid just learning to
+  // ride can't reliably handle even an occasional car interaction. Accepted
+  // infrastructure:
   //
-  //   - Physically car-free (carFree === true):
-  //       cycleway, car-free path, pedestrianised zone, curb-separated cycle
-  //       track on a sidewalk, forest/farm track.
-  //   - Bike-prioritized shared surface (bikePriority === true):
-  //       Fahrradstraßen (bicycle_road=yes), Dutch fietsstraten
-  //       (cyclestreet=yes), living streets (legally ≤ walking pace for cars),
-  //       SF Slow Streets and equivalents (residential with motor_vehicle=
-  //       destination), etc.
+  //   - cycleway, car-free path, pedestrianised zone, curb-separated cycle
+  //     track on a sidewalk, forest/farm track.
   //
-  // Excluded (even though Furth's LTS 1 would include them):
-  //   - Ordinary quiet residential streets with no bike-priority designation.
+  // Excluded (all have some car presence):
+  //   - Fahrradstraßen, living streets, SF Slow Streets
+  //   - Ordinary quiet residential streets
   //
-  // Real-world caveat: some bike-priority streets have persistent bad-driver
-  // problems (e.g. SF's Noe Slow Street). Layer 2 city profiles may demote
-  // specific named corridors to compensate.
-  requireLowCarRisk?: boolean
+  // Real-world caveat: rejected edges still enter the graph as bridge-walks
+  // at walkingSpeedKmh (see applyModeRule + isBridgeWalkable in clientRouter),
+  // so the graph stays connected. A kid-starting-out rider walks their bike
+  // across any Fahrradstraße segment rather than riding it.
+  requireCarFree?: boolean
 
   // Extra conditions that must hold for specific LTS tiers above 1.
   // Example: kid-traffic-savvy accepts LTS 2 only when bike infra is present,
@@ -136,16 +135,14 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     label: 'Kid starting out',
     description:
       'Kid has some bike control — can stop to avoid danger — but judgment is unreliable. ' +
-      'Needs infrastructure with minimal risk of bad car interactions: either physically ' +
-      'car-free (cycleways, park paths, curb-separated tracks, pedestrianised zones) or ' +
-      'bike-prioritized (Fahrradstraßen, Dutch fietsstraten, living streets, SF-style Slow ' +
-      'Streets where cars are restricted to local access). On bike-priority infrastructure ' +
-      'cars share the surface but in practice slow down and yield — some corridors with ' +
-      'persistent bad-driver problems may be demoted via Layer 2 city profiles. ' +
-      'Excludes ordinary residential streets that are merely quiet but not engineered for ' +
-      'bike priority. Can walk across short cobblestone stretches at walking pace.',
+      'Needs physically car-free infrastructure only: cycleways, park paths, curb-separated ' +
+      'cycle tracks, pedestrianised zones, forest/farm tracks. Even Fahrradstraßen and ' +
+      'living streets are excluded because cars are still legally present and this kid ' +
+      'can\'t be trusted to handle even an occasional car interaction. Bridge-walks short ' +
+      'non-car-free gaps (Fahrradstraße, residential, crosswalk) on the sidewalk at walking ' +
+      'pace. Can walk across short cobblestone stretches at walking pace.',
     ltsAccept: [1],
-    requireLowCarRisk: true,
+    requireCarFree: true,
     surfaceOk: PAVED_AND_SOFT,
     cobbleHandling: 'walking_pace',
     // ~5 km/h typical balance-bike or early pedaling pace
@@ -164,7 +161,7 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
       'quiet residential streets (≤30 km/h, low volume) even without bike-priority ' +
       'designation. Can ride short cobblestone stretches slowly as a learning opportunity.',
     ltsAccept: [1],
-    // No requireLowCarRisk — accepts full Furth LTS 1 including ordinary quiet residential.
+    // No requireCarFree — accepts full Furth LTS 1 including ordinary quiet residential + bikePriority.
     // Uses PAVED_AND_SOFT (superset of kid-starting-out's surface set) so
     // toggling up in skill never rejects an edge that the stricter mode
     // was willing to ride.
@@ -274,10 +271,10 @@ export function applyModeRule(
     return { accepted: false, reason: `LTS ${lts} not in accepted bands ${rule.ltsAccept.join(',')}` }
   }
 
-  // Low-car-risk constraint: edge must be car-free OR bike-prioritized.
-  // See ModeRule.requireLowCarRisk for the full rationale.
-  if (rule.requireLowCarRisk && !carFree && !classification.bikePriority) {
-    return { accepted: false, reason: 'requires car-free or bike-prioritized infrastructure' }
+  // Car-free-only constraint: edge must be physically car-free.
+  // See ModeRule.requireCarFree for the full rationale.
+  if (rule.requireCarFree && !carFree) {
+    return { accepted: false, reason: 'requires physically car-free infrastructure' }
   }
 
   // Per-tier conditions (only checked for tiers > 1)
