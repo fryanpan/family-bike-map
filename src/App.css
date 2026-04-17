@@ -794,15 +794,29 @@ button { font-family: inherit; cursor: pointer; }
   body:not(.mobile-preview) .map-legend-wrap { top: 64px; }
   body:not(.mobile-preview) .ui-routing .map-legend-wrap { display: flex; }
 }
-/* Very small screens: constrain chip overflow */
-@media (max-width: 374px) {
+/* Small-to-medium phones (iPhone 16 Pro Max @ 430, Pixel 10 Pro @ 412,
+   iPhone SE @ 375): tighten chip padding + gap so all 5 mode icons fit
+   on one row without wrapping into the legend. */
+@media (max-width: 480px) {
   .map-travel-mode .profile-chips {
     gap: 4px;
   }
   .map-travel-mode .profile-chip {
-    padding: 6px 10px;
+    padding: 6px 8px;
+    min-height: 36px;
+  }
+  /* The traffic-savvy icon has the widest viewBox (78) — shrink it a
+     touch so the chip row fits on narrow screens. */
+  .map-travel-mode .profile-chip svg {
+    max-width: 44px;
   }
 }
+body.mobile-preview .map-travel-mode .profile-chips { gap: 4px; }
+body.mobile-preview .map-travel-mode .profile-chip {
+  padding: 6px 8px;
+  min-height: 36px;
+}
+body.mobile-preview .map-travel-mode .profile-chip svg { max-width: 44px; }
 
 /* ── Map legend ─────────────────────────────────────── */
 .map-legend {
