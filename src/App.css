@@ -169,6 +169,26 @@ button { font-family: inherit; cursor: pointer; }
 }
 .place-card-directions-btn:hover { background: #1d4ed8; }
 
+.place-card-save-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.place-card-save-btn {
+  flex: 1;
+  padding: 10px 8px;
+  background: #fff;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  min-height: 40px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.place-card-save-btn:hover { background: #f9fafb; border-color: #9ca3af; }
+
 /* ── Routing header ───────────────────────────────────── */
 .routing-back-btn {
   background: none;

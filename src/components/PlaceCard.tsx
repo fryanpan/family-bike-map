@@ -5,9 +5,11 @@ interface Props {
   place: Place
   onDirections: () => void
   onBack: () => void
+  onSaveAsHome?: (place: Place) => void
+  onSaveAsSchool?: (place: Place) => void
 }
 
-export default function PlaceCard({ place, onDirections, onBack }: Props) {
+export default function PlaceCard({ place, onDirections, onBack, onSaveAsHome, onSaveAsSchool }: Props) {
   const detail = getPlaceDetail(place.label)
 
   return (
@@ -22,6 +24,28 @@ export default function PlaceCard({ place, onDirections, onBack }: Props) {
       <button className="place-card-directions-btn" onClick={onDirections}>
         🚲 Directions
       </button>
+      {(onSaveAsHome || onSaveAsSchool) && (
+        <div className="place-card-save-row">
+          {onSaveAsHome && (
+            <button
+              className="place-card-save-btn"
+              onClick={() => onSaveAsHome(place)}
+              title="Use this place as your saved Home"
+            >
+              🏠 Save as Home
+            </button>
+          )}
+          {onSaveAsSchool && (
+            <button
+              className="place-card-save-btn"
+              onClick={() => onSaveAsSchool(place)}
+              title="Use this place as your saved School"
+            >
+              🏫 Save as School
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

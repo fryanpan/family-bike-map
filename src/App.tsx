@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { useGeolocation } from './hooks/useGeolocation'
 const Map = lazy(() => import('./components/Map'))
 const AuditPanel = lazy(() => import('./components/AuditPanel'))
@@ -29,14 +29,18 @@ import { Sentry } from './sentry'
 
 type UiState = 'search' | 'place-detail' | 'routing'
 
-const HOME_PLACE: Place = {
+// Default home/school (Bryan's Berlin test addresses, used until the user
+// saves their own). When the user selects a place and taps "Save as home",
+// the full Place (with geocoded lat/lng) replaces this in localStorage so
+// subsequent routing uses exact coords, not a hardcoded guess.
+const DEFAULT_HOME_PLACE: Place = {
   lat: 52.5016,
   lng: 13.4103,
   label: 'Dresdener Str 112, Berlin',
   shortLabel: 'Dresdener Str 112',
 }
 
-const SCHOOL_PLACE: Place = {
+const DEFAULT_SCHOOL_PLACE: Place = {
   lat: 52.5105,
   lng: 13.4247,
   label: 'Wilhelmine-Gemberg-Weg 10, Berlin',
@@ -46,6 +50,22 @@ const SCHOOL_PLACE: Place = {
 const STORAGE_KEY = 'bike-route-profiles'
 const CUSTOM_PREFERRED_KEY = 'bike-route-custom-preferred'
 const TRAVEL_MODE_KEY = 'bike-route-travel-mode'
+const HOME_KEY = 'bike-route-home'
+const SCHOOL_KEY = 'bike-route-school'
+
+function loadSavedPlace(key: string, fallback: Place): Place {
+  try {
+    const saved = localStorage.getItem(key)
+    if (!saved) return fallback
+    const parsed = JSON.parse(saved) as Place
+    if (typeof parsed.lat === 'number' && typeof parsed.lng === 'number' && parsed.label) {
+      return parsed
+    }
+  } catch {
+    // fall through
+  }
+  return fallback
+}
 
 function loadProfiles(): ProfileMap {
   try {
@@ -155,6 +175,21 @@ export default function App() {
   const [startPoint, setStartPoint] = useState<Place | null>(null)
   const [endPoint, setEndPoint]     = useState<Place | null>(null)
   const [waypoints, setWaypoints]   = useState<Array<{ lat: number; lng: number }>>([])
+
+  // User-configurable home/school. Persist the full Place (with geocoded
+  // lat/lng) in localStorage so subsequent sessions have exact coords
+  // rather than a hardcoded guess.
+  const [homePlace, setHomePlace]     = useState<Place>(() => loadSavedPlace(HOME_KEY, DEFAULT_HOME_PLACE))
+  const [schoolPlace, setSchoolPlace] = useState<Place>(() => loadSavedPlace(SCHOOL_KEY, DEFAULT_SCHOOL_PLACE))
+
+  const saveHomePlace = useCallback((place: Place) => {
+    setHomePlace(place)
+    try { localStorage.setItem(HOME_KEY, JSON.stringify(place)) } catch { /* quota */ }
+  }, [])
+  const saveSchoolPlace = useCallback((place: Place) => {
+    setSchoolPlace(place)
+    try { localStorage.setItem(SCHOOL_KEY, JSON.stringify(place)) } catch { /* quota */ }
+  }, [])
 
   const { location: currentLocation } = useGeolocation()
 
@@ -493,12 +528,12 @@ export default function App() {
     {
       label: 'Home',
       icon: '🏠',
-      onSelect: () => startRoutingTo(HOME_PLACE),
+      onSelect: () => startRoutingTo(homePlace),
     },
     {
       label: 'School',
       icon: '🏫',
-      onSelect: () => startRoutingTo(SCHOOL_PLACE),
+      onSelect: () => startRoutingTo(schoolPlace),
     },
   ]
 
@@ -516,12 +551,12 @@ export default function App() {
     {
       label: 'Home',
       icon: '🏠',
-      onSelect: () => handleStartSelect(HOME_PLACE),
+      onSelect: () => handleStartSelect(homePlace),
     },
     {
       label: 'School',
       icon: '🏫',
-      onSelect: () => handleStartSelect(SCHOOL_PLACE),
+      onSelect: () => handleStartSelect(schoolPlace),
     },
   ]
 
@@ -538,12 +573,12 @@ export default function App() {
     {
       label: 'Home',
       icon: '🏠',
-      onSelect: () => handleEndSelect(HOME_PLACE),
+      onSelect: () => handleEndSelect(homePlace),
     },
     {
       label: 'School',
       icon: '🏫',
-      onSelect: () => handleEndSelect(SCHOOL_PLACE),
+      onSelect: () => handleEndSelect(schoolPlace),
     },
   ]
 
@@ -645,6 +680,8 @@ export default function App() {
               place={selectedPlace}
               onDirections={handleDirectionsFromPlace}
               onBack={backToSearch}
+              onSaveAsHome={saveHomePlace}
+              onSaveAsSchool={saveSchoolPlace}
             />
           </div>
         )}
