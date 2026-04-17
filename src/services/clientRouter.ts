@@ -22,6 +22,8 @@ import { MODE_RULES, applyModeRule } from '../data/modes'
 import type { RideMode } from '../data/modes'
 import type { OsmWay, Route, RouteSegment } from '../utils/types'
 import type { ClassificationRule } from './rules'
+import { applyRegionOverlay } from '../data/cityProfiles/overlay'
+import type { RegionProfile } from '../data/cityProfiles/overlay'
 
 // ── Haversine ──────────────────────────────────────────────────────────────
 
@@ -184,6 +186,7 @@ export function buildRoutingGraph(
   profileKey: string,
   preferredItemNames: Set<string>,
   regionRules?: ClassificationRule[],
+  regionProfile?: RegionProfile | null,
 ): Graph<NodeData, EdgeData> {
   const graph = createGraph<NodeData, EdgeData>()
   const rule = resolveRule(profileKey)
@@ -207,8 +210,19 @@ export function buildRoutingGraph(
     } else {
       // Classify the edge using Layer 1 (LTS + carFree + bikeInfra + speed
       // + traffic density + surface), then ask the mode rule whether it's
-      // accepted and at what speed.
-      const classification = classifyEdge(tags)
+      // accepted and at what speed. Layer 2 region overlay runs between
+      // classifyEdge and applyModeRule — it adjusts the classification
+      // based on named corridors / zone overrides specific to the current
+      // city (see src/data/cityProfiles/overlay.ts).
+      const rawClassification = classifyEdge(tags)
+      const midpoint = coords[Math.floor(coords.length / 2)]
+      const classification = applyRegionOverlay(
+        rawClassification,
+        tags,
+        regionProfile ?? null,
+        midpoint?.[0],
+        midpoint?.[1],
+      )
       const decision = applyModeRule(rule, classification)
       if (decision.accepted) {
         speedKmh = decision.speedKmh
@@ -512,6 +526,7 @@ export async function clientRoute(
   profileKey: string,
   preferredItemNames: Set<string>,
   regionRules?: ClassificationRule[],
+  regionProfile?: RegionProfile | null,
 ): Promise<Route | null> {
   // Collect ways from cached tiles covering the corridor
   const tiles = getTilesForCorridor(startLat, startLng, endLat, endLng)
@@ -532,7 +547,7 @@ export async function clientRoute(
 
   if (allWays.length === 0) return null
 
-  const graph = buildRoutingGraph(allWays, profileKey, preferredItemNames, regionRules)
+  const graph = buildRoutingGraph(allWays, profileKey, preferredItemNames, regionRules, regionProfile)
   const result = routeOnGraph(
     graph, startLat, startLng, endLat, endLng,
     profileKey, preferredItemNames, regionRules,

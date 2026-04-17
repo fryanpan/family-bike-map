@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { useGeolocation } from './hooks/useGeolocation'
 const Map = lazy(() => import('./components/Map'))
 const AuditPanel = lazy(() => import('./components/AuditPanel'))
@@ -23,6 +23,7 @@ import {
 import { CITY_PRESETS } from './services/audit'
 import { fetchRules } from './services/rules'
 import type { ClassificationRule } from './services/rules'
+import { BERLIN_PROFILE } from './data/cityProfiles/berlin'
 import RouteList from './components/RouteList'
 import type { Place, Route, ProfileMap, OsmWay } from './utils/types'
 import { Sentry } from './sentry'
@@ -248,6 +249,15 @@ export default function App() {
   const [regionRules, setRegionRules] = useState<ClassificationRule[]>([])
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
 
+  // Layer 2 region overlay (hard-coded per-city rules that adjust the
+  // LtsClassification between classifyEdge and applyModeRule). Only
+  // Berlin is implemented today — other cities fall through with
+  // regionProfile = null.
+  const regionProfile = useMemo(() => {
+    if (activeRegion === 'berlin') return BERLIN_PROFILE
+    return null
+  }, [activeRegion])
+
   // Tile cache state. The client router lazy-fetches tiles on demand, so
   // there is no longer an "auto-show download banner" flow. Power users can
   const tileCacheCheckedRef = useRef(false)
@@ -373,7 +383,7 @@ export default function App() {
         const b = legPoints[i + 1]
         const leg = await clientRoute(
           a.lat, a.lng, b.lat, b.lng,
-          profileKey, preferredItemNames, regionRules,
+          profileKey, preferredItemNames, regionRules, regionProfile,
         )
         if (!leg) throw new Error('No route found for this segment')
         legs.push(leg)
