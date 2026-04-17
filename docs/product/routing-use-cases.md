@@ -1,5 +1,77 @@
 # Routing Use Cases
 
+## The family-cycling stress model
+
+Every existing framework (LTS, NACTO AAA, CROW, ERA, LTN 1/20, Danish
+Vejdirektoratet) models stress per-individual-rider. Family cycling is
+a **group activity with asymmetric stress**: the parent carries both
+their own rider stress AND a supervisory load that scales with the
+kid's inability to self-regulate. This is the gap our kid modes fill.
+
+### The three stress axes for a parent riding with a kid
+
+1. **Own-bike-control stress** — same as any adult rider: steering,
+   braking, balance, reading the road surface.
+2. **Monitoring stress** — watching the kid: are they in the right
+   part of the lane, are they about to swerve, are they approaching a
+   hazard they haven't noticed? This is *dual-task cognitive load*:
+   the parent is attending to their own ride AND the kid's, not one
+   or the other.
+3. **Response-delay stress** — when the parent has to command ("stop!"
+   "stay right!" "car coming!"), there is a half-to-one-second lag
+   before the kid actually acts. That lag is a safety margin the
+   parent has to pay for out of their own planning budget — meaning
+   the parent has to anticipate a full beat earlier than a solo adult
+   would, on the same road.
+
+The three compound. A road that is LTS 1 for a solo adult can still be
+high-stress for a parent if it produces monitoring events too often.
+
+### Decision frequency is the dominant stress variable
+
+The real thing the kid modes are ordered by is **how often the parent
+has to make a supervisory decision**:
+
+- **kid-starting-out**: near-zero supervisory decisions in transit.
+  A decision happens only at intersections — every few minutes at
+  most. Between intersections the parent can relax and the kid can
+  build confidence. This is why the mode insists on car-free or
+  bike-priority surfaces: any moving-vehicle interaction forces a
+  supervisory event, and at this ability level the kid can't be
+  trusted to handle one correctly.
+
+- **kid-confident**: infrequent car interactions are acceptable —
+  roughly what the international manuals allow at LTS 1 (low
+  thousands of vehicles/day on 30 km/h streets, meaning the kid sees
+  a car every few minutes, not every few seconds). The supervisory
+  command is typically a single "stay to the right" — easy, low
+  stakes, and the parent has time to issue it and the kid has time
+  to comply. This maps to the 2,000–2,500 veh/day threshold every
+  framework converges on.
+
+- **kid-traffic-savvy**: the kid now makes the split-second decisions
+  themselves — painted bike lane on a tertiary street, watching for
+  door-zone, handling a signalled intersection. The parent's
+  supervisory load drops to occasional "I see a turning car ahead"
+  because the kid is already scanning. This maps to LTS 2 with bike
+  infrastructure and a speed cap.
+
+- **carrying-kid**: the kid is a passenger. No supervisory dual-task
+  at all — the adult is solo for decision-making purposes. The
+  asymmetry flips to the *passenger's* comfort (surface smoothness),
+  which the adult absorbs as a separate axis.
+
+### What this means for the router
+
+Routes don't just need to be safe — they need to produce the right
+*rate* of supervisory events for the rider's ability. Two routes of
+equal LTS can have very different stress profiles if one has ten
+intersections and the other has one. We don't currently model this
+explicitly, but it's the shape of the next layer (intersection
+density as a cost input, not just edge LTS).
+
+---
+
 ## UC0: Learning to Ride
 
 **Who:** Parent + very young child (age 2-4) just learning to bike/scooter
