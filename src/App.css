@@ -796,27 +796,29 @@ button { font-family: inherit; cursor: pointer; }
 }
 /* Small-to-medium phones (iPhone 16 Pro Max @ 430, Pixel 10 Pro @ 412,
    iPhone SE @ 375): tighten chip padding + gap so all 5 mode icons fit
-   on one row without wrapping into the legend. */
+   on one row without wrapping into the legend OR inside the route
+   summary card. The rules below target ALL profile-chips, not just
+   the map overlay, so the in-panel picker also fits. */
 @media (max-width: 480px) {
-  .map-travel-mode .profile-chips {
+  .profile-chips {
     gap: 4px;
   }
-  .map-travel-mode .profile-chip {
+  .profile-chip {
     padding: 6px 8px;
     min-height: 36px;
   }
   /* The traffic-savvy icon has the widest viewBox (78) — shrink it a
      touch so the chip row fits on narrow screens. */
-  .map-travel-mode .profile-chip svg {
+  .profile-chip svg {
     max-width: 44px;
   }
 }
-body.mobile-preview .map-travel-mode .profile-chips { gap: 4px; }
-body.mobile-preview .map-travel-mode .profile-chip {
+body.mobile-preview .profile-chips { gap: 4px; }
+body.mobile-preview .profile-chip {
   padding: 6px 8px;
   min-height: 36px;
 }
-body.mobile-preview .map-travel-mode .profile-chip svg { max-width: 44px; }
+body.mobile-preview .profile-chip svg { max-width: 44px; }
 
 /* ── Map legend ─────────────────────────────────────── */
 .map-legend {
