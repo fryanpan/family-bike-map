@@ -8,6 +8,8 @@ export interface QuickOption {
   icon: string
   onSelect: () => void
   isLocation?: boolean
+  /** Optional secondary line shown under the label (e.g. saved place address). */
+  sublabel?: string
 }
 
 interface Props {
@@ -122,7 +124,12 @@ export default function SearchBar({ label, value, onSelect, onClear, placeholder
               <span className={`quick-option-icon-wrap${opt.isLocation ? ' location' : ''}`}>
                 {opt.icon}
               </span>
-              <span className="quick-option-label">{opt.label}</span>
+              <span className="quick-option-text">
+                <span className="quick-option-label">{opt.label}</span>
+                {opt.sublabel && (
+                  <span className="quick-option-sublabel">{opt.sublabel}</span>
+                )}
+              </span>
             </button>
           ))}
         </div>

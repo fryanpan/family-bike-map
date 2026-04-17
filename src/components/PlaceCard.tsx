@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react'
 import { getPlaceDetail } from '../utils/types'
 import type { Place } from '../utils/types'
 
@@ -7,10 +8,46 @@ interface Props {
   onBack: () => void
   onSaveAsHome?: (place: Place) => void
   onSaveAsSchool?: (place: Place) => void
+  currentHome?: Place | null
+  currentSchool?: Place | null
 }
 
-export default function PlaceCard({ place, onDirections, onBack, onSaveAsHome, onSaveAsSchool }: Props) {
+/** ~5m at Berlin latitude — plenty of tolerance for "same place". */
+function isSamePlace(a: Place | null | undefined, b: Place): boolean {
+  if (!a) return false
+  return Math.abs(a.lat - b.lat) < 0.00005 && Math.abs(a.lng - b.lng) < 0.00005
+}
+
+export default function PlaceCard({
+  place, onDirections, onBack,
+  onSaveAsHome, onSaveAsSchool,
+  currentHome, currentSchool,
+}: Props) {
   const detail = getPlaceDetail(place.label)
+  const [flash, setFlash] = useState<'home' | 'school' | null>(null)
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => { if (flashTimer.current) clearTimeout(flashTimer.current) }
+  }, [])
+
+  const flashFor = (kind: 'home' | 'school') => {
+    setFlash(kind)
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlash(null), 1800)
+  }
+
+  const isThisHome   = isSamePlace(currentHome, place)
+  const isThisSchool = isSamePlace(currentSchool, place)
+
+  const homeLabel =
+    flash === 'home' ? '✓ Saved as Home' :
+    isThisHome       ? '🏠 Your Home' :
+                       '🏠 Save as Home'
+  const schoolLabel =
+    flash === 'school' ? '✓ Saved as School' :
+    isThisSchool       ? '🏫 Your School' :
+                         '🏫 Save as School'
 
   return (
     <div className="place-card">
@@ -28,20 +65,22 @@ export default function PlaceCard({ place, onDirections, onBack, onSaveAsHome, o
         <div className="place-card-save-row">
           {onSaveAsHome && (
             <button
-              className="place-card-save-btn"
-              onClick={() => onSaveAsHome(place)}
+              className={`place-card-save-btn${flash === 'home' ? ' saved-flash' : ''}${isThisHome ? ' is-current' : ''}`}
+              onClick={() => { onSaveAsHome(place); flashFor('home') }}
               title="Use this place as your saved Home"
+              disabled={flash === 'home'}
             >
-              🏠 Save as Home
+              {homeLabel}
             </button>
           )}
           {onSaveAsSchool && (
             <button
-              className="place-card-save-btn"
-              onClick={() => onSaveAsSchool(place)}
+              className={`place-card-save-btn${flash === 'school' ? ' saved-flash' : ''}${isThisSchool ? ' is-current' : ''}`}
+              onClick={() => { onSaveAsSchool(place); flashFor('school') }}
               title="Use this place as your saved School"
+              disabled={flash === 'school'}
             >
-              🏫 Save as School
+              {schoolLabel}
             </button>
           )}
         </div>

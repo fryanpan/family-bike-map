@@ -47,7 +47,7 @@ const SHORT_LABELS: Record<string, string> = {
   'Painted bike lane': 'Bike lane',
   'Shared bus lane': 'Bus lane',
   'Residential/local road': 'Local road',
-  'Rough surface': 'Rough',
+  'Rough surface': 'Bumpy · slow',
 }
 
 function makeTextLabel(text: string): L.DivIcon {

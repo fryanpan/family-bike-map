@@ -46,7 +46,7 @@ button { font-family: inherit; cursor: pointer; }
   right: 10px;
 }
 @media (min-width: 768px) {
-  .leaflet-top.leaflet-left { bottom: 80px; } /* above feedback FAB */
+  body:not(.mobile-preview) .leaflet-top.leaflet-left { bottom: 80px; } /* above feedback FAB */
 }
 
 /* ── Floating cards ───────────────────────────────────── */
@@ -188,6 +188,17 @@ button { font-family: inherit; cursor: pointer; }
   transition: background .12s, border-color .12s;
 }
 .place-card-save-btn:hover { background: #f9fafb; border-color: #9ca3af; }
+.place-card-save-btn.is-current {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #6ee7b7;
+}
+.place-card-save-btn.saved-flash {
+  background: #10b981;
+  color: #fff;
+  border-color: #059669;
+  transition: background .15s, color .15s, border-color .15s;
+}
 
 /* ── Routing header ───────────────────────────────────── */
 .routing-back-btn {
@@ -218,28 +229,28 @@ button { font-family: inherit; cursor: pointer; }
 
 /* Desktop: floating cards are positioned as a panel on the left */
 @media (min-width: 768px) {
-  .floating-search {
+  body:not(.mobile-preview) .floating-search {
     right: auto;
     width: 320px;
   }
-  .floating-place-detail {
+  body:not(.mobile-preview) .floating-place-detail {
     top: 12px;
     bottom: auto;
     right: auto;
     width: 320px;
   }
-  .floating-routing-header {
+  body:not(.mobile-preview) .floating-routing-header {
     right: auto;
     width: 320px;
   }
-  .floating-route-summary {
+  body:not(.mobile-preview) .floating-route-summary {
     top: auto;
     right: auto;
     width: 320px;
     max-height: 60vh;
   }
-  .floating-loading,
-  .floating-error {
+  body:not(.mobile-preview) .floating-loading,
+  body:not(.mobile-preview) .floating-error {
     right: auto;
     width: 320px;
   }
@@ -271,7 +282,7 @@ button { font-family: inherit; cursor: pointer; }
 .ui-place-detail .leaflet-top.leaflet-left { bottom: 160px; }
 .ui-routing .leaflet-top.leaflet-left { bottom: 220px; }
 @media (min-width: 768px) {
-  .ui-routing .leaflet-top.leaflet-left { bottom: 80px; }
+  body:not(.mobile-preview) .ui-routing .leaflet-top.leaflet-left { bottom: 80px; }
 }
 
 /* SearchBar */
@@ -675,7 +686,12 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 18px;
 }
 .quick-option-icon-wrap.location { background: #dbeafe; }
+.quick-option-text { display: flex; flex-direction: column; flex: 1; min-width: 0; text-align: left; }
 .quick-option-label { font-size: 14px; font-weight: 500; color: #111827; }
+.quick-option-sublabel {
+  font-size: 12px; color: #6b7280; margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ── Current location dot (map) ─────────────────────── */
 .current-location-dot {
@@ -772,13 +788,11 @@ button { font-family: inherit; cursor: pointer; }
 /* When routing, push map-top-right controls below the routing header */
 .ui-routing .map-top-right { top: 140px; }
 @media (min-width: 768px) {
-  .map-top-right {
-    top: 12px;
-  }
-  .ui-routing .map-top-right { top: 12px; right: 10px; }
-  .map-travel-mode { top: 12px; right: 12px; }
-  .map-legend-wrap { top: 64px; }
-  .ui-routing .map-legend-wrap { display: flex; }
+  body:not(.mobile-preview) .map-top-right { top: 12px; }
+  body:not(.mobile-preview) .ui-routing .map-top-right { top: 12px; right: 10px; }
+  body:not(.mobile-preview) .map-travel-mode { top: 12px; right: 12px; }
+  body:not(.mobile-preview) .map-legend-wrap { top: 64px; }
+  body:not(.mobile-preview) .ui-routing .map-legend-wrap { display: flex; }
 }
 /* Very small screens: constrain chip overflow */
 @media (max-width: 374px) {
@@ -868,16 +882,18 @@ button { font-family: inherit; cursor: pointer; }
   background: none;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1;
-  padding: 6px 10px;
+  padding: 4px 10px;
   min-height: 32px;
   min-width: 32px;
-  color: #9ca3af;
+  color: #6b7280;
   cursor: pointer;
   transition: all .1s;
   font-weight: 700;
 }
+.legend-move-btn-up { color: #059669; border-color: #a7f3d0; }
+.legend-move-btn-up:hover { background: #ecfdf5; border-color: #10b981; }
 .legend-move-btn:hover {
   background: #fef9c3;
   border-color: #fbbf24;
@@ -906,7 +922,7 @@ button { font-family: inherit; cursor: pointer; }
   justify-content: center;
 }
 @media (min-width: 768px) {
-  .modal-backdrop { align-items: center; }
+  body:not(.mobile-preview) .modal-backdrop { align-items: center; }
 }
 .modal {
   background: #fff;
@@ -919,7 +935,7 @@ button { font-family: inherit; cursor: pointer; }
   overflow: hidden;
 }
 @media (min-width: 768px) {
-  .modal { border-radius: 16px; }
+  body:not(.mobile-preview) .modal { border-radius: 16px; }
 }
 .modal-header {
   display: flex;
@@ -1103,9 +1119,9 @@ button { font-family: inherit; cursor: pointer; }
   overflow: hidden;
 }
 @media (min-width: 768px) {
-  .feedback-sheet { border-radius: 16px; max-width: 420px; }
+  body:not(.mobile-preview) .feedback-sheet { border-radius: 16px; max-width: 420px; }
   /* On desktop the FAB escapes the flex container and goes to the viewport bottom-right */
-  .feedback-fab {
+  body:not(.mobile-preview) .feedback-fab {
     position: fixed;
     bottom: 24px;
     right: 16px;
@@ -1177,7 +1193,7 @@ button { font-family: inherit; cursor: pointer; }
 .audit-overlay {
   position: fixed;
   inset: 0;
-  z-index: 900;
+  z-index: 2000; /* above Leaflet controls (default 1000) and popups */
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -1957,5 +1973,35 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ── Desktop layout ────────────────────────────────────── */
 @media (min-width: 768px) {
-  .maneuvers-list { max-height: 320px; overflow-y: auto; }
+  body:not(.mobile-preview) .maneuvers-list { max-height: 320px; overflow-y: auto; }
+}
+
+/* ── Mobile preview mode (?mobile=1) ──────────────────── */
+/* Renders the app inside a phone-sized frame at any viewport width.
+   Primary targets: iPhone 16 Pro Max (430×932) and Pixel 10 Pro (412×914).
+   Activated by App.tsx when ?mobile=1 is in the URL. The body class
+   turns off all desktop @media rules (via :not(.mobile-preview) above). */
+body.mobile-preview {
+  background: #1f2937;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+body.mobile-preview #root {
+  width: var(--mobile-preview-w, 430px);
+  height: var(--mobile-preview-h, 932px);
+  max-width: 100vw;
+  max-height: 100vh;
+  box-shadow: 0 0 0 8px #111827, 0 8px 40px rgba(0,0,0,.6);
+  border-radius: 24px;
+  overflow: hidden;
+  position: relative;
+}
+body.mobile-preview-label {
+  position: fixed;
+  top: 8px; left: 50%; transform: translateX(-50%);
+  color: #fff; font-size: 12px; font-weight: 600;
+  background: rgba(0,0,0,.6); padding: 4px 10px; border-radius: 8px;
+  z-index: 10000; pointer-events: none;
 }

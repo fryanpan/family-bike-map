@@ -181,6 +181,46 @@ export default function App() {
     try { localStorage.setItem(SCHOOL_KEY, JSON.stringify(place)) } catch { /* quota */ }
   }, [])
 
+  // Mobile preview mode: ?mobile=1 (iPhone 16 Pro Max), ?mobile=pixel
+  // (Pixel 10 Pro), or ?mobile=WIDTHxHEIGHT. Wraps #root in a phone-sized
+  // frame and disables desktop @media rules via body.mobile-preview.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const val = params.get('mobile')
+    if (!val) return
+
+    const PRESETS: Record<string, [number, number, string]> = {
+      '1':      [430, 932, 'iPhone 16 Pro Max'],
+      'iphone': [430, 932, 'iPhone 16 Pro Max'],
+      'pixel':  [412, 914, 'Pixel 10 Pro'],
+      'se':     [375, 667, 'iPhone SE'],
+    }
+
+    let w = 430, h = 932, label = 'iPhone 16 Pro Max'
+    const preset = PRESETS[val]
+    if (preset) {
+      [w, h, label] = preset
+    } else {
+      const m = val.match(/^(\d+)x(\d+)$/)
+      if (m) { w = parseInt(m[1]); h = parseInt(m[2]); label = `${w}×${h}` }
+    }
+
+    document.body.classList.add('mobile-preview')
+    document.documentElement.style.setProperty('--mobile-preview-w', `${w}px`)
+    document.documentElement.style.setProperty('--mobile-preview-h', `${h}px`)
+
+    const tag = document.createElement('div')
+    tag.className = 'mobile-preview-label'
+    tag.textContent = `📱 ${label} preview`
+    tag.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;font-weight:600;background:rgba(0,0,0,.6);padding:4px 10px;border-radius:8px;z-index:10000;pointer-events:none;'
+    document.body.appendChild(tag)
+
+    return () => {
+      document.body.classList.remove('mobile-preview')
+      tag.remove()
+    }
+  }, [])
+
   const { location: currentLocation } = useGeolocation()
 
   const [routes, setRoutes]                   = useState<Route[]>([])
@@ -523,6 +563,7 @@ export default function App() {
   ): QuickOption => ({
     label: saved ? kind : `Tap to add ${kind}`,
     icon,
+    sublabel: saved ? saved.shortLabel : undefined,
     onSelect: saved
       ? () => onUse(saved)
       : () => window.alert(kind === 'Home' ? ADD_HOME_HINT : ADD_SCHOOL_HINT),
@@ -663,6 +704,8 @@ export default function App() {
               onBack={backToSearch}
               onSaveAsHome={saveHomePlace}
               onSaveAsSchool={saveSchoolPlace}
+              currentHome={homePlace}
+              currentSchool={schoolPlace}
             />
           </div>
         )}

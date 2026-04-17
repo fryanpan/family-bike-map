@@ -106,19 +106,19 @@ export default function Legend({
           <button
             className="legend-move-btn"
             onClick={() => onMoveToOther(item.name)}
-            title="Move to Other Types"
-            aria-label={`Move ${item.name} to Other Types`}
+            title="Unprefer — move to Other (stops counting as preferred on the map)"
+            aria-label={`Unprefer ${item.name}`}
           >
-            ↓
+            −
           </button>
         ) : (
           <button
             className="legend-move-btn legend-move-btn-up"
             onClick={() => onMoveToPreferred(item.name)}
-            title="Move to Preferred"
-            aria-label={`Move ${item.name} to Preferred Path Types`}
+            title="Prefer — move to Preferred (shows as preferred on the map)"
+            aria-label={`Prefer ${item.name}`}
           >
-            ↑
+            +
           </button>
         )}
       </div>
