@@ -40,7 +40,16 @@ export interface PromoteRule {
   setBikePriority?: boolean   // force bikePriority=true
 }
 
-/** Push an edge down (e.g. painted lane with bad driver behavior). */
+/**
+ * Push an edge down (e.g. painted lane with bad driver behavior).
+ *
+ * Note on composition: `demote` intentionally does NOT clear `carFree`.
+ * If a future author needs to flip `carFree` from true back to false,
+ * add a new `clearCarFree` flag here rather than assuming demote
+ * undoes a prior promote. Today's three Berlin rules have disjoint
+ * matchers so this doesn't arise, but rule-authoring conventions are
+ * easier to keep than to recover.
+ */
 export interface DemoteRule {
   kind: 'demote'
   id: string
