@@ -1,8 +1,9 @@
 import L from 'leaflet'
-import { useEffect, useRef, useMemo } from 'react'
+import { useEffect, useRef, useMemo, useState } from 'react'
 import { Marker, MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import { PREFERRED_COLOR, OTHER_COLOR, getLegendItem } from '../utils/classify'
-import { getVisibleTiles, getCachedTile, classifyOsmTagsToItem } from '../services/overpass'
+import { getVisibleTiles, getCachedTile, latLngToTile, classifyOsmTagsToItem } from '../services/overpass'
+import { getStreetImage } from '../services/mapillary'
 import BikeMapOverlay from './BikeMapOverlay'
 import type { ClassificationRule } from '../services/rules'
 import type { Place, Route, RouteSegment, OsmWay } from '../utils/types'
@@ -159,6 +160,124 @@ const WALKING_COLOR = '#6b7280' // gray for walk-your-bike segments
 // Route segments are colored green (preferred) or orange (other).
 // Walking segments render as dashed gray lines.
 // ALL segments are always shown — the showOtherPaths toggle controls the overlay, not the route.
+/**
+ * Popup shown when the user taps a route segment. Displays the segment's
+ * classification, a Mapillary street-view image (fetched async), the
+ * relevant OSM tags, and the reroute-around / flag-as-wrong actions.
+ *
+ * Used in both pre-nav routing and in-ride navigation states — the user
+ * can report a bad segment either before starting or while riding past
+ * it, since either context lets them judge whether the classifier was
+ * right about it.
+ */
+function SegmentPopup({
+  seg,
+  latlng,
+  profileKey,
+  onClose,
+  onReroute,
+  onFlag,
+}: {
+  seg: RouteSegment
+  latlng: [number, number]
+  profileKey: string
+  onClose: () => void
+  onReroute?: (wayIds: number[]) => void
+  onFlag?: (seg: RouteSegment) => void
+}) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null)
+  const [imgLoading, setImgLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    setImgLoading(true)
+    getStreetImage(latlng[0], latlng[1]).then((img) => {
+      if (cancelled) return
+      setImgUrl(img?.thumbUrl ?? null)
+      setImgLoading(false)
+    }).catch(() => { if (!cancelled) setImgLoading(false) })
+    return () => { cancelled = true }
+  }, [latlng])
+
+  // Look up the way's OSM tags from cached tiles so the popup can show
+  // classification signals (surface, cycleway, speed) that help the
+  // user judge whether the classifier was right.
+  const tagSummary = useMemo(() => {
+    const wayId = seg.wayIds?.[0]
+    if (wayId == null) return null
+    const { row, col } = latLngToTile(latlng[0], latlng[1])
+    const tile = getCachedTile(row, col)
+    if (!tile) return null
+    const way = tile.find((w) => w.osmId === wayId)
+    if (!way) return null
+    const tags = way.tags
+    const rows: string[] = []
+    if (tags.highway) rows.push(`highway=${tags.highway}`)
+    if (tags.cycleway) rows.push(`cycleway=${tags.cycleway}`)
+    if (tags['cycleway:right']) rows.push(`cycleway:right=${tags['cycleway:right']}`)
+    if (tags['cycleway:left']) rows.push(`cycleway:left=${tags['cycleway:left']}`)
+    if (tags.surface) rows.push(`surface=${tags.surface}`)
+    if (tags.maxspeed) rows.push(`maxspeed=${tags.maxspeed}`)
+    if (tags.bicycle_road === 'yes') rows.push('bicycle_road=yes')
+    return { rows, name: tags.name }
+  }, [seg, latlng])
+
+  const legendItem = getLegendItem(seg.itemName, profileKey)
+  const title = seg.isWalking
+    ? '🚶 Walk your bike here'
+    : `${legendItem?.icon ?? ''} ${seg.itemName ?? 'Route segment'}`
+
+  return (
+    <Popup
+      position={latlng}
+      className="segment-popup"
+      eventHandlers={{ remove: onClose }}
+    >
+      <div className="segment-popup-body">
+        <div className="segment-popup-title">{title}</div>
+        {tagSummary?.name && (
+          <div className="segment-popup-name">{tagSummary.name}</div>
+        )}
+
+        {imgLoading && <div className="segment-popup-img-loading">Loading street view…</div>}
+        {!imgLoading && imgUrl && (
+          <img src={imgUrl} alt="Street view" className="segment-popup-img" loading="lazy" />
+        )}
+        {!imgLoading && !imgUrl && (
+          <div className="segment-popup-img-missing">No street view available for this segment.</div>
+        )}
+
+        {tagSummary && tagSummary.rows.length > 0 && (
+          <div className="segment-popup-tags">
+            {tagSummary.rows.map((r, i) => (
+              <div key={i} className="segment-popup-tag">{r}</div>
+            ))}
+          </div>
+        )}
+
+        <div className="segment-popup-actions">
+          {onReroute && (seg.wayIds?.length ?? 0) > 0 && (
+            <button
+              className="segment-popup-btn segment-popup-btn-primary"
+              onClick={() => { onReroute(seg.wayIds ?? []); onClose() }}
+            >
+              ↩ Reroute around
+            </button>
+          )}
+          {onFlag && (
+            <button
+              className="segment-popup-btn"
+              onClick={() => { onFlag(seg); onClose() }}
+            >
+              🚩 Flag as wrong
+            </button>
+          )}
+        </div>
+      </div>
+    </Popup>
+  )
+}
+
 function RouteDisplay({
   route,
   profileKey,
@@ -172,6 +291,14 @@ function RouteDisplay({
   onRerouteAround?: (wayIds: number[]) => void
   onFlagSegment?: (seg: RouteSegment) => void
 }) {
+  // Selected segment for popup (shared across pre-nav and nav).
+  // latlng is the click point; the popup anchors there.
+  const [selected, setSelected] = useState<{
+    seg: RouteSegment
+    index: number
+    latlng: [number, number]
+  } | null>(null)
+
   if (!route) return null
 
   if (route.segments?.length) {
@@ -185,9 +312,14 @@ function RouteDisplay({
                 key={i}
                 positions={seg.coordinates}
                 color={WALKING_COLOR}
-                weight={14}
+                weight={selected?.index === i ? 16 : 14}
                 opacity={0.85}
                 dashArray="8 8"
+                eventHandlers={{
+                  click: (e) => {
+                    setSelected({ seg, index: i, latlng: [e.latlng.lat, e.latlng.lng] })
+                  },
+                }}
               >
                 <Tooltip sticky direction="top" offset={[0, -6]}>
                   <span style={{ fontSize: 13 }}>&#x1F6B6; Walk your bike</span>
@@ -198,40 +330,21 @@ function RouteDisplay({
           const isPreferred = seg.itemName !== null && preferredItemNames.has(seg.itemName)
           const color = isPreferred ? PREFERRED_COLOR : OTHER_COLOR
           const legendItem = getLegendItem(seg.itemName, profileKey)
-          const canAct = (onRerouteAround || onFlagSegment) && (seg.wayIds?.length ?? 0) > 0
+          const isSelected = selected?.index === i
           return (
             <Polyline
               key={i}
               positions={seg.coordinates}
               color={color}
-              weight={16}
-              opacity={0.95}
+              weight={isSelected ? 18 : 16}
+              opacity={isSelected ? 1 : 0.95}
+              eventHandlers={{
+                click: (e) => {
+                  setSelected({ seg, index: i, latlng: [e.latlng.lat, e.latlng.lng] })
+                },
+              }}
             >
-              {canAct ? (
-                <Popup className="segment-popup">
-                  <div className="segment-popup-body">
-                    <div className="segment-popup-title">
-                      {legendItem?.icon} {seg.itemName ?? 'Route segment'}
-                    </div>
-                    {onRerouteAround && (
-                      <button
-                        className="segment-popup-btn segment-popup-btn-primary"
-                        onClick={() => onRerouteAround(seg.wayIds ?? [])}
-                      >
-                        ↩ Reroute around this
-                      </button>
-                    )}
-                    {onFlagSegment && (
-                      <button
-                        className="segment-popup-btn"
-                        onClick={() => onFlagSegment(seg)}
-                      >
-                        🚩 Flag as wrong
-                      </button>
-                    )}
-                  </div>
-                </Popup>
-              ) : legendItem && (
+              {legendItem && !isSelected && (
                 <Tooltip sticky direction="top" offset={[0, -6]}>
                   <span style={{ fontSize: 13 }}>{legendItem.icon} {seg.itemName}</span>
                 </Tooltip>
@@ -239,6 +352,16 @@ function RouteDisplay({
             </Polyline>
           )
         })}
+        {selected && (
+          <SegmentPopup
+            seg={selected.seg}
+            latlng={selected.latlng}
+            profileKey={profileKey}
+            onClose={() => setSelected(null)}
+            onReroute={onRerouteAround}
+            onFlag={onFlagSegment}
+          />
+        )}
         {/* Segment text labels: coalesced, shown directly on map */}
         {coalesceForIcons(visible)
           .filter((seg) => seg.coordinates.length >= 10)

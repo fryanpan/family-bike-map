@@ -8,10 +8,13 @@ import type { QuickOption } from './components/SearchBar'
 import PlaceCard from './components/PlaceCard'
 import RoutingHeader from './components/RoutingHeader'
 import FlagSegmentModal from './components/FlagSegmentModal'
-import PreferencesModal from './components/PreferencesModal'
 import { saveFeedbackEntry, type FeedbackVerdict } from './services/feedbackQueue'
-import { loadActivePreference } from './services/preferencesStore'
-import type { RiderPreference } from './data/preferences'
+// Chunks A (Layer 2 Berlin overlay) and D (personal preferences) are
+// shelved pending real user feedback on what routing customization
+// actually matters. The modules stay in the repo (src/data/cityProfiles/,
+// src/data/preferences.ts, src/components/PreferencesModal.tsx) but
+// are not wired into the App — re-enable by restoring the imports and
+// the activePreference + regionProfile props on clientRoute.
 import ProfileSelector from './components/ProfileSelector'
 import DirectionsPanel from './components/DirectionsPanel'
 import { DEFAULT_PROFILES } from './data/profiles'
@@ -28,7 +31,7 @@ import {
 import { CITY_PRESETS } from './services/audit'
 import { fetchRules } from './services/rules'
 import type { ClassificationRule } from './services/rules'
-import { BERLIN_PROFILE } from './data/cityProfiles/berlin'
+// Chunk A shelved: BERLIN_PROFILE import removed. See note above.
 import RouteList from './components/RouteList'
 import type { Place, Route, RouteSegment, ProfileMap } from './utils/types'
 import { Sentry } from './sentry'
@@ -179,24 +182,7 @@ export default function App() {
   // Segment flag modal state
   const [flagSegmentTarget, setFlagSegmentTarget] = useState<RouteSegment | null>(null)
 
-  // Active rider preference (Layer 3). Null on first load until the
-  // user saves + activates one via the PreferencesModal.
-  const [activePreference, setActivePreference] = useState<RiderPreference | null>(() => loadActivePreference())
-  const [prefsModalOpen, setPrefsModalOpen] = useState(false)
-  const refreshActivePreference = useCallback(() => {
-    setActivePreference(loadActivePreference())
-  }, [])
-
-  // Cross-tab sync: if another tab edits preferences, pick it up here.
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === 'bike-route-active-preference' || e.key === 'bike-route-preferences') {
-        refreshActivePreference()
-      }
-    }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [refreshActivePreference])
+  // Chunk D (personal preferences) is shelved. See import-block note.
 
   // User-configurable home/school. Null on first launch; set via the
   // "Save as Home/School" button in the place card. Persisted to
@@ -281,14 +267,8 @@ export default function App() {
   const [regionRules, setRegionRules] = useState<ClassificationRule[]>([])
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
 
-  // Layer 2 region overlay (hard-coded per-city rules that adjust the
-  // LtsClassification between classifyEdge and applyModeRule). Only
-  // Berlin is implemented today — other cities fall through with
-  // regionProfile = null.
-  const regionProfile = useMemo(() => {
-    if (activeRegion === 'berlin') return BERLIN_PROFILE
-    return null
-  }, [activeRegion])
+  // Chunk A (Layer 2 Berlin overlay) shelved — always null for now.
+  const regionProfile = null
 
   // Tile cache state. The client router lazy-fetches tiles on demand, so
   // there is no longer an "auto-show download banner" flow. Power users can
@@ -422,7 +402,8 @@ export default function App() {
         const leg = await clientRoute(
           a.lat, a.lng, b.lat, b.lng,
           profileKey, preferredItemNames, regionRules, regionProfile, avoids,
-          activePreference,
+          // Chunk D shelved: no active preference passed.
+          null,
         )
         if (!leg) throw new Error('No route found for this segment')
         legs.push(leg)
@@ -701,8 +682,8 @@ export default function App() {
             showOtherPaths={showOtherPaths}
             flyToPlace={flyToPlace}
             regionRules={regionRules}
-            onRerouteAround={uiState === 'routing' ? rerouteAroundSegment : undefined}
-            onFlagSegment={uiState === 'routing' ? setFlagSegmentTarget : undefined}
+            onRerouteAround={route ? rerouteAroundSegment : undefined}
+            onFlagSegment={route ? setFlagSegmentTarget : undefined}
           />
         </Suspense>
 
@@ -735,15 +716,7 @@ export default function App() {
         {/* Bike layer status + audit gear + preferences */}
         <div className="map-bike-layer-toggle">
           <div className="map-bike-layer-buttons">
-            <button
-              className="audit-gear-btn"
-              onClick={() => setPrefsModalOpen(true)}
-              title={activePreference
-                ? `Personal preferences — active: ${activePreference.name}`
-                : 'Personal preferences (tap to add)'}
-            >
-              {activePreference ? '🧑' : '🙂'}
-            </button>
+            {/* Chunk D (preferences) button removed pending user feedback. */}
             <button
               className="audit-gear-btn"
               onClick={() => {
@@ -850,12 +823,7 @@ export default function App() {
         )}
       </div>
 
-      {prefsModalOpen && (
-        <PreferencesModal
-          onClose={() => setPrefsModalOpen(false)}
-          onChange={refreshActivePreference}
-        />
-      )}
+      {/* Chunk D PreferencesModal shelved pending user feedback. */}
 
       {flagSegmentTarget && (
         <FlagSegmentModal

@@ -2022,18 +2022,40 @@ body.mobile-preview-label {
   z-index: 10000; pointer-events: none;
 }
 
-/* ── Segment popup (tap-to-avoid) ──────────────────────── */
-.segment-popup .leaflet-popup-content { margin: 0; }
+/* ── Segment popup (tap any route segment) ───────────── */
+.segment-popup .leaflet-popup-content { margin: 0; width: 240px !important; }
 .segment-popup-body {
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 10px 12px; min-width: 200px;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px;
 }
 .segment-popup-title {
-  font-size: 13px; font-weight: 600; color: #111827;
-  margin-bottom: 2px;
+  font-size: 13px; font-weight: 700; color: #111827;
+}
+.segment-popup-name {
+  font-size: 12px; color: #4b5563;
+  margin-top: -4px;
+}
+.segment-popup-img {
+  width: 100%; border-radius: 6px; display: block;
+}
+.segment-popup-img-loading,
+.segment-popup-img-missing {
+  background: #f3f4f6; border-radius: 6px;
+  padding: 16px 12px; font-size: 12px; color: #6b7280;
+  text-align: center;
+}
+.segment-popup-tags {
+  display: flex; flex-direction: column; gap: 2px;
+  font-family: 'SF Mono', monospace; font-size: 11px;
+  color: #4b5563;
+  max-height: 80px; overflow-y: auto;
+}
+.segment-popup-tag { white-space: nowrap; }
+.segment-popup-actions {
+  display: flex; flex-direction: column; gap: 4px; margin-top: 4px;
 }
 .segment-popup-btn {
-  padding: 8px 12px; font-size: 13px; font-weight: 500;
+  padding: 9px 12px; font-size: 13px; font-weight: 500;
   background: #f9fafb; border: 1px solid #e5e7eb;
   border-radius: 8px; cursor: pointer; min-height: 40px;
   text-align: left;
