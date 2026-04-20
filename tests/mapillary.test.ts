@@ -1,5 +1,14 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test'
 
+// Stub IDB cache: the browser IDB is absent in bun, and we want tests to
+// exercise the network-path logic (not a real cache). These stubs make
+// readCache always miss and writeCache a no-op so existing tests pass
+// unchanged.
+mock.module('../src/services/mapillaryCache', () => ({
+  readCache: async () => undefined,
+  writeCache: async () => {},
+}))
+
 describe('getStreetImage', () => {
   let originalFetch: typeof fetch
 
@@ -7,8 +16,11 @@ describe('getStreetImage', () => {
     originalFetch = globalThis.fetch
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     globalThis.fetch = originalFetch
+    // Clear rate-limit state between tests.
+    const mod = await import('../src/services/mapillary')
+    mod.__resetRateLimitForTests()
   })
 
   it('returns null when no token is configured', async () => {
@@ -84,6 +96,31 @@ describe('getStreetImage', () => {
       lat: 52.52,
       lng: 13.405,
     })
+
+    delete import.meta.env.VITE_MAPILLARY_TOKEN
+  })
+
+  it('returns null on HTTP 429 and skips subsequent calls during cooldown', async () => {
+    import.meta.env.VITE_MAPILLARY_TOKEN = 'test-token'
+
+    let fetchCalls = 0
+    globalThis.fetch = mock(async () => {
+      fetchCalls++
+      return new Response('Too Many Requests', {
+        status: 429,
+        headers: { 'Retry-After': '60' },
+      })
+    }) as unknown as typeof fetch
+
+    const { getStreetImage } = await import('../src/services/mapillary')
+    const first = await getStreetImage(52.52, 13.405)
+    expect(first).toBeNull()
+    expect(fetchCalls).toBe(1)
+
+    // Second call in cooldown window — must not hit the network.
+    const second = await getStreetImage(52.53, 13.41)
+    expect(second).toBeNull()
+    expect(fetchCalls).toBe(1)
 
     delete import.meta.env.VITE_MAPILLARY_TOKEN
   })

@@ -1,3 +1,5 @@
+import { readCache, writeCache } from './mapillaryCache'
+
 export interface MapillaryImage {
   id: string
   thumbUrl: string
@@ -11,6 +13,12 @@ const MAPILLARY_API = 'https://graph.mapillary.com/images'
 const METERS_TO_LAT = 1 / 111_000
 const METERS_TO_LNG = 1 / (111_000 * Math.cos((52.5 * Math.PI) / 180))
 
+/** Module-level cooldown: when Mapillary 429s, back off until this timestamp. */
+let rateLimitedUntil = 0
+
+/** Default backoff when no Retry-After header is present. */
+const DEFAULT_RATE_LIMIT_BACKOFF_MS = 60_000
+
 /**
  * Fetch the nearest Mapillary street-level image to the given point.
  *
@@ -21,12 +29,21 @@ const METERS_TO_LNG = 1 / (111_000 * Math.cos((52.5 * Math.PI) / 180))
  * fallbacks mean far fewer "no image" states while still picking the
  * nearest image to the click.
  *
+ * Cached in IndexedDB keyed on quantized (lat, lng) — nearby clicks
+ * share results, and a recent null (no coverage) is cached too. On HTTP
+ * 429 we enter a cooldown window and return null without hitting the API.
+ *
  * Returns null if no token is configured, no images exist within 500m,
- * or the API errors.
+ * the API errors, or we're rate-limited.
  */
 export async function getStreetImage(lat: number, lng: number): Promise<MapillaryImage | null> {
   const token = import.meta.env.VITE_MAPILLARY_TOKEN
   if (!token) return null
+
+  const cached = await readCache(lat, lng)
+  if (cached !== undefined) return cached
+
+  if (Date.now() < rateLimitedUntil) return null
 
   for (const radiusM of [100, 250, 500]) {
     const latDelta = radiusM * METERS_TO_LAT
@@ -34,13 +51,21 @@ export async function getStreetImage(lat: number, lng: number): Promise<Mapillar
     const bbox = `${lng - lngDelta},${lat - latDelta},${lng + lngDelta},${lat + latDelta}`
     const params = new URLSearchParams({
       bbox,
-      limit: '25',   // pull several so we can pick the truly nearest
+      limit: '25', // pull several so we can pick the truly nearest
       fields: 'id,thumb_1024_url,computed_geometry',
       access_token: token,
     })
 
     try {
       const resp = await fetch(`${MAPILLARY_API}?${params}`)
+      if (resp.status === 429) {
+        const retryAfter = Number(resp.headers.get('Retry-After'))
+        const backoffMs = Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : DEFAULT_RATE_LIMIT_BACKOFF_MS
+        rateLimitedUntil = Date.now() + backoffMs
+        return null // don't cache — cooldown expires and we can try again
+      }
       if (!resp.ok) return null
 
       const body = (await resp.json()) as {
@@ -71,11 +96,21 @@ export async function getStreetImage(lat: number, lng: number): Promise<Mapillar
           }
         }
       }
-      return best
+      if (best) {
+        void writeCache(lat, lng, best)
+        return best
+      }
     } catch {
       return null
     }
   }
 
+  // Empty at 500m — cache the null so we don't re-query this spot for a week.
+  void writeCache(lat, lng, null)
   return null
+}
+
+/** Test hook: reset module-level rate-limit state between tests. */
+export function __resetRateLimitForTests(): void {
+  rateLimitedUntil = 0
 }
