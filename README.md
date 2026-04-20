@@ -40,10 +40,13 @@ Search for a destination and get a route optimized for riding with a young child
 
 This multimodal approach means the router will walk your family past a scary intersection rather than route you through it — even if it takes a bit longer.
 
-### Other travel modes
+### Other ride modes
 
-- **Trailer mode** — for cargo bikes pulling a child trailer at 20-25 km/h. Prefers wide, smooth paths. Avoids narrow paths and cobblestones.
-- **Training mode** — for solo rides at 25-35 km/h on a road bike. Prefers smooth asphalt, okay with traffic on quiet roads. Avoids tram tracks and bumpy surfaces.
+There are five ride modes total. Four match Bea's progression above (starting out, confident, traffic-savvy) and one adds the parent-piloted case:
+
+- **Kid starting out / confident / traffic-savvy** — the three stages above, each with a different acceptable-infrastructure set. Switching up as your kid grows is a one-tap change.
+- **Carrying kid** — adult pilots a child seat, trailer, or cargo bike at 20-25 km/h. Surface-strict; willing to mix with traffic since the adult has full judgment.
+- **Training** — solo rides at 25-35 km/h on a road bike. Prefers smooth asphalt, okay with traffic on quiet roads. Avoids tram tracks and bumpy surfaces.
 
 ## Why this exists
 
@@ -61,7 +64,7 @@ This app routes on what you can actually see on the map. The same classification
 
 ### Benchmark
 
-22 test routes across Berlin, toddler mode:
+22 test routes in Berlin, kid-starting-out mode:
 
 | Engine | Avg safe infrastructure |
 |--------|:---:|
@@ -71,10 +74,12 @@ This app routes on what you can actually see on the map. The same classification
 
 Wins 13 out of 16 head-to-head comparisons against Valhalla, finding bike-priority streets and car-free paths that Valhalla routes through painted bike lanes instead.
 
+A parallel 22-route benchmark in San Francisco lands **20-22/22 routed** on every mode, with 94-99% preferred-infrastructure on adult modes (carrying-kid, training, kid-traffic-savvy). Tradeoffs and per-mode numbers: [docs/research/2026-04-20-sf-benchmark.md](docs/research/2026-04-20-sf-benchmark.md).
+
 ## Features
 
 - **Browse** bike infrastructure on a map — see what's safe at a glance
-- **Route** with three travel modes (toddler, trailer, training)
+- **Route** with five ride modes (kid starting out / confident / traffic-savvy, carrying kid, training)
 - **Navigate** with live GPS tracking, auto-advancing turn-by-turn, and voice announcements
 - **Download areas** for offline routing — Google Maps-style viewport selection
 - **Classify** infrastructure with an admin audit tool and Mapillary street imagery
@@ -84,14 +89,14 @@ Wins 13 out of 16 head-to-head comparisons against Valhalla, finding bike-priori
 
 Visit [bike-map.fryanpan.com](https://bike-map.fryanpan.com). The app works in any browser, mobile or desktop.
 
-Currently has the best data coverage for **Berlin**, but works anywhere OpenStreetMap has cycling infrastructure tagged. Download an area and try it in your city.
+Tested most thoroughly in **Berlin** and the **San Francisco Bay Area**, but works anywhere OpenStreetMap has cycling infrastructure tagged. Download an area and try it in your city.
 
 ## Development
 
 ```bash
 bun install
 bun run dev     # local dev server
-bun test        # run tests (200+)
+bun test        # run tests (245)
 bun run build   # production build
 ```
 
@@ -101,7 +106,7 @@ bun run build   # production build
 - ngraph.path (client-side A* routing)
 - Cloudflare Workers + KV + D1 (API proxy, classification rules, route logs)
 - OpenStreetMap / Overpass API (infrastructure data)
-- Valhalla (fallback routing)
+- Valhalla + BRouter (benchmark-only, not in the main routing path)
 
 See [docs/product/architecture.md](docs/product/architecture.md) for the full architecture with diagrams.
 
