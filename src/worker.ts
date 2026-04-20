@@ -5,10 +5,13 @@
  * Static assets are served automatically by the [assets] binding for non-API paths.
  *
  * Routes:
- *   /api/valhalla/*   → proxy to valhalla1.openstreetmap.de
- *   /api/nominatim/*  → proxy to nominatim.openstreetmap.org
- *   /api/overpass     → proxy to overpass-api.de with 30-day edge cache
- *   POST /api/feedback → create a Linear issue from user feedback
+ *   /api/valhalla/*      → proxy to valhalla1.openstreetmap.de
+ *   /api/brouter         → proxy to brouter.de
+ *   /api/nominatim/*     → proxy to nominatim.openstreetmap.org
+ *   /api/overpass        → proxy to overpass-api.de with 30-day edge cache
+ *   POST /api/feedback   → create a Linear issue from user feedback (KV-fallback)
+ *   POST /api/segment-feedback → log segment feedback (stub)
+ *   POST /api/route-log  → internal D1 tracking (no corresponding GET)
  */
 
 // Cloudflare Workers extends the standard CacheStorage interface with a `default`
@@ -176,48 +179,16 @@ export default {
       return handleFeedback(request, env)
     }
 
-    // ── Classification rules (KV-backed) ──────────────────────────────
-    const rulesMatch = path.match(/^\/api\/rules\/([a-zA-Z0-9_-]+)$/)
-    if (rulesMatch) {
-      const region = rulesMatch[1]
-      const kvKey = `rules:${region}`
-
-      if (request.method === 'GET') {
-        const value = await env.CLASSIFICATION_RULES.get(kvKey)
-        const body = value ?? JSON.stringify({ rules: [], legendItems: [] })
-        return new Response(body, {
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-
-      if (request.method === 'PUT') {
-        let body: unknown
-        try {
-          body = await request.json()
-        } catch {
-          return Response.json({ error: 'Invalid JSON' }, { status: 400 })
-        }
-
-        if (
-          typeof body !== 'object' ||
-          body === null ||
-          !Array.isArray((body as Record<string, unknown>).rules) ||
-          !Array.isArray((body as Record<string, unknown>).legendItems)
-        ) {
-          return Response.json(
-            { error: 'Body must contain "rules" (array) and "legendItems" (array)' },
-            { status: 400 },
-          )
-        }
-
-        await env.CLASSIFICATION_RULES.put(kvKey, JSON.stringify(body))
-        return Response.json({ ok: true })
-      }
-
-      return Response.json({ error: 'Method not allowed' }, { status: 405 })
-    }
+    // Per-region classification rules were removed pre-launch — custom rules
+    // weren't useful in practice, and the unauthenticated PUT was a DoS
+    // vector (any visitor could wipe live routing config). Classification is
+    // now fully driven by the hardcoded defaults in src/utils/classify.ts +
+    // src/services/overpass.ts. The CLASSIFICATION_RULES KV namespace binding
+    // is retained because it's also used as the feedback write-through store.
 
     // ── Route logging (D1) ───────────────────────────────────────────
+    // POST-only: the matching GET was removed pre-launch because it exposed
+    // every logged trip unauthenticated. Inspect via `wrangler d1 execute`.
     if (path === '/api/route-log' && request.method === 'POST') {
       try {
         const body = await request.json() as Record<string, unknown>
@@ -238,17 +209,21 @@ export default {
       }
     }
 
-    if (path === '/api/route-logs' && request.method === 'GET') {
-      const limit = parseInt(url.searchParams.get('limit') ?? '50')
-      const result = await env.ROUTE_LOGS.prepare(
-        'SELECT * FROM route_logs ORDER BY timestamp DESC LIMIT ?'
-      ).bind(limit).all()
-      return Response.json(result.results)
-    }
-
     // ── All other paths: serve static assets via [assets] binding ─────
     return env.ASSETS.fetch(request)
   },
+}
+
+// Input caps for POST /api/feedback. These keep the endpoint from being
+// used as a DoS vector against KV (25 MB per-value hard limit) or Linear
+// (GraphQL rejects >32 KB descriptions silently). 10 KB of freeform text
+// is already ~1500 words — plenty for any real feedback.
+const MAX_FEEDBACK_TEXT_BYTES = 10 * 1024
+const MAX_ANNOTATION_BYTES = 1 * 1024
+const MAX_ANNOTATION_COUNT = 20
+
+function byteLength(s: string): number {
+  return new TextEncoder().encode(s).length
 }
 
 async function handleFeedback(request: Request, env: Env): Promise<Response> {
@@ -270,6 +245,31 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
   const hasAnnotations = Array.isArray(annotations) && annotations.length > 0
   if (!hasText && !hasAnnotations) {
     return Response.json({ error: 'Feedback must include text or annotations' }, { status: 400 })
+  }
+
+  // ── Size caps: reject oversized inputs with 413 Payload Too Large. ───
+  if (typeof text === 'string' && byteLength(text) > MAX_FEEDBACK_TEXT_BYTES) {
+    return Response.json(
+      { error: `Text exceeds ${MAX_FEEDBACK_TEXT_BYTES} bytes` },
+      { status: 413 },
+    )
+  }
+  if (hasAnnotations) {
+    if ((annotations as unknown[]).length > MAX_ANNOTATION_COUNT) {
+      return Response.json(
+        { error: `Too many annotations (max ${MAX_ANNOTATION_COUNT})` },
+        { status: 413 },
+      )
+    }
+    for (const ann of annotations as unknown[]) {
+      const annText = (ann as { text?: unknown })?.text
+      if (typeof annText === 'string' && byteLength(annText) > MAX_ANNOTATION_BYTES) {
+        return Response.json(
+          { error: `Annotation text exceeds ${MAX_ANNOTATION_BYTES} bytes` },
+          { status: 413 },
+        )
+      }
+    }
   }
 
   // ── Always persist to KV so no feedback is lost if Linear is down or
