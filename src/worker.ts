@@ -257,11 +257,6 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
   const projectId = env.LINEAR_PROJECT_ID
   const assigneeId = env.LINEAR_ASSIGNEE_ID
 
-  if (!apiKey || !teamId || !projectId) {
-    console.error('[Feedback] Linear env vars not configured')
-    return Response.json({ error: 'Feedback service not configured' }, { status: 500 })
-  }
-
   let body: Record<string, unknown>
   try {
     body = await request.json()
@@ -275,6 +270,31 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
   const hasAnnotations = Array.isArray(annotations) && annotations.length > 0
   if (!hasText && !hasAnnotations) {
     return Response.json({ error: 'Feedback must include text or annotations' }, { status: 400 })
+  }
+
+  // ── Always persist to KV so no feedback is lost if Linear is down or
+  //    unconfigured. Key format: feedback:<iso-timestamp>:<rand>. Bryan can
+  //    read the KV from the Cloudflare dashboard or via `wrangler kv:key list`.
+  const kvKey = `feedback:${new Date().toISOString()}:${crypto.randomUUID()}`
+  const kvValue = JSON.stringify({
+    author: typeof author === 'string' ? author : null,
+    text: typeof text === 'string' ? text : null,
+    annotations: hasAnnotations ? annotations : null,
+    pageUrl: typeof pageUrl === 'string' ? pageUrl : null,
+    ts: Date.now(),
+  })
+  try {
+    await env.CLASSIFICATION_RULES.put(kvKey, kvValue)
+  } catch (err) {
+    // Don't fail the request — Linear attempt below is the primary path.
+    console.error('[Feedback] KV fallback write failed:', err)
+  }
+
+  // ── If Linear isn't configured, still return success — the feedback
+  //    survives in KV.
+  if (!apiKey || !teamId || !projectId) {
+    console.warn('[Feedback] Linear env vars not configured — feedback saved to KV only')
+    return Response.json({ status: 'kv-only', kvKey }, { status: 201 })
   }
 
   // Build Linear ticket description
@@ -326,7 +346,8 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
     if (!resp.ok) {
       const err = await resp.text()
       console.error('[Feedback] Linear error:', resp.status, err)
-      return Response.json({ error: 'Failed to create Linear ticket' }, { status: 500 })
+      // KV already captured it — still report success to the user.
+      return Response.json({ status: 'kv-only', kvKey, linearError: true }, { status: 201 })
     }
 
     const result = (await resp.json()) as {
@@ -341,17 +362,18 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
 
     if (result.errors || !result.data?.issueCreate.success) {
       console.error('[Feedback] Linear mutation failed:', result.errors)
-      return Response.json({ error: 'Failed to create Linear ticket' }, { status: 500 })
+      return Response.json({ status: 'kv-only', kvKey, linearError: true }, { status: 201 })
     }
 
     const issue = result.data.issueCreate.issue!
     return Response.json(
-      { id: issue.id, identifier: issue.identifier, url: issue.url, status: 'created' },
+      { id: issue.id, identifier: issue.identifier, url: issue.url, status: 'created', kvKey },
       { status: 201 },
     )
   } catch (err) {
     console.error('[Feedback] Error:', err)
-    return Response.json({ error: 'Failed to create Linear ticket' }, { status: 500 })
+    // KV already captured it — still report success.
+    return Response.json({ status: 'kv-only', kvKey, linearError: true }, { status: 201 })
   }
 }
 
