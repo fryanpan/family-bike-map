@@ -13,6 +13,25 @@
 export type LtsLevel = 1 | 2 | 3 | 4
 
 /**
+ * Path Level — our extension of Furth's LTS framework with a/b sub-tiers
+ * splitting LTS 1 and LTS 2 by bike-infra presence.
+ *
+ *   1a = physically car-free (cycleway, bike path, curb-separated track)
+ *   1b = bike-prioritized shared surface (Fahrradstraße, living street,
+ *        bike boulevard / SF Slow Street pattern)
+ *   2a = bike infra on a quiet street (painted lane or bus lane on
+ *        maxspeed ≤ 30 km/h)
+ *   2b = quiet residential without bike infra OR LTS 2 without infra
+ *   3  = LTS 3 (busy residentials, painted lane on 31–50 km/h, tertiary)
+ *   4  = LTS 4 (primary, secondary ≥50 km/h without infra, trunk)
+ *
+ * See docs/product/plans/2026-04-21-path-categories-plan.md.
+ */
+export type PathLevel = '1a' | '1b' | '2a' | '2b' | '3' | '4'
+
+export const PATH_LEVELS: readonly PathLevel[] = ['1a', '1b', '2a', '2b', '3', '4']
+
+/**
  * Human-readable labels for LTS levels.
  *
  * `short` is the user-facing label (no jargon, no Geller terminology).
@@ -66,6 +85,10 @@ export const LTS_LABELS: Record<LtsLevel, {
  */
 export interface LtsClassification {
   lts: LtsLevel
+  // Our extended path level — Furth's LTS tier with a/b sub-tier for LTS 1/2
+  // split by bike-infra presence. Mode rules in src/data/modes.ts key off this
+  // (not lts) to get finer acceptance granularity. See PathLevel docstring.
+  pathLevel: PathLevel
   // True iff the bike does NOT share a traffic surface with motor vehicles.
   // Physically separated cycle tracks, dedicated cycleways, park paths, and
   // pedestrianised zones are all car-free. Fahrradstraßen, living streets,
@@ -92,6 +115,38 @@ export interface LtsClassification {
   trafficDensity: TrafficDensity | null
   // OSM `surface` tag if set, otherwise null.
   surface: string | null
+}
+
+/**
+ * Derive pathLevel from the other LtsClassification fields. Captures our two
+ * departures from strict Furth:
+ *   - Quiet residential (LTS 1 per Furth) demotes to '2b' when it has no bike
+ *     infra or priority — the kid-first framing treats "quiet street" as
+ *     meaningfully different from "bike-prioritized street."
+ *   - Painted lane on >30 km/h demotes to '3' — Furth allows up to ~48 km/h;
+ *     we tighten so '2a' genuinely represents "quiet street with bike infra."
+ *
+ * See docs/product/plans/2026-04-21-path-categories-plan.md §2.
+ */
+function derivePathLevel(params: {
+  lts: LtsLevel
+  carFree: boolean
+  bikePriority: boolean
+  bikeInfra: boolean
+  speedKmh: number | null
+}): PathLevel {
+  const { lts, carFree, bikePriority, bikeInfra, speedKmh } = params
+  if (lts === 4) return '4'
+  if (lts === 3) return '3'
+  if (carFree) return '1a'
+  if (bikePriority) return '1b'
+  // LTS 1 or 2, shared surface without bike priority.
+  // 2a requires bike infra AND quiet (maxspeed ≤ 30 or unset).
+  if (bikeInfra && (speedKmh == null || speedKmh <= 30)) return '2a'
+  // Bike infra on a faster road demotes to LTS 3 per our kid-first framing.
+  if (bikeInfra) return '3'
+  // Everything else (quiet residential, LTS 2 mixed traffic) → 2b.
+  return '2b'
 }
 
 export type TrafficDensity = 'low' | 'moderate' | 'high'
@@ -236,7 +291,9 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
     return 3 // default for unknown
   })()
 
-  return { lts, carFree, bikePriority, bikeInfra, speedKmh, trafficDensity, surface }
+  const pathLevel = derivePathLevel({ lts, carFree, bikePriority, bikeInfra, speedKmh })
+
+  return { lts, pathLevel, carFree, bikePriority, bikeInfra, speedKmh, trafficDensity, surface }
 }
 
 /**

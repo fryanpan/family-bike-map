@@ -114,6 +114,7 @@ describe('parsePreferenceText — negation safety', () => {
 describe('applyPreferenceAdjustments', () => {
   const base = (): LtsClassification => ({
     lts: 2,
+    pathLevel: '2b',
     carFree: false,
     bikePriority: false,
     bikeInfra: false,

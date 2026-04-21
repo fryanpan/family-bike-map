@@ -6,6 +6,7 @@ import type { LtsClassification } from '../src/utils/lts'
 function baseClassification(overrides: Partial<LtsClassification> = {}): LtsClassification {
   return {
     lts: 2,
+    pathLevel: '2b',
     carFree: false,
     bikePriority: false,
     bikeInfra: false,
