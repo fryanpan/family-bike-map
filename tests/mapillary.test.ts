@@ -23,36 +23,51 @@ describe('getStreetImage', () => {
     mod.__resetRateLimitForTests()
   })
 
-  it('returns null when no token is configured', async () => {
-    const saved = import.meta.env.VITE_MAPILLARY_TOKEN
-    import.meta.env.VITE_MAPILLARY_TOKEN = ''
+  it('calls the Worker proxy at /api/mapillary/images, not graph.mapillary.com', async () => {
+    let calledUrl = ''
+    globalThis.fetch = mock(async (url: string | URL) => {
+      calledUrl = typeof url === 'string' ? url : url.toString()
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
 
     const { getStreetImage } = await import('../src/services/mapillary')
-    const result = await getStreetImage(52.52, 13.405)
-    expect(result).toBeNull()
+    await getStreetImage(52.52, 13.405)
 
-    import.meta.env.VITE_MAPILLARY_TOKEN = saved
+    expect(calledUrl.startsWith('/api/mapillary/images')).toBe(true)
+    // Crucially, the client must NOT embed an access_token — the Worker
+    // injects it server-side from a secret.
+    expect(calledUrl.includes('access_token')).toBe(false)
   })
 
   it('returns null on API error', async () => {
-    // Temporarily set the env var so the function proceeds to fetch
-    import.meta.env.VITE_MAPILLARY_TOKEN = 'test-token'
-
     globalThis.fetch = mock(async () =>
       new Response('Internal Server Error', { status: 500 })
     ) as unknown as typeof fetch
 
-    // Re-import to pick up the env change within the module scope
     const { getStreetImage } = await import('../src/services/mapillary')
     const result = await getStreetImage(52.52, 13.405)
     expect(result).toBeNull()
+  })
 
-    delete import.meta.env.VITE_MAPILLARY_TOKEN
+  it('returns null when Worker is not configured (HTTP 503)', async () => {
+    // Matches the Worker's 503 when MAPILLARY_TOKEN is unset. Client should
+    // degrade silently — no popup image, rest of app works.
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify({ error: 'Mapillary token not configured' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ) as unknown as typeof fetch
+
+    const { getStreetImage } = await import('../src/services/mapillary')
+    const result = await getStreetImage(52.52, 13.405)
+    expect(result).toBeNull()
   })
 
   it('returns null when API returns empty data array', async () => {
-    import.meta.env.VITE_MAPILLARY_TOKEN = 'test-token'
-
     globalThis.fetch = mock(async () =>
       new Response(JSON.stringify({ data: [] }), {
         status: 200,
@@ -63,13 +78,9 @@ describe('getStreetImage', () => {
     const { getStreetImage } = await import('../src/services/mapillary')
     const result = await getStreetImage(52.52, 13.405)
     expect(result).toBeNull()
-
-    delete import.meta.env.VITE_MAPILLARY_TOKEN
   })
 
   it('returns a MapillaryImage on success', async () => {
-    import.meta.env.VITE_MAPILLARY_TOKEN = 'test-token'
-
     const mockData = {
       data: [
         {
@@ -96,13 +107,9 @@ describe('getStreetImage', () => {
       lat: 52.52,
       lng: 13.405,
     })
-
-    delete import.meta.env.VITE_MAPILLARY_TOKEN
   })
 
   it('returns null on HTTP 429 and skips subsequent calls during cooldown', async () => {
-    import.meta.env.VITE_MAPILLARY_TOKEN = 'test-token'
-
     let fetchCalls = 0
     globalThis.fetch = mock(async () => {
       fetchCalls++
@@ -121,7 +128,5 @@ describe('getStreetImage', () => {
     const second = await getStreetImage(52.53, 13.41)
     expect(second).toBeNull()
     expect(fetchCalls).toBe(1)
-
-    delete import.meta.env.VITE_MAPILLARY_TOKEN
   })
 })

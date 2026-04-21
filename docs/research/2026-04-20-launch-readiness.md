@@ -79,13 +79,21 @@ today; lock it behind the same bearer-token key as PUT /api/rules.
 
 ## P2 — follow-up, not launch-blocking
 
-### Mapillary token is in the client bundle
+### Mapillary token is in the client bundle — RESOLVED 2026-04-21
 
-`VITE_MAPILLARY_TOKEN` (`src/services/mapillary.ts:40`) is build-time, so the
-token string ends up in the published JS. Mapillary client-tokens are
-designed for browser use (token → referrer-locked), but the launch checklist
-should confirm the token is scoped to `bike-map.fryanpan.com` in the
-Mapillary dashboard, not a general-purpose key. If not, rotate + scope.
+**Original claim was wrong.** The earlier doc said Mapillary client-tokens are
+"referrer-locked" and that the launch checklist just needed to confirm the
+scope in the Mapillary dashboard. That mitigation is not possible:
+Mapillary client tokens have permission scopes (`read` / `write` / `upload`)
+but **no domain / referrer allowlist mechanism**. Once shipped in the client
+bundle, anyone could copy the token and use it on any site.
+
+**Fix:** the token moved to a Cloudflare Worker secret (`MAPILLARY_TOKEN`)
+and the client now calls `/api/mapillary/*` through the Worker, which
+injects the token server-side and edge-caches the response for 7 days.
+See `src/worker.ts` Mapillary proxy section. `VITE_MAPILLARY_TOKEN` is
+deleted from the build environment (`.github/workflows/deploy.yml`,
+`.env.example`).
 
 ### No CORS / origin pinning on the Worker
 

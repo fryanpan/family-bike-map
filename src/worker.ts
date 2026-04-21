@@ -8,6 +8,8 @@
  *   /api/valhalla/*   → proxy to valhalla1.openstreetmap.de
  *   /api/nominatim/*  → proxy to nominatim.openstreetmap.org
  *   /api/overpass     → proxy to overpass-api.de with 30-day edge cache
+ *   /api/mapillary/*  → proxy to graph.mapillary.com with server-injected
+ *                       token + 7-day edge cache
  *   POST /api/feedback → create a Linear issue from user feedback
  */
 
@@ -37,6 +39,7 @@ type Env = {
   LINEAR_TEAM_ID?: string
   LINEAR_PROJECT_ID?: string
   LINEAR_ASSIGNEE_ID?: string
+  MAPILLARY_TOKEN?: string
   CLASSIFICATION_RULES: KVNamespace
   ROUTE_LOGS: D1Database
   ASSETS: { fetch: (request: Request) => Promise<Response> }
@@ -145,6 +148,82 @@ export default {
           'X-Cache': 'MISS',
         },
       })
+    }
+
+    // ── Mapillary proxy ───────────────────────────────────────────────
+    // Mapillary tokens can NOT be referrer-locked — they're scoped by
+    // permission (read/write/upload) but not by domain. Shipping the token
+    // in the client bundle would let anyone copy it. So we proxy through
+    // the Worker and inject the token server-side.
+    //
+    // Currently only `/api/mapillary/images` is consumed (from
+    // src/services/mapillary.ts), but the proxy forwards anything under
+    // /api/mapillary/* to graph.mapillary.com so future Mapillary endpoints
+    // don't need a new route.
+    //
+    // Edge-cached for 7 days — Mapillary image metadata is stable (image
+    // IDs, thumbnails, locations don't change once indexed) and the client
+    // already caches in IndexedDB on top of this. Two layers of cache keeps
+    // the Mapillary API well below its fair-use limits as the user base
+    // grows.
+    if (path.startsWith('/api/mapillary/')) {
+      if (!env.MAPILLARY_TOKEN) {
+        return new Response(JSON.stringify({ error: 'Mapillary token not configured' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      const upstreamPath = path.replace(/^\/api\/mapillary/, '')
+      // Rebuild query string, injecting the token. Strip any client-supplied
+      // access_token to avoid token-spoofing that bypasses our server secret.
+      const upstreamParams = new URLSearchParams(url.search)
+      upstreamParams.delete('access_token')
+      upstreamParams.set('access_token', env.MAPILLARY_TOKEN)
+      const target = `https://graph.mapillary.com${upstreamPath}?${upstreamParams}`
+
+      // Cache key excludes the token so the shared edge cache is keyed only
+      // on request shape (bbox, fields, limit). Without this, each user's
+      // proxied request would be a distinct cache entry because the query
+      // string differs per user.
+      const cacheKeyParams = new URLSearchParams(url.search)
+      cacheKeyParams.delete('access_token')
+      const cacheKeyUrl = `${url.origin}${path}?${cacheKeyParams}`
+      const cacheKey = new Request(cacheKeyUrl, { method: 'GET' })
+      const edgeCache = caches.default
+      const cached = await edgeCache.match(cacheKey)
+      if (cached) {
+        return new Response(cached.body, {
+          status: cached.status,
+          headers: { ...Object.fromEntries(cached.headers), 'X-Cache': 'HIT' },
+        })
+      }
+
+      const resp = await fetch(target, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      })
+      const body = await resp.arrayBuffer()
+
+      const response = new Response(body, {
+        status: resp.status,
+        headers: {
+          'Content-Type': resp.headers.get('Content-Type') ?? 'application/json',
+          'Cache-Control': 'public, max-age=604800', // 7 days
+          'X-Cache': 'MISS',
+        },
+      })
+
+      // Only cache successful responses — don't pollute the cache with
+      // 429s or 5xxs.
+      if (resp.ok) {
+        // clone() because we need to consume the response body again below
+        const toCache = response.clone()
+        // waitUntil would be nicer, but we don't have ctx here; fire-and-forget is fine
+        edgeCache.put(cacheKey, toCache).catch(() => {})
+      }
+
+      return response
     }
 
     // ── Nominatim proxy ───────────────────────────────────────────────

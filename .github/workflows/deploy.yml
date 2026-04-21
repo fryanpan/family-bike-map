@@ -22,10 +22,20 @@ jobs:
         env:
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          VITE_MAPILLARY_TOKEN: ${{ secrets.VITE_MAPILLARY_TOKEN }}
+          # VITE_MAPILLARY_TOKEN removed 2026-04-21. Mapillary tokens can't
+          # be referrer-locked so they no longer ship in the client bundle —
+          # the Worker proxies the API with a server-side MAPILLARY_TOKEN
+          # secret (set via `wrangler secret put MAPILLARY_TOKEN`). Add the
+          # GitHub secret below only if we want CI to push the Worker
+          # secret on every deploy; the default is a one-time manual set
+          # via wrangler.
 
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          secrets: |
+            MAPILLARY_TOKEN
+        env:
+          MAPILLARY_TOKEN: ${{ secrets.MAPILLARY_TOKEN }}

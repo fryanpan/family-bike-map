@@ -7,7 +7,10 @@ export interface MapillaryImage {
   lng: number
 }
 
-const MAPILLARY_API = 'https://graph.mapillary.com/images'
+// Proxy through our own Cloudflare Worker. Mapillary client tokens CAN'T be
+// referrer-locked, so shipping one in the client bundle would let anyone copy
+// it. The Worker injects the token server-side from a secret.
+const MAPILLARY_API = '/api/mapillary/images'
 
 /** Degrees per metre at Berlin latitude — rough, good enough for bbox queries. */
 const METERS_TO_LAT = 1 / 111_000
@@ -37,9 +40,6 @@ const DEFAULT_RATE_LIMIT_BACKOFF_MS = 60_000
  * the API errors, or we're rate-limited.
  */
 export async function getStreetImage(lat: number, lng: number): Promise<MapillaryImage | null> {
-  const token = import.meta.env.VITE_MAPILLARY_TOKEN
-  if (!token) return null
-
   const cached = await readCache(lat, lng)
   if (cached !== undefined) return cached
 
@@ -49,15 +49,19 @@ export async function getStreetImage(lat: number, lng: number): Promise<Mapillar
     const latDelta = radiusM * METERS_TO_LAT
     const lngDelta = radiusM * METERS_TO_LNG
     const bbox = `${lng - lngDelta},${lat - latDelta},${lng + lngDelta},${lat + latDelta}`
+    // No access_token here — the Worker injects it server-side from a secret.
     const params = new URLSearchParams({
       bbox,
       limit: '25', // pull several so we can pick the truly nearest
       fields: 'id,thumb_1024_url,computed_geometry',
-      access_token: token,
     })
 
     try {
       const resp = await fetch(`${MAPILLARY_API}?${params}`)
+      // 503 means the Worker isn't configured with MAPILLARY_TOKEN — treat
+      // the same way the old code treated a missing VITE_MAPILLARY_TOKEN:
+      // degrade silently, no popup image but the rest of the app works.
+      if (resp.status === 503) return null
       if (resp.status === 429) {
         const retryAfter = Number(resp.headers.get('Retry-After'))
         const backoffMs = Number.isFinite(retryAfter) && retryAfter > 0
