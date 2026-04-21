@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { formatDistance, formatDuration } from '../utils/format'
 import { computeRouteQuality } from '../utils/classify'
+import { SIMPLE_TIERS } from './SimpleLegend'
 import SegmentFeedback from './SegmentFeedback'
 import type { Route, ValhallaManeuver, LatLng } from '../utils/types'
 
@@ -72,7 +73,7 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
   const [turnsExpanded, setTurnsExpanded] = useState(false)
 
   const { summary, maneuvers, segments, coordinates } = route
-  const quality = segments ? computeRouteQuality(segments, preferredItemNames) : null
+  const quality = segments ? computeRouteQuality(segments, preferredItemNames, travelMode) : null
 
   // Compute maneuver coordinates once
   const maneuverCoords = useMemo(() =>
@@ -176,13 +177,25 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
         </div>
       )}
 
-      {/* Route quality bar — hidden in compact mode (already shown in route cards) */}
+      {/* Route quality bar — tier-colored segments matching the map legend.
+          Preferred share splits into 1a/1b/2a sub-segments (each a distinct
+          green). Non-preferred share is the single orange-styled "other"
+          fallback; walking keeps its own color. */}
       {quality && (
         <div className="quality-bar-wrap">
           <div className="quality-bar">
-            {quality.preferred > 0 && (
-              <div className="qb-segment qb-preferred" style={{ flex: quality.preferred }} title={`${Math.round(quality.preferred * 100)}% preferred`} />
-            )}
+            {SIMPLE_TIERS.map((tier) => {
+              const frac = quality.byLevel[tier.level] ?? 0
+              if (frac <= 0) return null
+              return (
+                <div
+                  key={tier.level}
+                  className="qb-segment"
+                  style={{ flex: frac, background: tier.color }}
+                  title={`${Math.round(frac * 100)}% ${tier.title}`}
+                />
+              )
+            })}
             {quality.walking > 0 && (
               <div className="qb-segment qb-walking" style={{ flex: quality.walking }} title={`${Math.round(quality.walking * 100)}% walking`} />
             )}
@@ -190,20 +203,23 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
               <div className="qb-segment qb-other" style={{ flex: quality.other }} title={`${Math.round(quality.other * 100)}% other`} />
             )}
           </div>
-          {/* Quality labels — hidden in compact non-navigating mode */}
-          {(
-            <div className="quality-labels">
-              {quality.preferred > 0.05 && (
-                <span className="ql-preferred">{Math.round(quality.preferred * 100)}% preferred</span>
-              )}
-              {quality.walking > 0.05 && (
-                <span className="ql-walking">{Math.round(quality.walking * 100)}% walking</span>
-              )}
-              {quality.other > 0.05 && (
-                <span className="ql-other">{Math.round(quality.other * 100)}% other</span>
-              )}
-            </div>
-          )}
+          <div className="quality-labels">
+            {SIMPLE_TIERS.map((tier) => {
+              const frac = quality.byLevel[tier.level] ?? 0
+              if (frac <= 0.05) return null
+              return (
+                <span key={tier.level} className="ql-tier" style={{ color: tier.color }}>
+                  {Math.round(frac * 100)}% {tier.title.toLowerCase()}
+                </span>
+              )
+            })}
+            {quality.walking > 0.05 && (
+              <span className="ql-walking">{Math.round(quality.walking * 100)}% walking</span>
+            )}
+            {quality.other > 0.05 && (
+              <span className="ql-other">{Math.round(quality.other * 100)}% other</span>
+            )}
+          </div>
         </div>
       )}
 

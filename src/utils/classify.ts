@@ -154,25 +154,52 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
 
 // ── Route quality stats ─────────────────────────────────────────────────────
 
-export interface RouteQuality { preferred: number; other: number; walking: number }
+export interface RouteQuality {
+  preferred: number
+  other: number
+  walking: number
+  /** Per-tier fractions for the preferred portion. Keys present only when >0. */
+  byLevel: Partial<Record<PathLevel, number>>
+}
 
 /**
- * Fraction of route (by coordinate count) on preferred, other, and walking infrastructure.
+ * Fraction of route (by coordinate count) on preferred, other, and walking
+ * infrastructure, plus a per-tier breakdown for the preferred portion.
+ *
+ * `byLevel` buckets preferred segments by the PROFILE_LEGEND item's `level`
+ * (1a/1b/2a). The distribution plot in DirectionsPanel uses this to render
+ * the preferred share as tier-colored sub-segments — matching the map
+ * overlay + SimpleLegend swatches.
+ *
+ * `profileKey` is optional; when absent, the per-level breakdown is skipped
+ * and `byLevel` is empty. Existing call sites that just read
+ * preferred/other/walking keep working.
  */
 export function computeRouteQuality(
   segments: RouteSegment[],
   preferredItemNames: Set<string>,
+  profileKey?: string,
 ): RouteQuality {
-  if (!segments.length) return { preferred: 0, other: 0, walking: 0 }
+  if (!segments.length) return { preferred: 0, other: 0, walking: 0, byLevel: {} }
   let preferred = 0, other = 0, walking = 0
+  const levelCounts: Partial<Record<PathLevel, number>> = {}
   for (const seg of segments) {
     const count = Math.max(1, seg.coordinates.length - 1)
     if (seg.isWalking) walking += count
-    else if (seg.itemName && preferredItemNames.has(seg.itemName)) preferred += count
-    else other += count
+    else if (seg.itemName && preferredItemNames.has(seg.itemName)) {
+      preferred += count
+      if (profileKey) {
+        const lvl = getLegendItem(seg.itemName, profileKey)?.level
+        if (lvl) levelCounts[lvl] = (levelCounts[lvl] ?? 0) + count
+      }
+    } else other += count
   }
   const total = preferred + other + walking || 1
-  return { preferred: preferred / total, other: other / total, walking: walking / total }
+  const byLevel: Partial<Record<PathLevel, number>> = {}
+  for (const [k, v] of Object.entries(levelCounts)) {
+    if (v) byLevel[k as PathLevel] = v / total
+  }
+  return { preferred: preferred / total, other: other / total, walking: walking / total, byLevel }
 }
 
 // ── Gap healing ─────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import L from 'leaflet'
 import { useEffect, useRef, useMemo, useState } from 'react'
 import { Marker, MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import { PREFERRED_COLOR, OTHER_COLOR, getLegendItem } from '../utils/classify'
-import { dashArrayForLevel } from './SimpleLegend'
+import { dashArrayForLevel, colorForLevel } from './SimpleLegend'
 import { getVisibleTiles, getCachedTile, latLngToTile, classifyOsmTagsToItem } from '../services/overpass'
 import { getStreetImage } from '../services/mapillary'
 import BikeMapOverlay from './BikeMapOverlay'
@@ -401,12 +401,15 @@ function RouteDisplay({
             )
           }
           const isPreferred = seg.itemName !== null && preferredItemNames.has(seg.itemName)
-          const color = isPreferred ? PREFERRED_COLOR : OTHER_COLOR
           const legendItem = getLegendItem(seg.itemName, profileKey)
           const isSelected = selected?.index === i
-          // Line style encodes the path level (solid=1a, long-dash=1b, dots=2a).
-          // Matches the overlay + SimpleLegend rendering.
+          // Line style + tier color encode the path level (solid=1a,
+          // long-dash=1b, dots=2a), matching the overlay + SimpleLegend
+          // swatches + distribution plot.
           const dashArray = legendItem ? dashArrayForLevel(legendItem.level) : undefined
+          const color = legendItem && isPreferred
+            ? colorForLevel(legendItem.level)
+            : isPreferred ? PREFERRED_COLOR : OTHER_COLOR
           return (
             <Polyline
               key={i}
