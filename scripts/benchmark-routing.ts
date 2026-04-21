@@ -12,6 +12,8 @@
 import { buildRoutingGraph, routeOnGraph, haversineM } from '../src/services/clientRouter'
 import { classifyOsmTagsToItem, buildQuery } from '../src/services/overpass'
 import { getDefaultPreferredItems } from '../src/utils/classify'
+import { classifyEdge } from '../src/utils/lts'
+import type { PathLevel } from '../src/utils/lts'
 import type { OsmWay } from '../src/utils/types'
 
 // ── Config ──────────────────────────────────────────────────────────────
@@ -162,13 +164,20 @@ async function fetchTilesForCity(cityName: string, bbox: CityBbox): Promise<OsmW
 
 // ── Score external routes using Overpass data ────────────────────────────
 
+type LevelBreakdown = Record<PathLevel, number>
+
+function emptyBreakdown(): LevelBreakdown {
+  return { '1a': 0, '1b': 0, '2a': 0, '2b': 0, '3': 0, '4': 0 }
+}
+
 function scoreRouteCoords(
   coords: [number, number][],
   allWays: OsmWay[],
   profileKey: string,
   preferred: Set<string>,
-): { preferredPct: number } {
+): { preferredPct: number; levelPct: LevelBreakdown } {
   let totalDist = 0, preferredDist = 0
+  const levelDist: LevelBreakdown = emptyBreakdown()
 
   for (let i = 1; i < coords.length; i++) {
     const d = haversineM(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1])
@@ -184,10 +193,19 @@ function scoreRouteCoords(
     if (nearestWay) {
       const item = classifyOsmTagsToItem(nearestWay.tags, profileKey)
       if (item && preferred.has(item)) preferredDist += d
+      const { pathLevel } = classifyEdge(nearestWay.tags)
+      levelDist[pathLevel] += d
     }
   }
 
-  return { preferredPct: totalDist > 0 ? preferredDist / totalDist : 0 }
+  const levelPct = emptyBreakdown()
+  if (totalDist > 0) {
+    for (const k of Object.keys(levelDist) as PathLevel[]) {
+      levelPct[k] = levelDist[k] / totalDist
+    }
+  }
+
+  return { preferredPct: totalDist > 0 ? preferredDist / totalDist : 0, levelPct }
 }
 
 // ── Valhalla routing ─────────────────────────────────────────────────────
@@ -387,7 +405,16 @@ async function main() {
   for (const p of city.extraRoutes) pairs.push(p)
 
   // Per-mode client routing: build a graph per mode and route every pair.
-  interface ModeRow { mode: ModeKey; pair: string; found: boolean; distanceKm: number; durationMin: number; preferredPct: number; walkingPct: number }
+  interface ModeRow {
+    mode: ModeKey
+    pair: string
+    found: boolean
+    distanceKm: number
+    durationMin: number
+    preferredPct: number
+    walkingPct: number
+    levelPct: LevelBreakdown
+  }
   const modeRows: ModeRow[] = []
   const modeGraphStats: Record<string, { nodes: number; edges: number; buildMs: number }> = {}
 
@@ -406,15 +433,17 @@ async function main() {
       const pairLabel = `${origin.label} -> ${dest.label}`
       if (result) {
         found++
+        const scored = scoreRouteCoords(result.coordinates, allWays, mode, preferred)
         modeRows.push({
           mode, pair: pairLabel, found: true,
           distanceKm: result.distanceKm,
           durationMin: result.durationS / 60,
-          preferredPct: scoreRouteCoords(result.coordinates, allWays, mode, preferred).preferredPct,
+          preferredPct: scored.preferredPct,
           walkingPct: result.walkingPct,
+          levelPct: scored.levelPct,
         })
       } else {
-        modeRows.push({ mode, pair: pairLabel, found: false, distanceKm: 0, durationMin: 0, preferredPct: 0, walkingPct: 0 })
+        modeRows.push({ mode, pair: pairLabel, found: false, distanceKm: 0, durationMin: 0, preferredPct: 0, walkingPct: 0, levelPct: emptyBreakdown() })
       }
     }
     console.log(`  Routes found: ${found}/${pairs.length}`)
@@ -451,6 +480,18 @@ async function main() {
     const stats = modeGraphStats[mode]
     console.log(
       `| ${mode} | ${rows.length}/${total} | ${avg(rows.map((r) => r.distanceKm)).toFixed(1)} km | ${avg(rows.map((r) => r.durationMin)).toFixed(0)} min | ${(avg(rows.map((r) => r.preferredPct)) * 100).toFixed(0)}% | ${(avg(rows.map((r) => r.walkingPct)) * 100).toFixed(0)}% | ${stats.nodes} | ${stats.edges} |`
+    )
+  }
+
+  console.log('\n=== PER-MODE LEVEL BREAKDOWN (% of route distance per PathLevel) ===\n')
+  console.log('| Mode | LTS 1a | LTS 1b | LTS 2a | LTS 2b | LTS 3 | LTS 4 |')
+  console.log('|------|:---:|:---:|:---:|:---:|:---:|:---:|')
+  const pctOf = (rows: ModeRow[], lvl: PathLevel): string =>
+    `${(avg(rows.map((r) => r.levelPct[lvl])) * 100).toFixed(0)}%`
+  for (const mode of MODES) {
+    const rows = modeRows.filter((r) => r.mode === mode && r.found)
+    console.log(
+      `| ${mode} | ${pctOf(rows, '1a')} | ${pctOf(rows, '1b')} | ${pctOf(rows, '2a')} | ${pctOf(rows, '2b')} | ${pctOf(rows, '3')} | ${pctOf(rows, '4')} |`
     )
   }
 
