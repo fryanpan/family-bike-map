@@ -1,7 +1,7 @@
 # Path Categories + Progressive Kid Modes
 
 **Date:** 2026-04-21
-**Status:** Awaiting sign-off on open questions (see §8)
+**Status:** Decisions finalized (see §8) — ready to implement
 **Context:** Pre-launch classification overhaul. Current state: every "preferred" infra in kid-traffic-savvy renders the same green, which overstates the safety of plain residentials and painted lanes vs. cycleways. See conversation 2026-04-21 for the diagnosis.
 
 ## 1. Goal
@@ -57,17 +57,19 @@ Both keep the "if it's green on the map, it has bike-specific design intent" men
 
 ## 3. Mode rules
 
-| Mode | Accepts | Riding speed | Cost multipliers |
-| --- | --- | --- | --- |
-| kid-starting-out | LTS 1a only | 5 km/h | Sidewalks (bridge-walk) at 1 km/h |
-| kid-confident | LTS 1a–1b | 10 km/h | Sidewalks at 2 km/h |
-| kid-traffic-savvy | LTS 1a–2a | 15 km/h | LTS 2b accepted at 15 km/h × 1.5. No sidewalk riding. Bridge-walks at 3 km/h (existing fallback). |
-| carrying-kid | LTS 1a–2b | 20 km/h | LTS 3 accepted at 20 km/h × 2.0 |
-| training | LTS 1b–3 (no LTS 1a elevated paths; LTS 4 rejected) | 30 km/h | No elevated sidewalk paths (narrow, pedestrian-heavy) |
+Walking speed applies uniformly — same value whether the rider is using a sidewalk as primary infra (kid-starting-out / kid-confident) or as a last-resort bridge-walk across a gap (all modes).
+
+| Mode | Accepts | Riding speed | Walking speed | Cost multipliers |
+| --- | --- | --- | --- | --- |
+| kid-starting-out | LTS 1a only | 5 km/h | 1 km/h | — |
+| kid-confident | LTS 1a–1b | 10 km/h | 2 km/h | — |
+| kid-traffic-savvy | LTS 1a–2a | 15 km/h | 3 km/h | LTS 2b accepted at × 1.5. No sidewalk riding — sidewalks only used as forced bridge-walks on LTS 3 gaps where a sidewalk exists. |
+| carrying-kid | LTS 1a–2b | 20 km/h | 4 km/h | LTS 3 accepted at × 2.0 |
+| training | LTS 1b–3 (no LTS 1a elevated paths; LTS 4 rejected) | 30 km/h | 5 km/h | — |
 
 **Universal:** Rough surface → accepted speed unchanged, cost × 5.0.
 
-**Bridge-walks preserved:** per `.claude/rules/routing-changes.md`, hard-rejection is reserved for motorway/trunk and `sidewalk=no`. All other rejected edges re-enter the graph as bridge-walks at `walkingSpeedKmh` so A* can use them as last-resort crossings. "No sidewalk riding" in kid-traffic-savvy means sidewalks are not chosen as primary infra (no routing preference), but the bridge-walk fallback still exists for unavoidable gaps.
+**Bridge-walks preserved:** per `.claude/rules/routing-changes.md`, hard-rejection is reserved for motorway/trunk and `sidewalk=no`. All other rejected edges re-enter the graph as bridge-walks at `walkingSpeedKmh` so A* can use them as last-resort crossings. This preserves the April-16-regression-preventing connectivity invariant.
 
 ## 4. Legend UI
 
@@ -79,7 +81,7 @@ Two modes, user-selectable, persisted in `localStorage`:
 
 **No floating legend panel.** Instead:
 
-- **Map mode**: per visible tile, pick one edge of each level that's present and label it inline on the map. Stable across pan/zoom within the tile. Tiles that lack a level show no label for that level. Tap-any-edge → popup with level + path type as the always-available fallback.
+- **Map mode**: per viewport, pick one edge of each level that's present and label it inline on the map. Stable across small pans; re-picks on major viewport change. Levels not present in the viewport get no label. Tap-any-edge → popup with level + path type as the always-available fallback.
 - **Routing mode**: route path renders with the selected legend directly on the drawn route. No per-edge labels.
 
 Toggle placement: in the settings panel next to the travel-mode selector, not on the map itself.
@@ -113,11 +115,11 @@ Per `.claude/rules/routing-changes.md`, every nontrivial routing change requires
 
 1. **Destination wiring** (task #93) — update `scripts/benchmark-routing.ts` SF config to 17 destinations + single origin. No behavior change.
 2. **Baseline benchmark** (task #94) — `bun scripts/benchmark-routing.ts --no-external --city=sf` and same for Berlin. Snapshots current numbers pre-overhaul.
-3. **Add ****`pathLevel`**** to ****`LtsClassification`** — in `src/utils/lts.ts`, add `pathLevel: PathLevel` field where `PathLevel = '1a' | '1b' | '2a' | '2b' | '3' | '4'`. Derive from existing `carFree`, `bikePriority`, `bikeInfra` flags plus the LTS tier. Purely additive; doesn't change routing yet.
+3. **Add \****`pathLevel`***\* to \****`LtsClassification`** — in `src/utils/lts.ts`, add `pathLevel: PathLevel` field where `PathLevel = '1a' | '1b' | '2a' | '2b' | '3' | '4'`. Derive from existing `carFree`, `bikePriority`, `bikeInfra` flags plus the LTS tier. Purely additive; doesn't change routing yet.
 4. **Unify display classifier** — rewrite `classifyOsmTagsToItem` in `src/services/overpass.ts` to return `{ level, pathType }`. Delete the parallel string-matching logic.
-5. **Extend ****`PROFILE_LEGEND`** — add `level` field on items. Add Bike boulevard item (level 1b). Add `'Other road'` item (level 3 or 4 depending on road class).
+5. **Extend \****`PROFILE_LEGEND`** — add `level` field on items. Add Bike boulevard item (level 1b). Add `'Other road'` item (level 3 or 4 depending on road class).
 6. **Rewrite mode rules** — in `src/data/modes.ts`, replace `ltsAccept` + `ltsConditions` with `acceptedLevels: PathLevel[]` + `levelMultipliers: Record<PathLevel, number>`. Keep bridge-walk behavior.
-7. **Update ****`clientRouter.ts`** — consume `levelMultipliers` when computing edge cost. Cost = `distance / speed × (multiplier for level) × (5.0 if rough surface else 1.0)`.
+7. **Update \****`clientRouter.ts`** — consume `levelMultipliers` when computing edge cost. Cost = `distance / speed × (multiplier for level) × (5.0 if rough surface else 1.0)`.
 8. **Legend rewrite** — Simple / By Path Type toggle, localStorage persistence, inline per-tile labels. Delete floating legend panel.
 9. **Re-run benchmark** — both cities. Compare %-by-level, route cost, walk %, routes-found. Diff against baseline.
 10. **Write results doc** — `docs/research/2026-04-21-path-categories-benchmark.md` with before/after delta and interpretation per `.claude/rules/routing-changes.md`.
@@ -127,45 +129,22 @@ Per `.claude/rules/routing-changes.md`, every nontrivial routing change requires
 
 - **Bridge-walk connectivity invariant** (highest risk). The April 16 regression dropped kid-confident from 16/16 to 5/22 when rejected edges stopped becoming bridge-walks. New mode-rule model must preserve this. Test: `clientRoute(LTS-4-crossing-pair, kid-confident)` must return a route, not fail.
 - **Multiplier tuning.** 1.5× (LTS 2b for traffic-savvy) / 2.0× (LTS 3 for carrying-kid) / 5.0× (rough surface) are initial guesses. Benchmark will tell us if any produce weird detours. Plan is to ship these numbers and tune in a follow-up if benchmarks diverge.
-- **Per-tile label UX.** Leaflet has no native collision avoidance. If overlap is bad on mobile, fall back to 1 label per level per viewport (not per tile).
+- **Per-viewport label UX.** Leaflet has no native collision avoidance. One label per level per viewport keeps clutter low but may leave labels stuck near a map edge after panning. Acceptable for launch; tap-any-edge popup covers the discoverability gap.
 - **Training mode change.** Excluding elevated bike paths is new behavior — could drop some Berlin training routes that used curb-separated sidewalk tracks. Accepted intentionally, verified by benchmark.
 - **OSM data completeness.** Bike boulevards depend on `motor_vehicle=destination` tagging. OSM coverage is uneven; some real-world Slow Streets may not be tagged and will fall into LTS 2b. Accept as known limitation; document.
 - **Departure from strict Furth.** Quiet residential moves from Furth's LTS 1 → our LTS 2b; painted lane on >30 km/h moves from LTS 2 → our LTS 3. Documented in §2 and aligned with the product's kid-first framing.
 
-## 8. Open questions (pick before coding)
+## 8. Decisions
 
-**Q1. LTS 2b rendering on the map for kid modes.** When a kid-mode user is looking at a map, do plain residentials render as overlay infrastructure at all?
+**D1. LTS 2b rendering on the map for kid modes.** No overlay line in kid modes — LTS 2b appears only as the base OSM tile color. Carrying-kid + training show LTS 2b in a 4th style (e.g. gray dotted).
 
-- **Option A (proposed):** no overlay line in kid modes — LTS 2b appears only as the base OSM tile color. Carrying-kid + training show LTS 2b in a 4th style (e.g. gray dotted).
-- **Option B:** always render LTS 2b in all modes but with a subtle style so it doesn't compete with LTS 1a/1b/2a.
+**D2. Walking speed.** Unified per mode — same value whether used as primary sidewalk infra or as a bridge-walk across an unavoidable gap. Values: kid-starting-out 1 km/h, kid-confident 2 km/h, kid-traffic-savvy 3 km/h, carrying-kid 4 km/h, training 5 km/h. Captured in §3.
 
-Going with A unless pushed back.
+**D3. Inline label placement.** One label per level per viewport. Re-pick on major viewport change. Tap-any-edge popup is the universal identification fallback.
 
-**Q2. Kid-starting-out / kid-confident walking speed** (1 km/h / 2 km/h from Bryan's spec) — is this the bridge-walk fallback speed, or the speed when a sidewalk is the *primary chosen infra*?
+**D4. Legend persistence + default.** Default to Simple. Persist user's choice in `localStorage` under `legendMode: 'simple' | 'by-path-type'`. Toggle lives in the settings panel next to the travel-mode selector.
 
-- **Proposed interpretation:** 1 km/h / 2 km/h = riding speed when sidewalk is chosen as primary. Bridge-walk fallback stays at 2 km/h / 2 km/h to preserve the April-16-regression-preventing connectivity invariant.
-- **Implication:** a kid-starting-out route that chooses to walk 200 m on a sidewalk costs 12 min (at 1 km/h); a 50 m bridge-walk across an LTS 4 gap costs ~1.5 min (at 2 km/h).
-
-Going with this unless pushed back.
-
-**Q3. Inline label placement UX.**
-
-- **Proposed:** 1 label per level per visible map tile, stable within the tile. Tap-any-edge for popup-with-level as universal fallback.
-- **Fallback if this is too noisy on mobile:** 1 label per level per viewport.
-
-Going with per-tile first; swap to viewport if benchmarks or testing show it's cluttered.
-
-**Q4. Legend persistence + default.**
-
-- **Proposed:** default to Simple. Persist choice in `localStorage` under `legendMode: 'simple' | 'by-path-type'`. Toggle lives in the settings panel next to travel mode.
-
-Going with this.
-
-**Q5. ****`carrying-kid`**** label rename to "Biking with trailer" (from Bryan's spec)?**
-
-- Internal `RideMode` key stays `carrying-kid` (too invasive to rename). UI label updates to "Biking with trailer" or similar.
-
-Flagging for Bryan's call on display copy; key stays the same either way.
+**D5. ****`carrying-kid`**** display label.** Stays "Carrying Kid" (not "Biking with trailer"). Internal `RideMode` key also stays `carrying-kid`.
 
 ## 9. Files affected
 
