@@ -2,7 +2,21 @@
 
 Post-launch ideas Bryan surfaced 2026-04-21. Not scoped to any sprint; logged so they don't get lost.
 
+## Unifying framing: the map as an advocacy booster
+
+All four threads below share a common purpose beyond "better routes for my kid." They turn the tool into an **advocacy booster** — a way for families to collectively push cities toward better bike infrastructure.
+
+The mechanism has two modes:
+
+**Louder individual actions.** A parent noticing "this intersection scared me" today has nowhere productive to put that feedback. Options are tweeting into the void, emailing their supervisor, or doing nothing. The map can change the outcome by making each individual observation one click from a formal 311 report, a comment on a city plan, or an aggregate dataset shared with advocacy groups. Same action, 10× the impact.
+
+**More convincing aggregate data.** Advocacy groups today argue from anecdote and hand-collected surveys. "Bike counts" at fixed intersections miss the network effects. A map that's seen hundreds of thousands of route requests + feedback events can tell a quantitative story about which streets families avoid, which "bike lanes" are treated as scary by real users, and which gaps unlock new routes if filled. This is the evidence that gets infrastructure built.
+
+The threads below are ordered from aggregate-data-side (Replica, SF schools) to individual-action-side (mid-ride feedback, 311 integration). Both sides are needed; they reinforce each other.
+
 ## 1. Replica — aggregated cell-phone tracking for route popularity
+
+**Advocacy role:** the evidence layer. Answers "does this corridor actually get used?" with quantitative revealed-preference data, not anecdote.
 
 [Replica](https://replicahq.com/) sells aggregated, de-identified mobility data derived from cell-phone and telematics sources. Could answer questions we can't answer from OSM alone:
 
@@ -14,6 +28,7 @@ Post-launch ideas Bryan surfaced 2026-04-21. Not scoped to any sprint; logged so
 - Validate our LTS classification against actual rider behavior at the corridor level.
 - Seed Layer 2 city profile promote/demote rules from revealed preference instead of hand-curated research.
 - Identify underserved corridors where infra investment would unlock the most new kid-friendly routes.
+- **Advocacy payload:** "42,000 family bike trips ran through this intersection last year. It has no protection" is an argument cities respond to. Replica data + our LTS overlay produces that claim at scale.
 
 **Open questions:**
 - Cost and licensing terms (Replica is a paid B2B product)
@@ -21,6 +36,8 @@ Post-launch ideas Bryan surfaced 2026-04-21. Not scoped to any sprint; logged so
 - Freshness — is the data recent enough to catch new Slow Streets / bike lanes?
 
 ## 2. SF school routing — city + national priority
+
+**Advocacy role:** the policy wedge. Safe Routes to School has legitimacy, funding, and political consensus that general bike advocacy lacks. Anchoring our claims to "kids getting to school" unlocks audiences who tune out general cycling infra asks.
 
 Routing kids to school is an explicit city priority in SF (Safe Routes to School programs) and a national one (federal Safe Routes to School funding). This is a natural wedge for family-bike-map.
 
@@ -36,6 +53,8 @@ Routing kids to school is an explicit city priority in SF (Safe Routes to School
 
 ## 3. Mid-ride feedback
 
+**Advocacy role:** the friction reducer on the individual side. The gap between "that intersection scared me" and "I reported it" is mostly memory and effort. Mid-ride capture collapses the gap to one tap / one voice note. Volume of feedback goes up 10×, quality goes up because the moment is fresh.
+
 Today's feedback plugin only collects post-ride text feedback. Real-time feedback during a ride would capture specific moments the rider wants to flag — without requiring them to remember later.
 
 **Ideas:**
@@ -49,6 +68,8 @@ Today's feedback plugin only collects post-ride text feedback. Real-time feedbac
 - How to prevent feedback spam (single-use token? confidence rating?)
 
 ## 4. 311 integration for bad-route reporting
+
+**Advocacy role:** the amplifier. A feedback note in our database is useful for aggregate analysis but invisible to the city. A 311 report is a government-tracked incident with a response SLA and public accountability. Wiring the two together means every user observation can escalate into a formal complaint with one tap — which is exactly the "louder individual actions" loop that changes infrastructure.
 
 SF, NYC, Oakland, Berkeley all have 311 systems for reporting infrastructure issues. We could generate pre-filled 311 reports from feedback events.
 
