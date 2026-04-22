@@ -4,7 +4,7 @@ import { classifyEdge } from '../utils/lts'
 import type { ClassificationRule } from './rules'
 import type { LatLngBounds } from 'leaflet'
 import * as Sentry from '@sentry/react'
-import { loadTile as loadTileFromIdb, storeTile as storeTileToIdb, loadAllTiles as loadAllTilesFromIdb } from './tileStore'
+import { loadTile as loadTileFromIdb, storeTile as storeTileToIdb } from './tileStore'
 
 // Proxy through our own Cloudflare Worker (same-origin request) to avoid:
 //   - Content blockers on iOS that block third-party domains
@@ -366,27 +366,6 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
   // non-critical — the in-memory cache still has the data for this session.
   void storeTileToIdb(row, col, result)
   return result
-}
-
-/**
- * Prime the in-memory tile cache from IndexedDB at startup. Call this once
- * early in app initialization to make already-visited areas render instantly
- * on next load without any network round-trip. Safe to call repeatedly;
- * already-cached entries are not overwritten.
- */
-export async function primeInMemoryCacheFromIdb(): Promise<number> {
-  const tiles = await loadAllTilesFromIdb()
-  let added = 0
-  for (const [key, ways] of tiles) {
-    if (!_tileCache.has(key)) {
-      _tileCache.set(key, ways)
-      added++
-    }
-  }
-  if (added > 0) {
-    console.debug(`[Overpass] Primed ${added} tiles from IndexedDB`)
-  }
-  return added
 }
 
 /**

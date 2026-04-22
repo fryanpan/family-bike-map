@@ -196,36 +196,6 @@ export async function storeTile(row: number, col: number, ways: OsmWay[]): Promi
   }
 }
 
-/**
- * Bulk-read all non-expired tiles from IndexedDB, intended for startup
- * cache warming. Returns a Map keyed by `row:col` → ways[].
- *
- * This is cheap: IDB reads from an object store are batched, and most users
- * won't have more than a few hundred tiles stored.
- */
-export async function loadAllTiles(): Promise<Map<string, OsmWay[]>> {
-  const result = new Map<string, OsmWay[]>()
-  if (!idbAvailable()) return result
-  try {
-    const db = await openDB()
-    const rows = await new Promise<StoredTile[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly')
-      const req = tx.objectStore(STORE_NAME).getAll()
-      req.onsuccess = () => resolve(req.result as StoredTile[])
-      req.onerror = () => reject(req.error)
-    })
-    const now = Date.now()
-    for (const row of rows) {
-      if (!isExpired(row, now)) {
-        result.set(row.key, row.ways)
-      }
-    }
-  } catch {
-    // IDB failure is non-critical
-  }
-  return result
-}
-
 // ── Internal helpers ───────────────────────────────────────────────────────
 
 async function touchTile(key: string): Promise<void> {

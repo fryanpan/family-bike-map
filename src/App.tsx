@@ -22,7 +22,7 @@ import DirectionsPanel from './components/DirectionsPanel'
 import { DEFAULT_PROFILES } from './data/profiles'
 import { scoreRoute } from './services/routeScorer'
 import { clientRoute } from './services/clientRouter'
-import { primeInMemoryCacheFromIdb, latLngToTile, getCachedTile } from './services/overpass'
+import { latLngToTile, getCachedTile } from './services/overpass'
 import { logRoute } from './services/routeLog'
 import { reverseGeocode } from './services/geocoding'
 import {
@@ -305,21 +305,14 @@ export default function App() {
   //
   // The overlay is gated on idbReady — it only starts fetching once the
   // per-tile IDB prime has finished (or failed), so OverlayController's
-  // initial loadVisibleTiles call reads from a warmed _tileCache instead
-  // of racing IDB with Overpass.
+  // Per-tile lazy IDB load happens inside fetchBikeInfraForTile, so the
+  // overlay doesn't need to block on any startup IDB work. Previously we
+  // bulk-loaded every stored tile here, which stalled mobile browsers
+  // for seconds on users with large caches.
   useEffect(() => {
     if (tileCacheCheckedRef.current) return
     tileCacheCheckedRef.current = true
-
-    void (async () => {
-      try {
-        await primeInMemoryCacheFromIdb()
-      } catch {
-        // IndexedDB failure is non-critical
-      } finally {
-        setIdbReady(true)
-      }
-    })()
+    setIdbReady(true)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derived: has the user customized their travel mode's preferred path types?
