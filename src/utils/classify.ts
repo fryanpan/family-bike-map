@@ -332,11 +332,28 @@ export function getLegendItem(name: string | null, profileKey: string): LegendIt
 // If you need this for benchmarking against Valhalla, see
 // src/services/benchmark/valhalla.ts.
 
-// Surfaces that are always rough regardless of travel mode.
+// Surfaces that are genuinely unrideable: very soft (mud/sand/grass),
+// or coarse enough to be painful on any bike (gravel, pebblestone).
+// These get hidden from the overlay AND carry the full rough-surface
+// routing penalty — router avoids them unless no alternative exists.
+// Wide well-maintained double-track dirt paths common in German forests
+// are NOT in this set — `surface=dirt` is rideable (and common).
+export const UNRIDEABLE_SURFACES = new Set([
+  'mud', 'sand', 'grass',
+  'gravel', 'pebblestone',
+])
+
+// Routing-rough surfaces (for the per-mode cost multiplier). Includes
+// unrideables + cobblestone/sett (visible on overlay but penalized in
+// routing — cobbles exist in central Berlin and riders want to see them
+// on the map but avoid them when alternatives exist).
+//
+// `dirt`, `earth`, `ground`, `unpaved`, `fine_gravel`, `compacted`, and
+// `woodchips` are NOT in this set — well-maintained forest paths use
+// these surfaces and they ride fine.
 const ALWAYS_BAD_SURFACES = new Set([
+  ...UNRIDEABLE_SURFACES,
   'cobblestone', 'sett', 'unhewn_cobblestone', 'cobblestone:flattened',
-  'gravel', 'unpaved', 'dirt', 'earth', 'ground', 'mud', 'sand',
-  'grass', 'fine_gravel', 'pebblestone', 'woodchips',
 ])
 
 // Surfaces that are rough only at higher speeds (trailer pulling, training ride).
@@ -372,6 +389,12 @@ export const BAD_SURFACES = new Set([...ALWAYS_BAD_SURFACES, ...SPEED_SENSITIVE_
 // Smoothness values that indicate a rough road regardless of surface tag.
 export const BAD_SMOOTHNESS = new Set([
   'bad', 'very_bad', 'horrible', 'very_horrible', 'impassable',
+])
+
+// Smoothness values that make a way genuinely unrideable. Overlay hides
+// these entirely; the router still allows them as bridge-walks.
+export const UNRIDEABLE_SMOOTHNESS = new Set([
+  'impassable',
 ])
 
 // Maps road_class string values returned by Valhalla API to a numeric rank.

@@ -249,13 +249,19 @@ export type ModeDecision =
   | { accepted: true; speedKmh: number; isWalking: boolean; costMultiplier: number }
   | { accepted: false; reason: string }
 
-// Surfaces that are always rough regardless of mode. Duplicated from
-// classify.ts to avoid a cross-module import cycle (modes is consumed by
-// classify via clientRouter).
+// Surfaces that trigger the rough-surface cost multiplier (per mode).
+// Mirrors ALWAYS_BAD_SURFACES in classify.ts — duplicated here to avoid
+// a cross-module import cycle (modes is consumed by classify via
+// clientRouter).
+//
+// Dirt, earth, ground, fine_gravel, compacted, unpaved, and woodchips
+// are NOT penalized — they're common on well-maintained forest paths
+// that ride fine. Per Bryan 2026-04-23: "routing should also allow
+// dirt paths."
 const ROUGH_SURFACES = new Set([
   'cobblestone', 'sett', 'unhewn_cobblestone', 'cobblestone:flattened',
-  'gravel', 'unpaved', 'dirt', 'earth', 'ground', 'mud', 'sand',
-  'grass', 'fine_gravel', 'pebblestone', 'woodchips',
+  'gravel', 'pebblestone',
+  'mud', 'sand', 'grass',
 ])
 
 /**

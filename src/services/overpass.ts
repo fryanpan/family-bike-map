@@ -1,5 +1,5 @@
 import type { OsmWay } from '../utils/types'
-import { BAD_SURFACES, BAD_SMOOTHNESS, isBadSurface } from '../utils/classify'
+import { BAD_SURFACES, BAD_SMOOTHNESS, UNRIDEABLE_SURFACES, UNRIDEABLE_SMOOTHNESS, isBadSurface } from '../utils/classify'
 import { classifyEdge } from '../utils/lts'
 import type { ClassificationRule } from './rules'
 import type { LatLngBounds } from 'leaflet'
@@ -174,17 +174,21 @@ export function isRoughSurface(tags: Record<string, string>, profileKey: string)
 }
 
 /**
- * Rough-surface check for the OVERLAY (mode-independent). Only hides
- * universally-bad surfaces — cobblestone, gravel, dirt, etc. Paving_stones
- * (Berlin's standard bike-path material) are visible on every mode so
- * toggling up in kid-skill never removes infrastructure from the map.
- * Monotonic-visibility invariant per docs/process/learnings.md.
+ * Surface check for the OVERLAY: hide only surfaces that are genuinely
+ * unrideable (mud / sand / grass / smoothness=impassable). Bumpy-but-
+ * rideable surfaces like fine_gravel, dirt, gravel, compacted, cobblestone,
+ * paving_stones all stay VISIBLE on the map because users want to see
+ * these paths — they just might prefer paved alternatives. The router
+ * still applies a 5× cost penalty via `isRoughSurface` so bumpy paths
+ * don't get picked when there's a better option.
+ *
+ * (Before 2026-04-23 this hid the full ALWAYS_BAD_SURFACES set, which
+ * wrongly removed forest multi-use paths — fine_gravel is the typical
+ * surface tag for a wide compacted forest path that's perfectly rideable.)
  */
 export function isOverlayHiddenSurface(tags: Record<string, string>): boolean {
-  if (BAD_SMOOTHNESS.has(tags.smoothness ?? '')) return true
-  // Any mode's "always bad" set is a subset of kid-starting-out's —
-  // delegate to kid-starting-out which only flags ALWAYS_BAD_SURFACES.
-  if (tags.surface && isBadSurface(tags.surface, 'kid-starting-out')) return true
+  if (UNRIDEABLE_SMOOTHNESS.has(tags.smoothness ?? '')) return true
+  if (tags.surface && UNRIDEABLE_SURFACES.has(tags.surface)) return true
   return false
 }
 
