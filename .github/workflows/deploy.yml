@@ -22,6 +22,9 @@ jobs:
         env:
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          VITE_USERBACK_TOKEN: ${{ secrets.VITE_USERBACK_TOKEN }}
+          VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
+          VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
           # VITE_MAPILLARY_TOKEN removed 2026-04-21. Mapillary tokens can't
           # be referrer-locked so they no longer ship in the client bundle —
           # the Worker proxies the API with a server-side MAPILLARY_TOKEN
