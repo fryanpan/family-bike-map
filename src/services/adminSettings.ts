@@ -61,9 +61,9 @@ export const DEFAULT_SETTINGS: AdminSettings = {
   tiers: {
     '1a': { color: '#004529', weight: 0.75 },
     '1b': { color: '#238443', weight: 0.75 },
-    '2a': { color: '#2b8cbe', weight: 0.6 },
-    '2b': { color: '#e78ac3', weight: 0.6 },
-    '3':  { color: '#ffd92f', weight: 0.6 },
+    '2a': { color: '#2b8cbe', weight: 0.75 },
+    '2b': { color: '#e78ac3', weight: 0.75 },
+    '3':  { color: '#ffd92f', weight: 0.75 },
     '4':  { color: '#999999', weight: 0.4 },
   },
   overlayHaloExtra: 4,
