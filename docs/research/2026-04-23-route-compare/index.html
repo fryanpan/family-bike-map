@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>Route-compare samples (30)</title>
+<style>
+  body{font-family:system-ui,sans-serif;padding:20px;max-width:1200px;margin:0 auto}
+  h1{font-size:20px}
+  .legend{margin:14px 0;font-size:13px}
+  .legend span{display:inline-block;margin-right:14px}
+  .sw{display:inline-block;width:14px;height:4px;vertical-align:middle;margin-right:4px}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{padding:6px 10px;border-bottom:1px solid #eee;text-align:left}
+  th{background:#f9fafb;font-weight:600}
+  td:nth-child(5),td:nth-child(6),td:nth-child(7){font-family:ui-monospace,Menlo,monospace;white-space:nowrap}
+</style>
+</head><body>
+<h1>Route-compare samples (30)</h1>
+<div class="legend">
+  <span><span class="sw" style="background:#2563eb"></span>Client router</span>
+  <span><span class="sw" style="background:#ea580c"></span>Valhalla (osm.org profile)</span>
+  <span><span class="sw" style="background:#059669"></span>BRouter</span>
+</div>
+<p>Each row opens a standalone map with all three routes overlaid. Distances are km; the client column also shows preferred-%.</p>
+<table>
+<thead><tr><th>#</th><th>City</th><th>Mode</th><th>Route</th><th>Client</th><th>Valhalla</th><th>BRouter</th><th></th></tr></thead>
+<tbody>
+<tr>
+      <td>1</td>
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Berlin Zoo</td>
+      <td style="color:#2563eb">8.0km / 79%</td>
+      <td style="color:#ea580c">6.4km</td>
+      <td style="color:#059669">6.8km</td>
+      <td><a href="01-berlin-kid-traffic-savvy-home-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr>
+      <td>2</td>
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (Castro) → UCSF Parnassus</td>
+      <td style="color:#2563eb">4.8km / 64%</td>
+      <td style="color:#ea580c">3.2km</td>
+      <td style="color:#059669">4.5km</td>
+      <td><a href="02-sf-carrying-kid-home-castro-to-ucsf-parnassus.html">open</a></td>
+    </tr>
+<tr>
+      <td>3</td>
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">6.7km / 80%</td>
+      <td style="color:#ea580c">4.8km</td>
+      <td style="color:#059669">5.2km</td>
+      <td><a href="03-berlin-kid-confident-school-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr>
+      <td>4</td>
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">2.5km / 31%</td>
+      <td style="color:#ea580c">2.5km</td>
+      <td style="color:#059669">2.3km</td>
+      <td><a href="04-berlin-training-home-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr>
+      <td>5</td>
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (Castro) → Lung Fung Bakery</td>
+      <td style="color:#2563eb">6.8km / 60%</td>
+      <td style="color:#ea580c">6.9km</td>
+      <td style="color:#059669">6.7km</td>
+      <td><a href="05-sf-training-home-castro-to-lung-fung-bakery.html">open</a></td>
+    </tr>
+<tr>
+      <td>6</td>
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Berlin Zoo</td>
+      <td style="color:#2563eb">9.8km / 70%</td>
+      <td style="color:#ea580c">7.4km</td>
+      <td style="color:#059669">7.9km</td>
+      <td><a href="06-berlin-kid-traffic-savvy-school-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr>
+      <td>7</td>
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (Castro) → 4th+King Caltrain</td>
+      <td style="color:#2563eb">5.2km / 51%</td>
+      <td style="color:#ea580c">4.4km</td>
+      <td style="color:#059669">4.5km</td>
+      <td><a href="07-sf-kid-starting-out-home-castro-to-4th-king-caltrain.html">open</a></td>
+    </tr>
+<tr>
+      <td>8</td>
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (Castro) → UCSF Parnassus</td>
+      <td style="color:#2563eb">4.8km / 64%</td>
+      <td style="color:#ea580c">4.3km</td>
+      <td style="color:#059669">2.9km</td>
+      <td><a href="08-sf-training-home-castro-to-ucsf-parnassus.html">open</a></td>
+    </tr>
+<tr>
+      <td>9</td>
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (Castro) → CPMC Mission Bernal</td>
+      <td style="color:#2563eb">2.2km / 0%</td>
+      <td style="color:#ea580c">2.7km</td>
+      <td style="color:#059669">2.6km</td>
+      <td><a href="09-sf-carrying-kid-home-castro-to-cpmc-mission-bernal.html">open</a></td>
+    </tr>
+<tr>
+      <td>10</td>
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (Castro) → 4th+King Caltrain</td>
+      <td style="color:#2563eb">5.8km / 59%</td>
+      <td style="color:#ea580c">4.4km</td>
+      <td style="color:#059669">4.5km</td>
+      <td><a href="10-sf-kid-traffic-savvy-home-castro-to-4th-king-caltrain.html">open</a></td>
+    </tr>
+<tr>
+      <td>11</td>
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">2.3km / 0%</td>
+      <td style="color:#ea580c">1.5km</td>
+      <td style="color:#059669">1.5km</td>
+      <td><a href="11-berlin-kid-starting-out-school-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr>
+      <td>12</td>
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Alexanderplatz</td>
+      <td style="color:#2563eb">3.2km / 67%</td>
+      <td style="color:#ea580c">2.8km</td>
+      <td style="color:#059669">2.8km</td>
+      <td><a href="12-berlin-kid-traffic-savvy-home-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr>
+      <td>13</td>
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">1.7km / 54%</td>
+      <td style="color:#ea580c">1.8km</td>
+      <td style="color:#059669">1.6km</td>
+      <td><a href="13-berlin-kid-confident-home-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr>
+      <td>14</td>
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (Castro) → 4th+King Caltrain</td>
+      <td style="color:#2563eb">4.5km / 18%</td>
+      <td style="color:#ea580c">FAIL</td>
+      <td style="color:#059669">4.4km</td>
+      <td><a href="14-sf-training-home-castro-to-4th-king-caltrain.html">open</a></td>
+    </tr>
+<tr>
+      <td>15</td>
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (Castro) → Ferry Building</td>
+      <td style="color:#2563eb">6.8km / 58%</td>
+      <td style="color:#ea580c">6.2km</td>
+      <td style="color:#059669">7.1km</td>
+      <td><a href="15-sf-kid-confident-home-castro-to-ferry-building.html">open</a></td>
+    </tr>
+<tr>
+      <td>16</td>
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (Castro) → Dragon Beaux</td>
+      <td style="color:#2563eb">6.6km / 38%</td>
+      <td style="color:#ea580c">6.9km</td>
+      <td style="color:#059669">6.9km</td>
+      <td><a href="16-sf-kid-starting-out-home-castro-to-dragon-beaux.html">open</a></td>
+    </tr>
+<tr>
+      <td>17</td>
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (Castro) → Lung Fung Bakery</td>
+      <td style="color:#2563eb">6.8km / 65%</td>
+      <td style="color:#ea580c">6.9km</td>
+      <td style="color:#059669">6.9km</td>
+      <td><a href="17-sf-kid-traffic-savvy-home-castro-to-lung-fung-bakery.html">open</a></td>
+    </tr>
+<tr>
+      <td>18</td>
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Berlin Zoo</td>
+      <td style="color:#2563eb">8.8km / 44%</td>
+      <td style="color:#ea580c">7.4km</td>
+      <td style="color:#059669">7.9km</td>
+      <td><a href="18-berlin-carrying-kid-school-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr>
+      <td>19</td>
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">5.1km / 77%</td>
+      <td style="color:#ea580c">3.9km</td>
+      <td style="color:#059669">3.9km</td>
+      <td><a href="19-berlin-kid-confident-home-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr>
+      <td>20</td>
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Berlin Zoo</td>
+      <td style="color:#2563eb">11.6km / 87%</td>
+      <td style="color:#ea580c">7.4km</td>
+      <td style="color:#059669">7.9km</td>
+      <td><a href="20-berlin-kid-confident-school-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr>
+      <td>21</td>
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">2.9km / 35%</td>
+      <td style="color:#ea580c">1.5km</td>
+      <td style="color:#059669">1.5km</td>
+      <td><a href="21-berlin-kid-confident-school-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr>
+      <td>22</td>
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (Castro) → Dumpling Story</td>
+      <td style="color:#2563eb">1.2km / 0%</td>
+      <td style="color:#ea580c">0.9km</td>
+      <td style="color:#059669">0.9km</td>
+      <td><a href="22-sf-training-home-castro-to-dumpling-story.html">open</a></td>
+    </tr>
+<tr>
+      <td>23</td>
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Alexanderplatz</td>
+      <td style="color:#2563eb">2.9km / 68%</td>
+      <td style="color:#ea580c">3.0km</td>
+      <td style="color:#059669">2.8km</td>
+      <td><a href="23-berlin-training-home-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr>
+      <td>24</td>
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">2.0km / 55%</td>
+      <td style="color:#ea580c">1.6km</td>
+      <td style="color:#059669">1.6km</td>
+      <td><a href="24-berlin-kid-traffic-savvy-home-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr>
+      <td>25</td>
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (Castro) → CPMC Mission Bernal</td>
+      <td style="color:#2563eb">2.6km / 24%</td>
+      <td style="color:#ea580c">2.7km</td>
+      <td style="color:#059669">2.6km</td>
+      <td><a href="25-sf-kid-confident-home-castro-to-cpmc-mission-bernal.html">open</a></td>
+    </tr>
+<tr>
+      <td>26</td>
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (Castro) → Dumpling Story</td>
+      <td style="color:#2563eb">1.2km / 26%</td>
+      <td style="color:#ea580c">0.9km</td>
+      <td style="color:#059669">0.9km</td>
+      <td><a href="26-sf-kid-confident-home-castro-to-dumpling-story.html">open</a></td>
+    </tr>
+<tr>
+      <td>27</td>
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Alexanderplatz</td>
+      <td style="color:#2563eb">2.5km / 45%</td>
+      <td style="color:#ea580c">2.3km</td>
+      <td style="color:#059669">2.3km</td>
+      <td><a href="27-berlin-kid-traffic-savvy-school-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr>
+      <td>28</td>
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (Castro) → 22nd St Caltrain</td>
+      <td style="color:#2563eb">4.4km / 27%</td>
+      <td style="color:#ea580c">4.7km</td>
+      <td style="color:#059669">4.9km</td>
+      <td><a href="28-sf-kid-starting-out-home-castro-to-22nd-st-caltrain.html">open</a></td>
+    </tr>
+<tr>
+      <td>29</td>
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">5.3km / 55%</td>
+      <td style="color:#ea580c">4.0km</td>
+      <td style="color:#059669">4.0km</td>
+      <td><a href="29-berlin-training-home-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr>
+      <td>30</td>
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Thaipark → Tranxx</td>
+      <td style="color:#2563eb">4.2km / 44%</td>
+      <td style="color:#ea580c">3.4km</td>
+      <td style="color:#059669">3.4km</td>
+      <td><a href="30-berlin-carrying-kid-thaipark-to-tranxx.html">open</a></td>
+    </tr>
+</tbody>
+</table>
+</body></html>
