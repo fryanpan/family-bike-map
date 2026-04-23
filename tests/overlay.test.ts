@@ -13,6 +13,7 @@ function baseClassification(overrides: Partial<LtsClassification> = {}): LtsClas
     speedKmh: 50,
     trafficDensity: 'moderate',
     surface: null,
+    smoothness: null,
     ...overrides,
   }
 }

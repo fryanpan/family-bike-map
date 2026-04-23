@@ -115,6 +115,10 @@ export interface LtsClassification {
   trafficDensity: TrafficDensity | null
   // OSM `surface` tag if set, otherwise null.
   surface: string | null
+  // OSM `smoothness` tag if set, otherwise null. A bike path can have
+  // surface=asphalt but smoothness=horrible (freeze-thaw cracked, root
+  // heaves, potholed). Treated as rough independent of surface.
+  smoothness: string | null
 }
 
 /**
@@ -164,6 +168,7 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
   const maxspeed = parseInt(tags.maxspeed ?? '0', 10)
   const lanes = parseInt(tags.lanes ?? '0', 10)
   const surface = tags.surface ?? null
+  const smoothness = tags.smoothness ?? null
 
   const isCycleway = highway === 'cycleway'
   const isPath = highway === 'path'
@@ -293,7 +298,7 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
 
   const pathLevel = derivePathLevel({ lts, carFree, bikePriority, bikeInfra, speedKmh })
 
-  return { lts, pathLevel, carFree, bikePriority, bikeInfra, speedKmh, trafficDensity, surface }
+  return { lts, pathLevel, carFree, bikePriority, bikeInfra, speedKmh, trafficDensity, surface, smoothness }
 }
 
 /**

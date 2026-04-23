@@ -267,6 +267,16 @@ const ROUGH_SURFACES = new Set([
   'cobblestone', 'sett', 'unhewn_cobblestone', 'cobblestone:flattened',
 ])
 
+// Smoothness tiers that trigger the same rough penalty regardless of
+// surface. A bike path with surface=asphalt but smoothness=horrible
+// (freeze-thaw cracks, root heaves, potholes) rides like gravel. Mirrors
+// BAD_SMOOTHNESS in classify.ts — duplicated for the same cycle-avoidance
+// reason as ROUGH_SURFACES. `intermediate` is intentionally excluded:
+// cyclocross/hybrid-rideable is still fine for a kid on a bike path.
+const BAD_SMOOTHNESS = new Set([
+  'bad', 'very_bad', 'horrible', 'very_horrible', 'impassable',
+])
+
 /**
  * Check whether a mode accepts an edge, given its Layer 1 classification
  * (already adjusted by any Layer 2 region overlay).
@@ -329,7 +339,7 @@ export function applyModeRule(
   classification: LtsClassification,
   pathType?: string | null,
 ): ModeDecision {
-  const { pathLevel, surface } = classification
+  const { pathLevel, surface, smoothness } = classification
 
   // Level acceptance.
   if (!rule.acceptedLevels.has(pathLevel)) {
@@ -371,7 +381,10 @@ export function applyModeRule(
   }
 
   const levelMul = rule.levelMultipliers?.[pathLevel] ?? 1.0
-  const roughMul = surface && ROUGH_SURFACES.has(surface) ? (rule.roughSurfaceMultiplier ?? 1.0) : 1.0
+  const isRough =
+    (surface != null && ROUGH_SURFACES.has(surface)) ||
+    (smoothness != null && BAD_SMOOTHNESS.has(smoothness))
+  const roughMul = isRough ? (rule.roughSurfaceMultiplier ?? 1.0) : 1.0
   const costMultiplier = levelMul * roughMul
 
   return {

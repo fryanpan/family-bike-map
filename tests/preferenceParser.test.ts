@@ -121,6 +121,7 @@ describe('applyPreferenceAdjustments', () => {
     speedKmh: 30,
     trafficDensity: 'low',
     surface: 'cobblestone',
+    smoothness: null,
   })
 
   it('null preference is a pass-through', () => {
