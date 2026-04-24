@@ -241,6 +241,45 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
 import type { LtsClassification } from '../utils/lts'
 
 /**
+ * UI-facing: how does this travel mode treat this PathLevel?
+ *   'accepted'      — router rides the edge at full mode speed.
+ *   'bridge-walked' — rejected as preferred but still traversable at
+ *                     walking pace to preserve connectivity. See
+ *                     clientRouter's bridge-walk branch.
+ * Admin's AuditSamplesTab groups levels by this.
+ */
+export type LevelAcceptance = 'accepted' | 'bridge-walked'
+
+export function pathLevelAcceptanceForMode(
+  mode: RideMode,
+  level: PathLevel,
+): LevelAcceptance {
+  return MODE_RULES[mode].acceptedLevels.has(level) ? 'accepted' : 'bridge-walked'
+}
+
+/**
+ * Plain-English routing note for a (mode, level) pair — used in the
+ * admin audit UI so Bryan (and anyone else) can see at a glance how
+ * the router treats each LTS level under the selected mode. Numbers
+ * are pulled directly from MODE_RULES so the UI can't drift.
+ */
+export function routingNoteForModeLevel(mode: RideMode, level: PathLevel): string {
+  const rule = MODE_RULES[mode]
+  if (rule.acceptedLevels.has(level)) {
+    const mult = rule.levelMultipliers?.[level] ?? 1.0
+    const multHint = mult > 1.01
+      ? ` (${mult.toFixed(1)}× cost vs best-tier alternatives)`
+      : ''
+    return `Routed at ${rule.ridingSpeedKmh} km/h${multHint}. First-choice path for this mode.`
+  }
+  return (
+    `Treated as off-network for this mode. Only used as a short unavoidable gap: ` +
+    `the router walks the bike on the sidewalk at ${rule.walkingSpeedKmh} km/h so connectivity holds, ` +
+    `but walking is heavily penalised per-metre so it won't be chosen over a real alternative.`
+  )
+}
+
+/**
  * Decision returned by the mode-rule acceptance check.
  *   accepted — edge is usable; use `speedKmh` for cost computation
  *   rejected — edge is excluded from the routing graph entirely

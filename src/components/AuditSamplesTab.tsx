@@ -5,6 +5,10 @@ import type { MapillaryImage } from '../services/mapillary'
 import type { CityScan, AuditWay } from '../services/audit'
 import { classifyOsmTagsToItem } from '../services/overpass'
 import type { ClassificationRule } from '../services/rules'
+import { classifyEdge, PATH_LEVELS, PATH_LEVEL_LABELS } from '../utils/lts'
+import type { PathLevel } from '../utils/lts'
+import { pathLevelAcceptanceForMode, routingNoteForModeLevel } from '../data/modes'
+import type { RideMode } from '../data/modes'
 
 interface Props {
   scan: CityScan | null
@@ -20,8 +24,8 @@ function shuffle<T>(arr: T[]): T[] {
   return out
 }
 
-const INITIAL_IMAGES = 3
-const EXPANDED_IMAGES = 12
+const INITIAL_IMAGES = 6
+const EXPANDED_IMAGES = 18
 const TAG_KEYS = ['highway', 'cycleway', 'cycleway:right', 'cycleway:left', 'cycleway:both', 'surface', 'smoothness', 'maxspeed', 'bicycle', 'segregated', 'bicycle_road']
 
 interface FoundImage {
@@ -211,32 +215,33 @@ function ClassCard({
 // ── Main tab ────────────────────────────────────────────────────────────
 
 export default function AuditSamplesTab({ scan, regionRules }: Props) {
-  const [travelMode, setTravelMode] = useState('kid-starting-out')
+  const [travelMode, setTravelMode] = useState<RideMode>('kid-starting-out')
 
-  const { preferred, other } = useMemo(() => {
-    if (!scan) return { preferred: new Map<string, AuditWay[]>(), other: new Map<string, AuditWay[]>() }
+  // Group by PathLevel → classification → ways. Each ClassCard still
+  // represents one classification item (e.g. "Bike path") but cards are
+  // now nested inside level sections so Bryan can audit each tier's
+  // acceptance under the currently-selected mode.
+  const byLevel = useMemo(() => {
+    const out = new Map<PathLevel, Map<string, AuditWay[]>>()
+    for (const lvl of PATH_LEVELS) out.set(lvl, new Map())
+    if (!scan) return out
 
     const preferredItems = getDefaultPreferredItems(travelMode)
-    const prefMap = new Map<string, AuditWay[]>()
-    const otherMap = new Map<string, AuditWay[]>()
 
     for (const group of scan.groups) {
       const sampleTags = group.samples[0]?.tags
-      const cls = sampleTags
-        ? (classifyOsmTagsToItem(sampleTags, travelMode, regionRules) ?? 'Unclassified')
-        : (group.classification ?? 'Unclassified')
-      const isPreferred = preferredItems.has(cls)
-      const map = isPreferred ? prefMap : otherMap
-      const existing = map.get(cls) ?? []
+      if (!sampleTags) continue
+      const { pathLevel } = classifyEdge(sampleTags)
+      const cls = classifyOsmTagsToItem(sampleTags, travelMode, regionRules) ?? 'Unclassified'
+      const levelMap = out.get(pathLevel)!
+      const existing = levelMap.get(cls) ?? []
       existing.push(...group.samples.filter((w) => w.center))
-      map.set(cls, existing)
+      levelMap.set(cls, existing)
+      // Kept for future: could surface preferredItems per-card, currently
+      // mode-acceptance is shown at the level header which is sufficient.
+      void preferredItems
     }
-
-    const sortBySize = (a: [string, AuditWay[]], b: [string, AuditWay[]]) => b[1].length - a[1].length
-    return {
-      preferred: new Map([...prefMap.entries()].sort(sortBySize)),
-      other: new Map([...otherMap.entries()].sort(sortBySize)),
-    }
+    return out
   }, [scan, travelMode, regionRules])
 
   if (!scan) {
@@ -250,7 +255,7 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
         <select
           className="audit-select"
           value={travelMode}
-          onChange={(e) => setTravelMode(e.target.value)}
+          onChange={(e) => setTravelMode(e.target.value as RideMode)}
         >
           <option value="kid-starting-out">Kid starting out</option>
           <option value="kid-confident">Kid confident</option>
@@ -260,23 +265,40 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
         </select>
       </div>
 
-      {preferred.size > 0 && (
-        <div className="st-section">
-          <h2 className="st-heading st-heading-pref">Preferred</h2>
-          {[...preferred.entries()].map(([cls, ways]) => (
-            <ClassCard key={cls} classification={cls} ways={ways} isPreferred />
-          ))}
-        </div>
-      )}
-
-      {other.size > 0 && (
-        <div className="st-section">
-          <h2 className="st-heading st-heading-other">Other</h2>
-          {[...other.entries()].map(([cls, ways]) => (
-            <ClassCard key={cls} classification={cls} ways={ways} isPreferred={false} />
-          ))}
-        </div>
-      )}
+      {(['accepted', 'bridge-walked'] as const).map((bucket) => {
+        const levelsInBucket = PATH_LEVELS.filter((lvl) =>
+          pathLevelAcceptanceForMode(travelMode, lvl) === bucket &&
+          (byLevel.get(lvl)?.size ?? 0) > 0,
+        )
+        if (levelsInBucket.length === 0) return null
+        const sortBySize = (a: [string, AuditWay[]], b: [string, AuditWay[]]) => b[1].length - a[1].length
+        return (
+          <div key={bucket} className={`st-bucket st-bucket-${bucket}`}>
+            <h2 className={`st-bucket-heading st-bucket-heading-${bucket}`}>
+              {bucket === 'accepted' ? 'Preferred paths' : 'Not preferred paths'}
+            </h2>
+            {levelsInBucket.map((lvl) => {
+              const classMap = byLevel.get(lvl)!
+              const info = PATH_LEVEL_LABELS[lvl]
+              const note = routingNoteForModeLevel(travelMode, lvl)
+              const entries = [...classMap.entries()].sort(sortBySize)
+              return (
+                <div key={lvl} className={`st-section st-level st-level-${bucket}`}>
+                  <div className="st-level-header">
+                    <span className="st-level-code">LTS {lvl}</span>
+                    <span className="st-level-name">{info.short}</span>
+                  </div>
+                  <p className="st-level-desc">{info.description}</p>
+                  <p className="st-level-note">{note}</p>
+                  {entries.map(([cls, ways]) => (
+                    <ClassCard key={cls} classification={cls} ways={ways} isPreferred={bucket === 'accepted'} />
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
     </div>
   )
 }

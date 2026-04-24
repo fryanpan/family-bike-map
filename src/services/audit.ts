@@ -32,35 +32,38 @@ export interface CityPreset {
   bbox: { south: number; west: number; north: number; east: number }
 }
 
+// Cities available for classification auditing. Sorted alphabetically so
+// the dropdown is easy to scan. Bboxes cover the city centre plus one
+// ring of inner suburbs — just enough for scanCity to sample ~20 tiles.
+// Original seven (Berlin / Bay Area / Copenhagen / Hamburg) are ground-
+// truthed; the rest were added to give Bryan wider exploration range and
+// should be treated as exploratory until spot-checked.
 export const CITY_PRESETS: CityPreset[] = [
-  {
-    name: 'Berlin',
-    bbox: { south: 52.34, west: 13.08, north: 52.68, east: 13.76 },
-  },
-  {
-    name: 'Copenhagen',
-    bbox: { south: 55.61, west: 12.45, north: 55.73, east: 12.65 },
-  },
-  {
-    name: 'Hamburg',
-    bbox: { south: 53.4, west: 9.8, north: 53.65, east: 10.2 },
-  },
-  {
-    name: 'San Francisco',
-    bbox: { south: 37.70, west: -122.52, north: 37.81, east: -122.35 },
-  },
-  {
-    name: 'Oakland',
-    bbox: { south: 37.73, west: -122.33, north: 37.85, east: -122.16 },
-  },
-  {
-    name: 'Berkeley',
-    bbox: { south: 37.85, west: -122.32, north: 37.92, east: -122.23 },
-  },
-  {
-    name: 'Marin',
-    bbox: { south: 37.83, west: -122.60, north: 38.08, east: -122.40 },
-  },
+  { name: 'Amsterdam',     bbox: { south: 52.30, west:    4.80,  north: 52.42, east:    5.00  } },
+  { name: 'Antwerp',       bbox: { south: 51.17, west:    4.35,  north: 51.28, east:    4.50  } },
+  { name: 'Berkeley',      bbox: { south: 37.85, west: -122.32,  north: 37.92, east: -122.23  } },
+  { name: 'Berlin',        bbox: { south: 52.34, west:   13.08,  north: 52.68, east:   13.76  } },
+  { name: 'Bogotá',        bbox: { south:  4.55, west:  -74.15,  north:  4.75, east:  -74.05  } },
+  { name: 'Bordeaux',      bbox: { south: 44.80, west:   -0.65,  north: 44.88, east:   -0.54  } },
+  { name: 'Buenos Aires',  bbox: { south:-34.66, west:  -58.52,  north:-34.52, east:  -58.35  } },
+  { name: 'Cape Town',     bbox: { south:-34.00, west:   18.40,  north:-33.85, east:   18.55  } },
+  { name: 'Copenhagen',    bbox: { south: 55.61, west:   12.45,  north: 55.73, east:   12.65  } },
+  { name: 'Hamburg',       bbox: { south: 53.40, west:    9.80,  north: 53.65, east:   10.20  } },
+  { name: 'Kigali',        bbox: { south: -1.99, west:   30.03,  north: -1.92, east:   30.13  } },
+  { name: 'Malmö',         bbox: { south: 55.54, west:   12.94,  north: 55.63, east:   13.08  } },
+  { name: 'Marin',         bbox: { south: 37.83, west: -122.60,  north: 38.08, east: -122.40  } },
+  { name: 'Munich',        bbox: { south: 48.08, west:   11.46,  north: 48.22, east:   11.68  } },
+  { name: 'Oakland',       bbox: { south: 37.73, west: -122.33,  north: 37.85, east: -122.16  } },
+  { name: 'Oslo',          bbox: { south: 59.87, west:   10.66,  north: 59.97, east:   10.85  } },
+  { name: 'Paris',         bbox: { south: 48.80, west:    2.23,  north: 48.92, east:    2.42  } },
+  { name: 'Portland, OR',  bbox: { south: 45.46, west: -122.74,  north: 45.60, east: -122.57  } },
+  { name: 'San Francisco', bbox: { south: 37.70, west: -122.52,  north: 37.81, east: -122.35  } },
+  { name: 'Strasbourg',    bbox: { south: 48.53, west:    7.69,  north: 48.62, east:    7.82  } },
+  { name: 'Taipei',        bbox: { south: 25.00, west:  121.48,  north: 25.12, east:  121.60  } },
+  { name: 'Tokyo',         bbox: { south: 35.60, west:  139.65,  north: 35.78, east:  139.85  } },
+  { name: 'Utrecht',       bbox: { south: 52.04, west:    5.05,  north: 52.13, east:    5.18  } },
+  { name: 'Vancouver, BC', bbox: { south: 49.20, west: -123.22,  north: 49.31, east: -123.02  } },
+  { name: 'Vienna',        bbox: { south: 48.14, west:   16.28,  north: 48.28, east:   16.47  } },
 ]
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { CITY_PRESETS, scanCity, reclassifyGroups } from '../services/audit'
+import type { CityPreset } from '../services/audit'
 import { saveScan, loadScan } from '../services/auditCache'
 import AuditGroupDetail from './AuditGroupDetail'
 import AuditSamplesTab from './AuditSamplesTab'
@@ -11,6 +12,37 @@ import type { RegionRules } from '../services/rules'
 type OuterTab = 'audit' | 'settings'
 type InnerTab = 'samples' | 'groups'
 type FilterStatus = 'all' | 'classified' | 'unclassified'
+
+// Sentinel for the "sample tiles around my current location" dropdown
+// option. When selected, scanning requests browser geolocation and
+// builds a bbox around the user. Defaults to this on open so auditing
+// "just works" in whatever city Bryan is actually in.
+const CURRENT_LOCATION = 'Current location'
+// Half-span (degrees) for the bbox around a detected current location.
+// 0.18° ≈ 20 km at Berlin/SF latitudes — covers ~16 tiles, of which
+// `scanCity` randomly samples up to 20.
+const CURRENT_LOCATION_HALF_SPAN_DEG = 0.18
+
+async function getCurrentLocationBbox(): Promise<CityPreset['bbox']> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new Error('geolocation unavailable'))
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords
+        const r = CURRENT_LOCATION_HALF_SPAN_DEG
+        resolve({
+          south: latitude - r, north: latitude + r,
+          west: longitude - r, east: longitude + r,
+        })
+      },
+      (err) => reject(err),
+      { timeout: 10000, enableHighAccuracy: false },
+    )
+  })
+}
 
 const VALID_OUTER: OuterTab[] = ['audit', 'settings']
 const VALID_INNER: InnerTab[] = ['samples', 'groups']
@@ -53,7 +85,7 @@ export default function AdminPanel({ onClose, initialTab }: Props) {
     window.history.replaceState({}, '', `?${params.toString()}`)
   }, [])
 
-  const [selectedCity, setSelectedCity] = useState(CITY_PRESETS[0].name)
+  const [selectedCity, setSelectedCity] = useState(CURRENT_LOCATION)
   const [scan, setScan] = useState<CityScan | null>(null)
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
@@ -93,14 +125,30 @@ export default function AdminPanel({ onClose, initialTab }: Props) {
   }, [])
 
   async function handleScan() {
-    const preset = CITY_PRESETS.find((p) => p.name === selectedCity)
-    if (!preset || scanning) return
+    if (scanning) return
+
+    let bbox: CityPreset['bbox'] | null = null
+    if (selectedCity === CURRENT_LOCATION) {
+      try {
+        bbox = await getCurrentLocationBbox()
+      } catch (err) {
+        // Browser geolocation denied or unavailable. Surface the error
+        // without a silent fallback — Bryan should know why it failed.
+        const msg = err instanceof Error ? err.message : String(err)
+        alert(`Couldn't read current location: ${msg}`)
+        return
+      }
+    } else {
+      const preset = CITY_PRESETS.find((p) => p.name === selectedCity)
+      if (!preset) return
+      bbox = preset.bbox
+    }
 
     setScanning(true)
     setProgress({ done: 0, total: 1 })
 
     try {
-      const result = await scanCity(selectedCity, preset.bbox, (done, total) => {
+      const result = await scanCity(selectedCity, bbox, (done, total) => {
         setProgress({ done, total })
       })
       setScan(result)
@@ -166,6 +214,7 @@ export default function AdminPanel({ onClose, initialTab }: Props) {
               onChange={(e) => handleCityChange(e.target.value)}
               disabled={scanning}
             >
+              <option value={CURRENT_LOCATION}>{CURRENT_LOCATION}</option>
               {CITY_PRESETS.map((p) => (
                 <option key={p.name} value={p.name}>{p.name}</option>
               ))}
