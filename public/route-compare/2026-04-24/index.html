@@ -1,0 +1,2064 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"><title>Route-compare samples — 2026-04-24 (195)</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 20px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .subtitle { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
+  .legend { margin: 12px 0 18px; font-size: 13px; }
+  .legend span { display: inline-block; margin-right: 14px; }
+  .sw { display: inline-block; width: 14px; height: 4px; vertical-align: middle; margin-right: 4px; }
+
+  .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0 20px; }
+  .summary-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; }
+  .summary-card h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin: 0 0 6px; }
+  .summary-card .client   { color: #2563eb; }
+  .summary-card .valhalla { color: #ea580c; }
+  .summary-card .brouter  { color: #059669; }
+  .summary-card .metric   { font-family: ui-monospace, Menlo, monospace; font-size: 13px; margin: 2px 0; }
+
+  .flag-banner { background: #fef3c7; color: #78350f; padding: 8px 12px; border-radius: 6px; margin: 14px 0; font-size: 13px; }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; padding: 10px 14px; background: #f9fafb; border-radius: 6px; align-items: center; }
+  .filters label { font-size: 12px; font-weight: 600; color: #374151; margin-right: 4px; }
+  .filters select, .filters input { font-size: 13px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; }
+  .filters input { min-width: 200px; }
+  .filters button { font-size: 12px; padding: 4px 10px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; }
+  .filters .count { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #6b7280; margin-left: auto; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid #eee; text-align: left; }
+  th { background: #f9fafb; font-weight: 600; position: sticky; top: 0; }
+  td:nth-child(4), td:nth-child(5), td:nth-child(6) { font-family: ui-monospace, Menlo, monospace; white-space: nowrap; }
+  tr.hidden { display: none; }
+  .fail { color: #b91c1c; font-weight: 500; }
+  .flag { color: #b45309; font-weight: 600; }
+</style>
+</head><body>
+<h1>Route-compare samples</h1>
+<p class="subtitle">Run: 2026-04-24 · 195 samples · City × mode × pair</p>
+
+<div class="legend">
+  <span><span class="sw" style="background:#2563eb"></span>Client router (ours)</span>
+  <span><span class="sw" style="background:#ea580c"></span>Valhalla (osm.org bicycle)</span>
+  <span><span class="sw" style="background:#059669"></span>BRouter</span>
+</div>
+
+<div class="summary">
+  <div class="summary-card">
+    <h3>Avg preferred %</h3>
+    <div class="metric client">Client:   54% <span style="color:#9ca3af">(n=150)</span></div>
+    <div class="metric valhalla">Valhalla: 33% <span style="color:#9ca3af">(n=190)</span></div>
+    <div class="metric brouter">BRouter:  33% <span style="color:#9ca3af">(n=195)</span></div>
+  </div>
+  <div class="summary-card">
+    <h3>Avg distance</h3>
+    <div class="metric client">Client:   5.79 km</div>
+    <div class="metric valhalla">Valhalla: 4.82 km</div>
+    <div class="metric brouter">BRouter:  4.83 km</div>
+  </div>
+  <div class="summary-card">
+    <h3>Distance flags</h3>
+    <div class="metric">75 / 195 routes where client &gt; 1.2× min(Valhalla, BRouter)</div>
+    <div class="metric" style="color:#6b7280;font-size:11px;margin-top:6px">Likely detour. Worth reviewing on the map — may still be correct (e.g. safer corridor) but flag it.</div>
+  </div>
+</div>
+
+<div class="flag-banner">⚠ 75 route(s) flagged for long detour. Use the “flagged only” filter below.</div>
+
+<div class="filters">
+  <label>City <select id="f-city"><option value="">all</option><option>Berlin</option><option>San Francisco</option></select></label>
+  <label>Mode <select id="f-mode"><option value="">all</option><option>carrying-kid</option><option>kid-confident</option><option>kid-starting-out</option><option>kid-traffic-savvy</option><option>training</option></select></label>
+  <label>Pair <input id="f-pair" type="search" placeholder="search origin/dest…" /></label>
+  <label><input id="f-flag" type="checkbox" /> flagged only</label>
+  <button id="f-clear" type="button">clear</button>
+  <span class="count" id="f-count"></span>
+</div>
+
+<table>
+  <thead><tr>
+    <th>City</th><th>Mode</th><th>Route</th>
+    <th>Client</th><th>Valhalla</th><th>BRouter</th>
+    <th>Flag</th><th></th>
+  </tr></thead>
+  <tbody id="rows"><tr data-city="Berlin" data-mode="carrying-kid" data-pair="brandenburger tor → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Brandenburger Tor → Berlin Zoo</td>
+      <td style="color:#2563eb">4.3 km · 97%</td>
+      <td style="color:#ea580c">2.9 km · 83%</td>
+      <td style="color:#059669">4.0 km · 79%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="104-berlin-carrying-kid-brandenburger-tor-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → alexanderplatz" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → Alexanderplatz</td>
+      <td style="color:#2563eb">3.1 km · 65%</td>
+      <td style="color:#ea580c">2.3 km · 55%</td>
+      <td style="color:#059669">2.3 km · 57%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="014-berlin-carrying-kid-home-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → ararat bergmannstr" data-flagged="0">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">3.4 km · 57%</td>
+      <td style="color:#ea580c">3.1 km · 30%</td>
+      <td style="color:#059669">3.0 km · 26%</td>
+      <td></td>
+      <td><a href="049-berlin-carrying-kid-home-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → Berlin Zoo</td>
+      <td style="color:#2563eb">7.8 km · 70%</td>
+      <td style="color:#ea580c">6.3 km · 36%</td>
+      <td style="color:#059669">6.7 km · 47%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="004-berlin-carrying-kid-home-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">1.6 km · 47%</td>
+      <td style="color:#ea580c">1.3 km · 18%</td>
+      <td style="color:#059669">1.4 km · 16%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="019-berlin-carrying-kid-home-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → garten der welt" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → Garten der Welt</td>
+      <td style="color:#2563eb">22.3 km · 67%</td>
+      <td style="color:#ea580c">16.4 km · 74%</td>
+      <td style="color:#059669">14.9 km · 55%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="039-berlin-carrying-kid-home-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">6.4 km · 47%</td>
+      <td style="color:#ea580c">5.1 km · 23%</td>
+      <td style="color:#059669">5.5 km · 45%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="009-berlin-carrying-kid-home-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → Humboldt Forum</td>
+      <td style="color:#2563eb">2.6 km · 58%</td>
+      <td style="color:#ea580c">1.6 km · 23%</td>
+      <td style="color:#059669">1.7 km · 26%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="024-berlin-carrying-kid-home-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → nonne und zwerg" data-flagged="0">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → Nonne und Zwerg</td>
+      <td style="color:#2563eb">2.6 km · 59%</td>
+      <td style="color:#ea580c">2.4 km · 0%</td>
+      <td style="color:#059669">2.5 km · 64%</td>
+      <td></td>
+      <td><a href="029-berlin-carrying-kid-home-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.4 km · 33%</td>
+      <td style="color:#059669">4.8 km · 44%</td>
+      <td></td>
+      <td><a href="044-berlin-carrying-kid-home-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="home → stadtbad neukoelln" data-flagged="0">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Home → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">4.4 km · 64%</td>
+      <td style="color:#ea580c">3.8 km · 36%</td>
+      <td style="color:#059669">3.7 km · 37%</td>
+      <td></td>
+      <td><a href="034-berlin-carrying-kid-home-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → alexanderplatz" data-flagged="0">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Alexanderplatz</td>
+      <td style="color:#2563eb">2.5 km · 45%</td>
+      <td style="color:#ea580c">2.3 km · 64%</td>
+      <td style="color:#059669">2.3 km · 66%</td>
+      <td></td>
+      <td><a href="064-berlin-carrying-kid-school-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → ararat bergmannstr" data-flagged="0">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">4.6 km · 46%</td>
+      <td style="color:#ea580c">4.2 km · 27%</td>
+      <td style="color:#059669">4.2 km · 23%</td>
+      <td></td>
+      <td><a href="099-berlin-carrying-kid-school-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Berlin Zoo</td>
+      <td style="color:#2563eb">8.2 km · 61%</td>
+      <td style="color:#ea580c">6.6 km · 34%</td>
+      <td style="color:#059669">8.0 km · 59%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="054-berlin-carrying-kid-school-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">2.1 km · 16%</td>
+      <td style="color:#ea580c">1.6 km · 29%</td>
+      <td style="color:#059669">1.8 km · 37%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="069-berlin-carrying-kid-school-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → garten der welt" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Garten der Welt</td>
+      <td style="color:#2563eb">21.0 km · 66%</td>
+      <td style="color:#ea580c">15.7 km · 78%</td>
+      <td style="color:#059669">14.3 km · 55%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="089-berlin-carrying-kid-school-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">6.8 km · 37%</td>
+      <td style="color:#ea580c">5.4 km · 26%</td>
+      <td style="color:#059669">5.7 km · 52%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="059-berlin-carrying-kid-school-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Humboldt Forum</td>
+      <td style="color:#2563eb">3.1 km · 35%</td>
+      <td style="color:#ea580c">2.0 km · 31%</td>
+      <td style="color:#059669">2.1 km · 42%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="074-berlin-carrying-kid-school-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → nonne und zwerg" data-flagged="0">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Nonne und Zwerg</td>
+      <td style="color:#2563eb">3.8 km · 45%</td>
+      <td style="color:#ea580c">3.5 km · 6%</td>
+      <td style="color:#059669">3.7 km · 48%</td>
+      <td></td>
+      <td><a href="079-berlin-carrying-kid-school-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 41%</td>
+      <td style="color:#059669">4.1 km · 54%</td>
+      <td></td>
+      <td><a href="094-berlin-carrying-kid-school-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="school → stadtbad neukoelln" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>School → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">5.4 km · 74%</td>
+      <td style="color:#ea580c">4.4 km · 38%</td>
+      <td style="color:#059669">4.3 km · 38%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="084-berlin-carrying-kid-school-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="carrying-kid" data-pair="thaipark → tranxx" data-flagged="1">
+      <td>Berlin</td>
+      <td>carrying-kid</td>
+      <td>Thaipark → Tranxx</td>
+      <td style="color:#2563eb">4.2 km · 45%</td>
+      <td style="color:#ea580c">3.4 km · 31%</td>
+      <td style="color:#059669">3.4 km · 41%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="109-berlin-carrying-kid-thaipark-to-tranxx.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="brandenburger tor → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Brandenburger Tor → Berlin Zoo</td>
+      <td style="color:#2563eb">4.3 km · 97%</td>
+      <td style="color:#ea580c">2.9 km · 83%</td>
+      <td style="color:#059669">4.0 km · 79%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="102-berlin-kid-confident-brandenburger-tor-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → alexanderplatz" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Alexanderplatz</td>
+      <td style="color:#2563eb">2.6 km · 23%</td>
+      <td style="color:#ea580c">2.3 km · 33%</td>
+      <td style="color:#059669">2.3 km · 36%</td>
+      <td></td>
+      <td><a href="012-berlin-kid-confident-home-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → ararat bergmannstr" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">3.9 km · 84%</td>
+      <td style="color:#ea580c">3.1 km · 67%</td>
+      <td style="color:#059669">3.0 km · 64%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="047-berlin-kid-confident-home-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Berlin Zoo</td>
+      <td style="color:#2563eb">9.0 km · 91%</td>
+      <td style="color:#ea580c">6.1 km · 59%</td>
+      <td style="color:#059669">6.9 km · 57%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="002-berlin-kid-confident-home-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">1.6 km · 47%</td>
+      <td style="color:#ea580c">1.3 km · 0%</td>
+      <td style="color:#059669">1.4 km · 0%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="017-berlin-kid-confident-home-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → garten der welt" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Garten der Welt</td>
+      <td style="color:#2563eb">18.9 km · 86%</td>
+      <td style="color:#ea580c">16.4 km · 76%</td>
+      <td style="color:#059669">14.9 km · 48%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="037-berlin-kid-confident-home-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">10.4 km · 85%</td>
+      <td style="color:#ea580c">5.1 km · 13%</td>
+      <td style="color:#059669">5.5 km · 38%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="007-berlin-kid-confident-home-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Humboldt Forum</td>
+      <td style="color:#2563eb">2.6 km · 48%</td>
+      <td style="color:#ea580c">1.6 km · 0%</td>
+      <td style="color:#059669">1.7 km · 0%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="022-berlin-kid-confident-home-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → nonne und zwerg" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Nonne und Zwerg</td>
+      <td style="color:#2563eb">2.4 km · 66%</td>
+      <td style="color:#ea580c">2.4 km · 46%</td>
+      <td style="color:#059669">2.5 km · 64%</td>
+      <td></td>
+      <td><a href="027-berlin-kid-confident-home-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.4 km · 38%</td>
+      <td style="color:#059669">4.8 km · 43%</td>
+      <td></td>
+      <td><a href="042-berlin-kid-confident-home-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="home → stadtbad neukoelln" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Home → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">4.4 km · 63%</td>
+      <td style="color:#ea580c">3.8 km · 35%</td>
+      <td style="color:#059669">4.0 km · 11%</td>
+      <td></td>
+      <td><a href="032-berlin-kid-confident-home-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → alexanderplatz" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Alexanderplatz</td>
+      <td style="color:#2563eb">2.6 km · 29%</td>
+      <td style="color:#ea580c">2.3 km · 41%</td>
+      <td style="color:#059669">2.3 km · 44%</td>
+      <td></td>
+      <td><a href="062-berlin-kid-confident-school-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → ararat bergmannstr" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">6.1 km · 90%</td>
+      <td style="color:#ea580c">4.2 km · 47%</td>
+      <td style="color:#059669">4.2 km · 50%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="097-berlin-kid-confident-school-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Berlin Zoo</td>
+      <td style="color:#2563eb">12.1 km · 93%</td>
+      <td style="color:#ea580c">7.0 km · 52%</td>
+      <td style="color:#059669">8.0 km · 58%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="052-berlin-kid-confident-school-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">2.7 km · 34%</td>
+      <td style="color:#ea580c">1.6 km · 17%</td>
+      <td style="color:#059669">1.8 km · 32%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="067-berlin-kid-confident-school-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → garten der welt" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Garten der Welt</td>
+      <td style="color:#2563eb">18.4 km · 84%</td>
+      <td style="color:#ea580c">15.7 km · 81%</td>
+      <td style="color:#059669">14.3 km · 51%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="087-berlin-kid-confident-school-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">14.2 km · 90%</td>
+      <td style="color:#ea580c">5.4 km · 17%</td>
+      <td style="color:#059669">5.7 km · 48%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="057-berlin-kid-confident-school-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Humboldt Forum</td>
+      <td style="color:#2563eb">2.5 km · 12%</td>
+      <td style="color:#ea580c">2.0 km · 14%</td>
+      <td style="color:#059669">2.1 km · 28%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="072-berlin-kid-confident-school-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → nonne und zwerg" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Nonne und Zwerg</td>
+      <td style="color:#2563eb">5.6 km · 86%</td>
+      <td style="color:#ea580c">3.5 km · 28%</td>
+      <td style="color:#059669">3.7 km · 48%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="077-berlin-kid-confident-school-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 47%</td>
+      <td style="color:#059669">4.1 km · 54%</td>
+      <td></td>
+      <td><a href="092-berlin-kid-confident-school-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="school → stadtbad neukoelln" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>School → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">5.4 km · 78%</td>
+      <td style="color:#ea580c">4.4 km · 36%</td>
+      <td style="color:#059669">4.7 km · 20%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="082-berlin-kid-confident-school-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-confident" data-pair="thaipark → tranxx" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-confident</td>
+      <td>Thaipark → Tranxx</td>
+      <td style="color:#2563eb">3.8 km · 81%</td>
+      <td style="color:#ea580c">3.4 km · 31%</td>
+      <td style="color:#059669">3.6 km · 63%</td>
+      <td></td>
+      <td><a href="107-berlin-kid-confident-thaipark-to-tranxx.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="brandenburger tor → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Brandenburger Tor → Berlin Zoo</td>
+      <td style="color:#2563eb">4.3 km · 97%</td>
+      <td style="color:#ea580c">3.1 km · 84%</td>
+      <td style="color:#059669">4.0 km · 79%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="101-berlin-kid-starting-out-brandenburger-tor-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → alexanderplatz" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → Alexanderplatz</td>
+      <td style="color:#2563eb">2.6 km · 23%</td>
+      <td style="color:#ea580c">2.3 km · 34%</td>
+      <td style="color:#059669">2.3 km · 34%</td>
+      <td></td>
+      <td><a href="011-berlin-kid-starting-out-home-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → ararat bergmannstr" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">3.1 km · 59%</td>
+      <td style="color:#ea580c">3.2 km · 43%</td>
+      <td style="color:#059669">3.0 km · 51%</td>
+      <td></td>
+      <td><a href="046-berlin-kid-starting-out-home-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → Berlin Zoo</td>
+      <td style="color:#2563eb">7.9 km · 83%</td>
+      <td style="color:#ea580c">6.3 km · 58%</td>
+      <td style="color:#059669">6.9 km · 47%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="001-berlin-kid-starting-out-home-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">2.6 km · 61%</td>
+      <td style="color:#ea580c">1.3 km · 0%</td>
+      <td style="color:#059669">1.4 km · 0%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="016-berlin-kid-starting-out-home-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → garten der welt" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → Garten der Welt</td>
+      <td style="color:#2563eb">19.1 km · 80%</td>
+      <td style="color:#ea580c">15.1 km · 74%</td>
+      <td style="color:#059669">14.9 km · 47%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="036-berlin-kid-starting-out-home-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">9.1 km · 74%</td>
+      <td style="color:#ea580c">5.1 km · 11%</td>
+      <td style="color:#059669">5.5 km · 15%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="006-berlin-kid-starting-out-home-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → Humboldt Forum</td>
+      <td style="color:#2563eb">3.3 km · 52%</td>
+      <td style="color:#ea580c"><span class="fail">FAIL</span></td>
+      <td style="color:#059669">1.7 km · 0%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="021-berlin-kid-starting-out-home-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → nonne und zwerg" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → Nonne und Zwerg</td>
+      <td style="color:#2563eb">2.6 km · 56%</td>
+      <td style="color:#ea580c">2.5 km · 27%</td>
+      <td style="color:#059669">2.5 km · 2%</td>
+      <td></td>
+      <td><a href="026-berlin-kid-starting-out-home-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.4 km · 30%</td>
+      <td style="color:#059669">4.8 km · 43%</td>
+      <td></td>
+      <td><a href="041-berlin-kid-starting-out-home-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="home → stadtbad neukoelln" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Home → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">4.2 km · 42%</td>
+      <td style="color:#ea580c">3.8 km · 34%</td>
+      <td style="color:#059669">4.0 km · 10%</td>
+      <td></td>
+      <td><a href="031-berlin-kid-starting-out-home-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → alexanderplatz" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Alexanderplatz</td>
+      <td style="color:#2563eb">2.6 km · 23%</td>
+      <td style="color:#ea580c">2.3 km · 35%</td>
+      <td style="color:#059669">2.3 km · 35%</td>
+      <td></td>
+      <td><a href="061-berlin-kid-starting-out-school-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → ararat bergmannstr" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">4.2 km · 43%</td>
+      <td style="color:#ea580c">4.2 km · 36%</td>
+      <td style="color:#059669">4.2 km · 36%</td>
+      <td></td>
+      <td><a href="096-berlin-kid-starting-out-school-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Berlin Zoo</td>
+      <td style="color:#2563eb">9.0 km · 73%</td>
+      <td style="color:#ea580c">7.1 km · 39%</td>
+      <td style="color:#059669">8.0 km · 54%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="051-berlin-kid-starting-out-school-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">3.7 km · 43%</td>
+      <td style="color:#ea580c">1.6 km · 1%</td>
+      <td style="color:#059669">1.8 km · 15%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="066-berlin-kid-starting-out-school-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → garten der welt" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Garten der Welt</td>
+      <td style="color:#2563eb">18.4 km · 83%</td>
+      <td style="color:#ea580c">14.4 km · 77%</td>
+      <td style="color:#059669">14.3 km · 49%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="086-berlin-kid-starting-out-school-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">10.2 km · 66%</td>
+      <td style="color:#ea580c">5.4 km · 10%</td>
+      <td style="color:#059669">5.7 km · 33%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="056-berlin-kid-starting-out-school-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Humboldt Forum</td>
+      <td style="color:#2563eb">2.5 km · 6%</td>
+      <td style="color:#ea580c">2.0 km · 1%</td>
+      <td style="color:#059669">2.1 km · 13%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="071-berlin-kid-starting-out-school-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → nonne und zwerg" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Nonne und Zwerg</td>
+      <td style="color:#2563eb">3.7 km · 39%</td>
+      <td style="color:#ea580c">3.5 km · 23%</td>
+      <td style="color:#059669">3.7 km · 2%</td>
+      <td></td>
+      <td><a href="076-berlin-kid-starting-out-school-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 34%</td>
+      <td style="color:#059669">4.1 km · 50%</td>
+      <td></td>
+      <td><a href="091-berlin-kid-starting-out-school-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="school → stadtbad neukoelln" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>School → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">5.2 km · 41%</td>
+      <td style="color:#ea580c">4.4 km · 32%</td>
+      <td style="color:#059669">4.7 km · 4%</td>
+      <td></td>
+      <td><a href="081-berlin-kid-starting-out-school-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-starting-out" data-pair="thaipark → tranxx" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-starting-out</td>
+      <td>Thaipark → Tranxx</td>
+      <td style="color:#2563eb">4.5 km · 75%</td>
+      <td style="color:#ea580c">3.4 km · 31%</td>
+      <td style="color:#059669">3.6 km · 46%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="106-berlin-kid-starting-out-thaipark-to-tranxx.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="brandenburger tor → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Brandenburger Tor → Berlin Zoo</td>
+      <td style="color:#2563eb">4.3 km · 97%</td>
+      <td style="color:#ea580c">2.9 km · 83%</td>
+      <td style="color:#059669">4.0 km · 79%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="103-berlin-kid-traffic-savvy-brandenburger-tor-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → alexanderplatz" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Alexanderplatz</td>
+      <td style="color:#2563eb">3.1 km · 67%</td>
+      <td style="color:#ea580c">2.3 km · 55%</td>
+      <td style="color:#059669">2.3 km · 57%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="013-berlin-kid-traffic-savvy-home-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → ararat bergmannstr" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">3.9 km · 84%</td>
+      <td style="color:#ea580c">3.1 km · 67%</td>
+      <td style="color:#059669">3.0 km · 65%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="048-berlin-kid-traffic-savvy-home-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Berlin Zoo</td>
+      <td style="color:#2563eb">7.7 km · 85%</td>
+      <td style="color:#ea580c">6.3 km · 43%</td>
+      <td style="color:#059669">6.7 km · 47%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="003-berlin-kid-traffic-savvy-home-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">1.6 km · 47%</td>
+      <td style="color:#ea580c">1.3 km · 18%</td>
+      <td style="color:#059669">1.4 km · 16%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="018-berlin-kid-traffic-savvy-home-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → garten der welt" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Garten der Welt</td>
+      <td style="color:#2563eb">17.7 km · 81%</td>
+      <td style="color:#ea580c">16.4 km · 77%</td>
+      <td style="color:#059669">14.9 km · 58%</td>
+      <td></td>
+      <td><a href="038-berlin-kid-traffic-savvy-home-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">6.8 km · 58%</td>
+      <td style="color:#ea580c">5.1 km · 23%</td>
+      <td style="color:#059669">5.5 km · 45%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="008-berlin-kid-traffic-savvy-home-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Humboldt Forum</td>
+      <td style="color:#2563eb">2.6 km · 58%</td>
+      <td style="color:#ea580c">1.6 km · 23%</td>
+      <td style="color:#059669">1.7 km · 26%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="023-berlin-kid-traffic-savvy-home-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → nonne und zwerg" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Nonne und Zwerg</td>
+      <td style="color:#2563eb">2.6 km · 65%</td>
+      <td style="color:#ea580c">2.4 km · 46%</td>
+      <td style="color:#059669">2.5 km · 64%</td>
+      <td></td>
+      <td><a href="028-berlin-kid-traffic-savvy-home-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.4 km · 43%</td>
+      <td style="color:#059669">4.8 km · 44%</td>
+      <td></td>
+      <td><a href="043-berlin-kid-traffic-savvy-home-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="home → stadtbad neukoelln" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">4.4 km · 65%</td>
+      <td style="color:#ea580c">3.8 km · 36%</td>
+      <td style="color:#059669">3.7 km · 37%</td>
+      <td></td>
+      <td><a href="033-berlin-kid-traffic-savvy-home-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → alexanderplatz" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Alexanderplatz</td>
+      <td style="color:#2563eb">2.5 km · 45%</td>
+      <td style="color:#ea580c">2.3 km · 64%</td>
+      <td style="color:#059669">2.3 km · 66%</td>
+      <td></td>
+      <td><a href="063-berlin-kid-traffic-savvy-school-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → ararat bergmannstr" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">5.3 km · 86%</td>
+      <td style="color:#ea580c">4.2 km · 54%</td>
+      <td style="color:#059669">4.2 km · 51%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="098-berlin-kid-traffic-savvy-school-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Berlin Zoo</td>
+      <td style="color:#2563eb">8.9 km · 76%</td>
+      <td style="color:#ea580c">6.6 km · 35%</td>
+      <td style="color:#059669">8.0 km · 59%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="053-berlin-kid-traffic-savvy-school-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">2.1 km · 17%</td>
+      <td style="color:#ea580c">1.6 km · 30%</td>
+      <td style="color:#059669">1.8 km · 38%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="068-berlin-kid-traffic-savvy-school-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → garten der welt" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Garten der Welt</td>
+      <td style="color:#2563eb">15.2 km · 72%</td>
+      <td style="color:#ea580c">15.7 km · 81%</td>
+      <td style="color:#059669">14.3 km · 57%</td>
+      <td></td>
+      <td><a href="088-berlin-kid-traffic-savvy-school-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">7.2 km · 48%</td>
+      <td style="color:#ea580c">5.4 km · 26%</td>
+      <td style="color:#059669">5.7 km · 52%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="058-berlin-kid-traffic-savvy-school-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Humboldt Forum</td>
+      <td style="color:#2563eb">3.1 km · 36%</td>
+      <td style="color:#ea580c">2.0 km · 32%</td>
+      <td style="color:#059669">2.1 km · 43%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="073-berlin-kid-traffic-savvy-school-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → nonne und zwerg" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Nonne und Zwerg</td>
+      <td style="color:#2563eb">3.8 km · 49%</td>
+      <td style="color:#ea580c">3.5 km · 37%</td>
+      <td style="color:#059669">3.7 km · 48%</td>
+      <td></td>
+      <td><a href="078-berlin-kid-traffic-savvy-school-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 41%</td>
+      <td style="color:#059669">4.1 km · 54%</td>
+      <td></td>
+      <td><a href="093-berlin-kid-traffic-savvy-school-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="school → stadtbad neukoelln" data-flagged="1">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>School → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">5.4 km · 78%</td>
+      <td style="color:#ea580c">4.4 km · 38%</td>
+      <td style="color:#059669">4.3 km · 39%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="083-berlin-kid-traffic-savvy-school-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="kid-traffic-savvy" data-pair="thaipark → tranxx" data-flagged="0">
+      <td>Berlin</td>
+      <td>kid-traffic-savvy</td>
+      <td>Thaipark → Tranxx</td>
+      <td style="color:#2563eb">3.8 km · 81%</td>
+      <td style="color:#ea580c">3.4 km · 31%</td>
+      <td style="color:#059669">3.4 km · 41%</td>
+      <td></td>
+      <td><a href="108-berlin-kid-traffic-savvy-thaipark-to-tranxx.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="brandenburger tor → berlin zoo" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Brandenburger Tor → Berlin Zoo</td>
+      <td style="color:#2563eb">3.4 km · 68%</td>
+      <td style="color:#ea580c">3.3 km · 32%</td>
+      <td style="color:#059669">3.8 km · 28%</td>
+      <td></td>
+      <td><a href="105-berlin-training-brandenburger-tor-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → alexanderplatz" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Alexanderplatz</td>
+      <td style="color:#2563eb">2.6 km · 41%</td>
+      <td style="color:#ea580c">2.5 km · 49%</td>
+      <td style="color:#059669">2.3 km · 55%</td>
+      <td></td>
+      <td><a href="015-berlin-training-home-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → ararat bergmannstr" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">3.2 km · 60%</td>
+      <td style="color:#ea580c">3.1 km · 30%</td>
+      <td style="color:#059669">3.0 km · 26%</td>
+      <td></td>
+      <td><a href="050-berlin-training-home-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Berlin Zoo</td>
+      <td style="color:#2563eb">7.7 km · 61%</td>
+      <td style="color:#ea580c">6.3 km · 28%</td>
+      <td style="color:#059669">6.5 km · 23%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="005-berlin-training-home-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">1.9 km · 32%</td>
+      <td style="color:#ea580c">1.3 km · 18%</td>
+      <td style="color:#059669">1.3 km · 17%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="020-berlin-training-home-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → garten der welt" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Garten der Welt</td>
+      <td style="color:#2563eb">20.3 km · 53%</td>
+      <td style="color:#ea580c">15.8 km · 59%</td>
+      <td style="color:#059669">14.6 km · 51%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="040-berlin-training-home-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">6.5 km · 44%</td>
+      <td style="color:#ea580c">5.1 km · 23%</td>
+      <td style="color:#059669">5.1 km · 35%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="010-berlin-training-home-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Humboldt Forum</td>
+      <td style="color:#2563eb">2.4 km · 47%</td>
+      <td style="color:#ea580c">1.6 km · 23%</td>
+      <td style="color:#059669">1.7 km · 26%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="025-berlin-training-home-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → nonne und zwerg" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Nonne und Zwerg</td>
+      <td style="color:#2563eb">2.4 km · 63%</td>
+      <td style="color:#ea580c">2.4 km · 0%</td>
+      <td style="color:#059669">2.3 km · 15%</td>
+      <td></td>
+      <td><a href="030-berlin-training-home-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.4 km · 33%</td>
+      <td style="color:#059669">5.0 km · 49%</td>
+      <td></td>
+      <td><a href="045-berlin-training-home-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="home → stadtbad neukoelln" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Home → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">4.4 km · 64%</td>
+      <td style="color:#ea580c">3.8 km · 37%</td>
+      <td style="color:#059669">4.0 km · 15%</td>
+      <td></td>
+      <td><a href="035-berlin-training-home-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → alexanderplatz" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → Alexanderplatz</td>
+      <td style="color:#2563eb">2.6 km · 49%</td>
+      <td style="color:#ea580c">2.7 km · 43%</td>
+      <td style="color:#059669">2.3 km · 64%</td>
+      <td></td>
+      <td><a href="065-berlin-training-school-to-alexanderplatz.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → ararat bergmannstr" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → Ararat Bergmannstr</td>
+      <td style="color:#2563eb">4.3 km · 49%</td>
+      <td style="color:#ea580c">4.2 km · 27%</td>
+      <td style="color:#059669">4.3 km · 20%</td>
+      <td></td>
+      <td><a href="100-berlin-training-school-to-ararat-bergmannstr.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → berlin zoo" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → Berlin Zoo</td>
+      <td style="color:#2563eb">8.1 km · 54%</td>
+      <td style="color:#ea580c">6.6 km · 34%</td>
+      <td style="color:#059669">7.1 km · 31%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="055-berlin-training-school-to-berlin-zoo.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → fischerinsel swimming" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → Fischerinsel Swimming</td>
+      <td style="color:#2563eb">2.5 km · 42%</td>
+      <td style="color:#ea580c">1.6 km · 29%</td>
+      <td style="color:#059669">1.7 km · 28%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="070-berlin-training-school-to-fischerinsel-swimming.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → garten der welt" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → Garten der Welt</td>
+      <td style="color:#2563eb">21.2 km · 58%</td>
+      <td style="color:#ea580c">15.2 km · 63%</td>
+      <td style="color:#059669">14.0 km · 52%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="090-berlin-training-school-to-garten-der-welt.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → hamburger bahnhof" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → Hamburger Bahnhof</td>
+      <td style="color:#2563eb">6.9 km · 35%</td>
+      <td style="color:#ea580c">5.4 km · 26%</td>
+      <td style="color:#059669">5.5 km · 37%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="060-berlin-training-school-to-hamburger-bahnhof.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → humboldt forum" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → Humboldt Forum</td>
+      <td style="color:#2563eb">2.5 km · 40%</td>
+      <td style="color:#ea580c">2.0 km · 31%</td>
+      <td style="color:#059669">2.1 km · 33%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="075-berlin-training-school-to-humboldt-forum.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → nonne und zwerg" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → Nonne und Zwerg</td>
+      <td style="color:#2563eb">3.5 km · 48%</td>
+      <td style="color:#ea580c">3.5 km · 5%</td>
+      <td style="color:#059669">3.4 km · 27%</td>
+      <td></td>
+      <td><a href="080-berlin-training-school-to-nonne-und-zwerg.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → sse schwimmhalle" data-flagged="0">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → SSE Schwimmhalle</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 41%</td>
+      <td style="color:#059669">4.2 km · 52%</td>
+      <td></td>
+      <td><a href="095-berlin-training-school-to-sse-schwimmhalle.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="school → stadtbad neukoelln" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>School → Stadtbad Neukoelln</td>
+      <td style="color:#2563eb">5.4 km · 71%</td>
+      <td style="color:#ea580c">4.4 km · 39%</td>
+      <td style="color:#059669">4.4 km · 19%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="085-berlin-training-school-to-stadtbad-neukoelln.html">open</a></td>
+    </tr>
+<tr data-city="Berlin" data-mode="training" data-pair="thaipark → tranxx" data-flagged="1">
+      <td>Berlin</td>
+      <td>training</td>
+      <td>Thaipark → Tranxx</td>
+      <td style="color:#2563eb">4.5 km · 24%</td>
+      <td style="color:#ea580c">3.5 km · 44%</td>
+      <td style="color:#059669">3.4 km · 37%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="110-berlin-training-thaipark-to-tranxx.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → 16th st mission bart" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → 16th St Mission BART</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">1.4 km · 0%</td>
+      <td style="color:#059669">1.4 km · 0%</td>
+      <td></td>
+      <td><a href="159-sf-carrying-kid-home-120-hancock-st-castro-to-16th-st-mission-bart.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → 22nd st caltrain" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → 22nd St Caltrain</td>
+      <td style="color:#2563eb">4.5 km · 26%</td>
+      <td style="color:#ea580c">4.8 km · 0%</td>
+      <td style="color:#059669">4.9 km · 0%</td>
+      <td></td>
+      <td><a href="149-sf-carrying-kid-home-120-hancock-st-castro-to-22nd-st-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → 450 sutter medical building" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → 450 Sutter Medical Building</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.9 km · 21%</td>
+      <td style="color:#059669">5.0 km · 17%</td>
+      <td></td>
+      <td><a href="174-sf-carrying-kid-home-120-hancock-st-castro-to-450-sutter-medical-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → 4th + king caltrain" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → 4th + King Caltrain</td>
+      <td style="color:#2563eb">5.1 km · 42%</td>
+      <td style="color:#ea580c">4.4 km · 28%</td>
+      <td style="color:#059669">4.5 km · 25%</td>
+      <td></td>
+      <td><a href="154-sf-carrying-kid-home-120-hancock-st-castro-to-4th-king-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → apple store union square" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Apple Store Union Square</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 22%</td>
+      <td style="color:#059669">4.7 km · 18%</td>
+      <td></td>
+      <td><a href="179-sf-carrying-kid-home-120-hancock-st-castro-to-apple-store-union-square.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → balboa pool" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Balboa Pool</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.2 km · 7%</td>
+      <td style="color:#059669">5.5 km · 21%</td>
+      <td></td>
+      <td><a href="134-sf-carrying-kid-home-120-hancock-st-castro-to-balboa-pool.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → cpmc mission bernal (cesar chavez + valencia)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → CPMC Mission Bernal (Cesar Chavez + Valencia)</td>
+      <td style="color:#2563eb">2.2 km · 1%</td>
+      <td style="color:#ea580c">2.7 km · 22%</td>
+      <td style="color:#059669">2.6 km · 18%</td>
+      <td></td>
+      <td><a href="164-sf-carrying-kid-home-120-hancock-st-castro-to-cpmc-mission-bernal-cesar-chavez.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → dragon beaux (5700 geary)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Dragon Beaux (5700 Geary)</td>
+      <td style="color:#2563eb">6.8 km · 51%</td>
+      <td style="color:#ea580c">6.9 km · 42%</td>
+      <td style="color:#059669">6.9 km · 46%</td>
+      <td></td>
+      <td><a href="194-sf-carrying-kid-home-120-hancock-st-castro-to-dragon-beaux-5700-geary.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → dumpling story (694 valencia)" data-flagged="1">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Dumpling Story (694 Valencia)</td>
+      <td style="color:#2563eb">1.4 km · 0%</td>
+      <td style="color:#ea580c">0.9 km · 0%</td>
+      <td style="color:#059669">0.9 km · 0%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="139-sf-carrying-kid-home-120-hancock-st-castro-to-dumpling-story-694-valencia.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → ferry building" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Ferry Building</td>
+      <td style="color:#2563eb">6.6 km · 33%</td>
+      <td style="color:#ea580c">6.3 km · 15%</td>
+      <td style="color:#059669">7.0 km · 27%</td>
+      <td></td>
+      <td><a href="114-sf-carrying-kid-home-120-hancock-st-castro-to-ferry-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → jfk promenade east end (stanyan)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → JFK Promenade east end (Stanyan)</td>
+      <td style="color:#2563eb">3.6 km · 68%</td>
+      <td style="color:#ea580c">4.0 km · 49%</td>
+      <td style="color:#059669">3.7 km · 56%</td>
+      <td></td>
+      <td><a href="124-sf-carrying-kid-home-120-hancock-st-castro-to-jfk-promenade-east-end-stanyan.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → lands end" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Lands End</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">9.9 km · 20%</td>
+      <td style="color:#059669">9.7 km · 48%</td>
+      <td></td>
+      <td><a href="119-sf-carrying-kid-home-120-hancock-st-castro-to-lands-end.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → lung fung bakery (1823 clement)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Lung Fung Bakery (1823 Clement)</td>
+      <td style="color:#2563eb">6.8 km · 48%</td>
+      <td style="color:#ea580c">6.9 km · 25%</td>
+      <td style="color:#059669">6.9 km · 38%</td>
+      <td></td>
+      <td><a href="189-sf-carrying-kid-home-120-hancock-st-castro-to-lung-fung-bakery-1823-clement.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → sunset dunes (ocean beach)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Sunset Dunes (Ocean Beach)</td>
+      <td style="color:#2563eb">10.1 km · 62%</td>
+      <td style="color:#ea580c">10.7 km · 60%</td>
+      <td style="color:#059669">10.2 km · 39%</td>
+      <td></td>
+      <td><a href="129-sf-carrying-kid-home-120-hancock-st-castro-to-sunset-dunes-ocean-beach.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → tartine (600 guerrero)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Tartine (600 Guerrero)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">0.7 km · 0%</td>
+      <td style="color:#059669">0.7 km · 0%</td>
+      <td></td>
+      <td><a href="144-sf-carrying-kid-home-120-hancock-st-castro-to-tartine-600-guerrero.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → ucsf parnassus (505 parnassus)" data-flagged="1">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → UCSF Parnassus (505 Parnassus)</td>
+      <td style="color:#2563eb">4.8 km · 64%</td>
+      <td style="color:#ea580c">3.2 km · 0%</td>
+      <td style="color:#059669">4.5 km · 30%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="169-sf-carrying-kid-home-120-hancock-st-castro-to-ucsf-parnassus-505-parnassus.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="carrying-kid" data-pair="home (120 hancock st, castro) → yummy's (607 jackson, chinatown)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>carrying-kid</td>
+      <td>Home (120 Hancock St, Castro) → Yummy's (607 Jackson, Chinatown)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.5 km · 16%</td>
+      <td style="color:#059669">5.3 km · 16%</td>
+      <td></td>
+      <td><a href="184-sf-carrying-kid-home-120-hancock-st-castro-to-yummy-s-607-jackson-chinatown.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → 16th st mission bart" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → 16th St Mission BART</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">1.4 km · 14%</td>
+      <td style="color:#059669">1.4 km · 14%</td>
+      <td></td>
+      <td><a href="157-sf-kid-confident-home-120-hancock-st-castro-to-16th-st-mission-bart.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → 22nd st caltrain" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → 22nd St Caltrain</td>
+      <td style="color:#2563eb">5.2 km · 40%</td>
+      <td style="color:#ea580c">4.7 km · 23%</td>
+      <td style="color:#059669">4.9 km · 23%</td>
+      <td></td>
+      <td><a href="147-sf-kid-confident-home-120-hancock-st-castro-to-22nd-st-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → 450 sutter medical building" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → 450 Sutter Medical Building</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.9 km · 36%</td>
+      <td style="color:#059669">5.0 km · 24%</td>
+      <td></td>
+      <td><a href="172-sf-kid-confident-home-120-hancock-st-castro-to-450-sutter-medical-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → 4th + king caltrain" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → 4th + King Caltrain</td>
+      <td style="color:#2563eb">5.2 km · 48%</td>
+      <td style="color:#ea580c">4.4 km · 37%</td>
+      <td style="color:#059669">4.5 km · 45%</td>
+      <td></td>
+      <td><a href="152-sf-kid-confident-home-120-hancock-st-castro-to-4th-king-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → apple store union square" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Apple Store Union Square</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 38%</td>
+      <td style="color:#059669">5.0 km · 24%</td>
+      <td></td>
+      <td><a href="177-sf-kid-confident-home-120-hancock-st-castro-to-apple-store-union-square.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → balboa pool" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Balboa Pool</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.8 km · 22%</td>
+      <td style="color:#059669">6.1 km · 28%</td>
+      <td></td>
+      <td><a href="132-sf-kid-confident-home-120-hancock-st-castro-to-balboa-pool.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → cpmc mission bernal (cesar chavez + valencia)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → CPMC Mission Bernal (Cesar Chavez + Valencia)</td>
+      <td style="color:#2563eb">2.6 km · 28%</td>
+      <td style="color:#ea580c">2.7 km · 20%</td>
+      <td style="color:#059669">2.6 km · 17%</td>
+      <td></td>
+      <td><a href="162-sf-kid-confident-home-120-hancock-st-castro-to-cpmc-mission-bernal-cesar-chavez.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → dragon beaux (5700 geary)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Dragon Beaux (5700 Geary)</td>
+      <td style="color:#2563eb">7.9 km · 74%</td>
+      <td style="color:#ea580c">6.9 km · 34%</td>
+      <td style="color:#059669">6.9 km · 42%</td>
+      <td></td>
+      <td><a href="192-sf-kid-confident-home-120-hancock-st-castro-to-dragon-beaux-5700-geary.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → dumpling story (694 valencia)" data-flagged="1">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Dumpling Story (694 Valencia)</td>
+      <td style="color:#2563eb">1.2 km · 27%</td>
+      <td style="color:#ea580c">0.9 km · 5%</td>
+      <td style="color:#059669">0.9 km · 9%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="137-sf-kid-confident-home-120-hancock-st-castro-to-dumpling-story-694-valencia.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → ferry building" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Ferry Building</td>
+      <td style="color:#2563eb">6.8 km · 63%</td>
+      <td style="color:#ea580c">6.2 km · 56%</td>
+      <td style="color:#059669">7.1 km · 45%</td>
+      <td></td>
+      <td><a href="112-sf-kid-confident-home-120-hancock-st-castro-to-ferry-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → jfk promenade east end (stanyan)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → JFK Promenade east end (Stanyan)</td>
+      <td style="color:#2563eb">3.6 km · 65%</td>
+      <td style="color:#ea580c">4.0 km · 41%</td>
+      <td style="color:#059669">3.7 km · 55%</td>
+      <td></td>
+      <td><a href="122-sf-kid-confident-home-120-hancock-st-castro-to-jfk-promenade-east-end-stanyan.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → lands end" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Lands End</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c"><span class="fail">FAIL</span></td>
+      <td style="color:#059669">10.0 km · 50%</td>
+      <td></td>
+      <td><a href="117-sf-kid-confident-home-120-hancock-st-castro-to-lands-end.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → lung fung bakery (1823 clement)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Lung Fung Bakery (1823 Clement)</td>
+      <td style="color:#2563eb">8.2 km · 76%</td>
+      <td style="color:#ea580c">6.9 km · 34%</td>
+      <td style="color:#059669">6.9 km · 42%</td>
+      <td></td>
+      <td><a href="187-sf-kid-confident-home-120-hancock-st-castro-to-lung-fung-bakery-1823-clement.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → sunset dunes (ocean beach)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Sunset Dunes (Ocean Beach)</td>
+      <td style="color:#2563eb">10.1 km · 50%</td>
+      <td style="color:#ea580c">10.7 km · 76%</td>
+      <td style="color:#059669">10.2 km · 34%</td>
+      <td></td>
+      <td><a href="127-sf-kid-confident-home-120-hancock-st-castro-to-sunset-dunes-ocean-beach.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → tartine (600 guerrero)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Tartine (600 Guerrero)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">0.7 km · 0%</td>
+      <td style="color:#059669">0.7 km · 0%</td>
+      <td></td>
+      <td><a href="142-sf-kid-confident-home-120-hancock-st-castro-to-tartine-600-guerrero.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → ucsf parnassus (505 parnassus)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → UCSF Parnassus (505 Parnassus)</td>
+      <td style="color:#2563eb">4.8 km · 61%</td>
+      <td style="color:#ea580c"><span class="fail">FAIL</span></td>
+      <td style="color:#059669">4.5 km · 29%</td>
+      <td></td>
+      <td><a href="167-sf-kid-confident-home-120-hancock-st-castro-to-ucsf-parnassus-505-parnassus.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-confident" data-pair="home (120 hancock st, castro) → yummy's (607 jackson, chinatown)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-confident</td>
+      <td>Home (120 Hancock St, Castro) → Yummy's (607 Jackson, Chinatown)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.5 km · 25%</td>
+      <td style="color:#059669">5.2 km · 22%</td>
+      <td></td>
+      <td><a href="182-sf-kid-confident-home-120-hancock-st-castro-to-yummy-s-607-jackson-chinatown.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → 16th st mission bart" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → 16th St Mission BART</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">1.4 km · 14%</td>
+      <td style="color:#059669">1.4 km · 14%</td>
+      <td></td>
+      <td><a href="156-sf-kid-starting-out-home-120-hancock-st-castro-to-16th-st-mission-bart.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → 22nd st caltrain" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → 22nd St Caltrain</td>
+      <td style="color:#2563eb">4.4 km · 24%</td>
+      <td style="color:#ea580c">4.7 km · 23%</td>
+      <td style="color:#059669">4.9 km · 22%</td>
+      <td></td>
+      <td><a href="146-sf-kid-starting-out-home-120-hancock-st-castro-to-22nd-st-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → 450 sutter medical building" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → 450 Sutter Medical Building</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.9 km · 36%</td>
+      <td style="color:#059669">5.0 km · 23%</td>
+      <td></td>
+      <td><a href="171-sf-kid-starting-out-home-120-hancock-st-castro-to-450-sutter-medical-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → 4th + king caltrain" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → 4th + King Caltrain</td>
+      <td style="color:#2563eb">5.2 km · 47%</td>
+      <td style="color:#ea580c">4.4 km · 37%</td>
+      <td style="color:#059669">4.5 km · 45%</td>
+      <td></td>
+      <td><a href="151-sf-kid-starting-out-home-120-hancock-st-castro-to-4th-king-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → apple store union square" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Apple Store Union Square</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 38%</td>
+      <td style="color:#059669">5.0 km · 23%</td>
+      <td></td>
+      <td><a href="176-sf-kid-starting-out-home-120-hancock-st-castro-to-apple-store-union-square.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → balboa pool" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Balboa Pool</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.8 km · 22%</td>
+      <td style="color:#059669">6.1 km · 5%</td>
+      <td></td>
+      <td><a href="131-sf-kid-starting-out-home-120-hancock-st-castro-to-balboa-pool.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → cpmc mission bernal (cesar chavez + valencia)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → CPMC Mission Bernal (Cesar Chavez + Valencia)</td>
+      <td style="color:#2563eb">2.2 km · 0%</td>
+      <td style="color:#ea580c">2.7 km · 20%</td>
+      <td style="color:#059669">2.6 km · 0%</td>
+      <td></td>
+      <td><a href="161-sf-kid-starting-out-home-120-hancock-st-castro-to-cpmc-mission-bernal-cesar-chavez.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → dragon beaux (5700 geary)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Dragon Beaux (5700 Geary)</td>
+      <td style="color:#2563eb">6.6 km · 38%</td>
+      <td style="color:#ea580c">6.9 km · 34%</td>
+      <td style="color:#059669">6.9 km · 34%</td>
+      <td></td>
+      <td><a href="191-sf-kid-starting-out-home-120-hancock-st-castro-to-dragon-beaux-5700-geary.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → dumpling story (694 valencia)" data-flagged="1">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Dumpling Story (694 Valencia)</td>
+      <td style="color:#2563eb">1.2 km · 27%</td>
+      <td style="color:#ea580c">0.9 km · 5%</td>
+      <td style="color:#059669">0.9 km · 9%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="136-sf-kid-starting-out-home-120-hancock-st-castro-to-dumpling-story-694-valencia.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → ferry building" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Ferry Building</td>
+      <td style="color:#2563eb">6.8 km · 63%</td>
+      <td style="color:#ea580c">6.2 km · 56%</td>
+      <td style="color:#059669">7.1 km · 45%</td>
+      <td></td>
+      <td><a href="111-sf-kid-starting-out-home-120-hancock-st-castro-to-ferry-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → jfk promenade east end (stanyan)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → JFK Promenade east end (Stanyan)</td>
+      <td style="color:#2563eb">3.4 km · 9%</td>
+      <td style="color:#ea580c"><span class="fail">FAIL</span></td>
+      <td style="color:#059669">3.7 km · 8%</td>
+      <td></td>
+      <td><a href="121-sf-kid-starting-out-home-120-hancock-st-castro-to-jfk-promenade-east-end-stanyan.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → lands end" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Lands End</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">9.7 km · 25%</td>
+      <td style="color:#059669">10.0 km · 25%</td>
+      <td></td>
+      <td><a href="116-sf-kid-starting-out-home-120-hancock-st-castro-to-lands-end.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → lung fung bakery (1823 clement)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Lung Fung Bakery (1823 Clement)</td>
+      <td style="color:#2563eb">6.7 km · 38%</td>
+      <td style="color:#ea580c">6.9 km · 34%</td>
+      <td style="color:#059669">6.9 km · 34%</td>
+      <td></td>
+      <td><a href="186-sf-kid-starting-out-home-120-hancock-st-castro-to-lung-fung-bakery-1823-clement.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → sunset dunes (ocean beach)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Sunset Dunes (Ocean Beach)</td>
+      <td style="color:#2563eb">9.9 km · 28%</td>
+      <td style="color:#ea580c">10.7 km · 76%</td>
+      <td style="color:#059669">10.2 km · 17%</td>
+      <td></td>
+      <td><a href="126-sf-kid-starting-out-home-120-hancock-st-castro-to-sunset-dunes-ocean-beach.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → tartine (600 guerrero)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Tartine (600 Guerrero)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">0.7 km · 0%</td>
+      <td style="color:#059669">0.7 km · 0%</td>
+      <td></td>
+      <td><a href="141-sf-kid-starting-out-home-120-hancock-st-castro-to-tartine-600-guerrero.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → ucsf parnassus (505 parnassus)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → UCSF Parnassus (505 Parnassus)</td>
+      <td style="color:#2563eb">4.6 km · 20%</td>
+      <td style="color:#ea580c">5.4 km · 24%</td>
+      <td style="color:#059669">4.5 km · 0%</td>
+      <td></td>
+      <td><a href="166-sf-kid-starting-out-home-120-hancock-st-castro-to-ucsf-parnassus-505-parnassus.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-starting-out" data-pair="home (120 hancock st, castro) → yummy's (607 jackson, chinatown)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-starting-out</td>
+      <td>Home (120 Hancock St, Castro) → Yummy's (607 Jackson, Chinatown)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.5 km · 22%</td>
+      <td style="color:#059669">5.2 km · 22%</td>
+      <td></td>
+      <td><a href="181-sf-kid-starting-out-home-120-hancock-st-castro-to-yummy-s-607-jackson-chinatown.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → 16th st mission bart" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → 16th St Mission BART</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">1.4 km · 14%</td>
+      <td style="color:#059669">1.4 km · 30%</td>
+      <td></td>
+      <td><a href="158-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-16th-st-mission-bart.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → 22nd st caltrain" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → 22nd St Caltrain</td>
+      <td style="color:#2563eb">4.5 km · 26%</td>
+      <td style="color:#ea580c">4.8 km · 23%</td>
+      <td style="color:#059669">4.9 km · 23%</td>
+      <td></td>
+      <td><a href="148-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-22nd-st-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → 450 sutter medical building" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → 450 Sutter Medical Building</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.9 km · 52%</td>
+      <td style="color:#059669">5.0 km · 38%</td>
+      <td></td>
+      <td><a href="173-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-450-sutter-medical-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → 4th + king caltrain" data-flagged="1">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → 4th + King Caltrain</td>
+      <td style="color:#2563eb">5.8 km · 60%</td>
+      <td style="color:#ea580c">4.4 km · 40%</td>
+      <td style="color:#059669">4.5 km · 45%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="153-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-4th-king-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → apple store union square" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Apple Store Union Square</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 54%</td>
+      <td style="color:#059669">4.7 km · 42%</td>
+      <td></td>
+      <td><a href="178-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-apple-store-union-square.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → balboa pool" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Balboa Pool</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.8 km · 43%</td>
+      <td style="color:#059669">5.5 km · 21%</td>
+      <td></td>
+      <td><a href="133-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-balboa-pool.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → cpmc mission bernal (cesar chavez + valencia)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → CPMC Mission Bernal (Cesar Chavez + Valencia)</td>
+      <td style="color:#2563eb">2.6 km · 28%</td>
+      <td style="color:#ea580c">2.7 km · 41%</td>
+      <td style="color:#059669">2.6 km · 18%</td>
+      <td></td>
+      <td><a href="163-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-cpmc-mission-bernal-cesar-chavez.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → dragon beaux (5700 geary)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Dragon Beaux (5700 Geary)</td>
+      <td style="color:#2563eb">6.8 km · 67%</td>
+      <td style="color:#ea580c">6.9 km · 56%</td>
+      <td style="color:#059669">6.9 km · 60%</td>
+      <td></td>
+      <td><a href="193-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-dragon-beaux-5700-geary.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → dumpling story (694 valencia)" data-flagged="1">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Dumpling Story (694 Valencia)</td>
+      <td style="color:#2563eb">1.4 km · 26%</td>
+      <td style="color:#ea580c">0.9 km · 5%</td>
+      <td style="color:#059669">0.9 km · 9%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="138-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-dumpling-story-694-valencia.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → ferry building" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Ferry Building</td>
+      <td style="color:#2563eb">6.6 km · 74%</td>
+      <td style="color:#ea580c">6.3 km · 62%</td>
+      <td style="color:#059669">7.0 km · 46%</td>
+      <td></td>
+      <td><a href="113-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-ferry-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → jfk promenade east end (stanyan)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → JFK Promenade east end (Stanyan)</td>
+      <td style="color:#2563eb">3.6 km · 68%</td>
+      <td style="color:#ea580c">4.0 km · 50%</td>
+      <td style="color:#059669">3.7 km · 56%</td>
+      <td></td>
+      <td><a href="123-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-jfk-promenade-east-end-stanyan.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → lands end" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Lands End</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">9.9 km · 29%</td>
+      <td style="color:#059669">9.7 km · 57%</td>
+      <td></td>
+      <td><a href="118-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-lands-end.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → lung fung bakery (1823 clement)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Lung Fung Bakery (1823 Clement)</td>
+      <td style="color:#2563eb">6.8 km · 64%</td>
+      <td style="color:#ea580c">6.9 km · 39%</td>
+      <td style="color:#059669">6.9 km · 51%</td>
+      <td></td>
+      <td><a href="188-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-lung-fung-bakery-1823-clement.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → sunset dunes (ocean beach)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Sunset Dunes (Ocean Beach)</td>
+      <td style="color:#2563eb">10.1 km · 73%</td>
+      <td style="color:#ea580c">10.7 km · 80%</td>
+      <td style="color:#059669">10.2 km · 39%</td>
+      <td></td>
+      <td><a href="128-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-sunset-dunes-ocean-beach.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → tartine (600 guerrero)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Tartine (600 Guerrero)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">0.7 km · 0%</td>
+      <td style="color:#059669">0.7 km · 0%</td>
+      <td></td>
+      <td><a href="143-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-tartine-600-guerrero.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → ucsf parnassus (505 parnassus)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → UCSF Parnassus (505 Parnassus)</td>
+      <td style="color:#2563eb">4.8 km · 64%</td>
+      <td style="color:#ea580c">4.3 km · 4%</td>
+      <td style="color:#059669">4.5 km · 30%</td>
+      <td></td>
+      <td><a href="168-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-ucsf-parnassus-505-parnassus.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="kid-traffic-savvy" data-pair="home (120 hancock st, castro) → yummy's (607 jackson, chinatown)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>kid-traffic-savvy</td>
+      <td>Home (120 Hancock St, Castro) → Yummy's (607 Jackson, Chinatown)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.5 km · 37%</td>
+      <td style="color:#059669">5.3 km · 37%</td>
+      <td></td>
+      <td><a href="183-sf-kid-traffic-savvy-home-120-hancock-st-castro-to-yummy-s-607-jackson-chinatown.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → 16th st mission bart" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → 16th St Mission BART</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">1.4 km · 0%</td>
+      <td style="color:#059669">1.4 km · 0%</td>
+      <td></td>
+      <td><a href="160-sf-training-home-120-hancock-st-castro-to-16th-st-mission-bart.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → 22nd st caltrain" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → 22nd St Caltrain</td>
+      <td style="color:#2563eb">4.5 km · 26%</td>
+      <td style="color:#ea580c">4.8 km · 0%</td>
+      <td style="color:#059669">4.9 km · 0%</td>
+      <td></td>
+      <td><a href="150-sf-training-home-120-hancock-st-castro-to-22nd-st-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → 450 sutter medical building" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → 450 Sutter Medical Building</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.9 km · 22%</td>
+      <td style="color:#059669">4.4 km · 19%</td>
+      <td></td>
+      <td><a href="175-sf-training-home-120-hancock-st-castro-to-450-sutter-medical-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → 4th + king caltrain" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → 4th + King Caltrain</td>
+      <td style="color:#2563eb">4.5 km · 18%</td>
+      <td style="color:#ea580c">4.4 km · 25%</td>
+      <td style="color:#059669">4.4 km · 25%</td>
+      <td></td>
+      <td><a href="155-sf-training-home-120-hancock-st-castro-to-4th-king-caltrain.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → apple store union square" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Apple Store Union Square</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">4.7 km · 22%</td>
+      <td style="color:#059669">4.4 km · 19%</td>
+      <td></td>
+      <td><a href="180-sf-training-home-120-hancock-st-castro-to-apple-store-union-square.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → balboa pool" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Balboa Pool</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.9 km · 30%</td>
+      <td style="color:#059669">5.3 km · 7%</td>
+      <td></td>
+      <td><a href="135-sf-training-home-120-hancock-st-castro-to-balboa-pool.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → cpmc mission bernal (cesar chavez + valencia)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → CPMC Mission Bernal (Cesar Chavez + Valencia)</td>
+      <td style="color:#2563eb">2.2 km · 1%</td>
+      <td style="color:#ea580c">2.7 km · 22%</td>
+      <td style="color:#059669">2.2 km · 1%</td>
+      <td></td>
+      <td><a href="165-sf-training-home-120-hancock-st-castro-to-cpmc-mission-bernal-cesar-chavez.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → dragon beaux (5700 geary)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Dragon Beaux (5700 Geary)</td>
+      <td style="color:#2563eb">6.8 km · 62%</td>
+      <td style="color:#ea580c">6.9 km · 42%</td>
+      <td style="color:#059669">6.6 km · 17%</td>
+      <td></td>
+      <td><a href="195-sf-training-home-120-hancock-st-castro-to-dragon-beaux-5700-geary.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → dumpling story (694 valencia)" data-flagged="1">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Dumpling Story (694 Valencia)</td>
+      <td style="color:#2563eb">1.2 km · 0%</td>
+      <td style="color:#ea580c">0.9 km · 0%</td>
+      <td style="color:#059669">0.9 km · 0%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="140-sf-training-home-120-hancock-st-castro-to-dumpling-story-694-valencia.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → ferry building" data-flagged="1">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Ferry Building</td>
+      <td style="color:#2563eb">8.1 km · 18%</td>
+      <td style="color:#ea580c">5.5 km · 21%</td>
+      <td style="color:#059669">7.0 km · 28%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="115-sf-training-home-120-hancock-st-castro-to-ferry-building.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → jfk promenade east end (stanyan)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → JFK Promenade east end (Stanyan)</td>
+      <td style="color:#2563eb">3.6 km · 68%</td>
+      <td style="color:#ea580c">4.0 km · 49%</td>
+      <td style="color:#059669">3.5 km · 69%</td>
+      <td></td>
+      <td><a href="125-sf-training-home-120-hancock-st-castro-to-jfk-promenade-east-end-stanyan.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → lands end" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Lands End</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">9.9 km · 20%</td>
+      <td style="color:#059669">9.5 km · 16%</td>
+      <td></td>
+      <td><a href="120-sf-training-home-120-hancock-st-castro-to-lands-end.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → lung fung bakery (1823 clement)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Lung Fung Bakery (1823 Clement)</td>
+      <td style="color:#2563eb">6.8 km · 59%</td>
+      <td style="color:#ea580c"><span class="fail">FAIL</span></td>
+      <td style="color:#059669">6.7 km · 17%</td>
+      <td></td>
+      <td><a href="190-sf-training-home-120-hancock-st-castro-to-lung-fung-bakery-1823-clement.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → sunset dunes (ocean beach)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Sunset Dunes (Ocean Beach)</td>
+      <td style="color:#2563eb">10.4 km · 72%</td>
+      <td style="color:#ea580c">10.6 km · 57%</td>
+      <td style="color:#059669">9.9 km · 11%</td>
+      <td></td>
+      <td><a href="130-sf-training-home-120-hancock-st-castro-to-sunset-dunes-ocean-beach.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → tartine (600 guerrero)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Tartine (600 Guerrero)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">0.7 km · 0%</td>
+      <td style="color:#059669">0.7 km · 0%</td>
+      <td></td>
+      <td><a href="145-sf-training-home-120-hancock-st-castro-to-tartine-600-guerrero.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → ucsf parnassus (505 parnassus)" data-flagged="1">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → UCSF Parnassus (505 Parnassus)</td>
+      <td style="color:#2563eb">4.8 km · 64%</td>
+      <td style="color:#ea580c">4.3 km · 4%</td>
+      <td style="color:#059669">2.9 km · 0%</td>
+      <td><span class="flag">⚠</span></td>
+      <td><a href="170-sf-training-home-120-hancock-st-castro-to-ucsf-parnassus-505-parnassus.html">open</a></td>
+    </tr>
+<tr data-city="San Francisco" data-mode="training" data-pair="home (120 hancock st, castro) → yummy's (607 jackson, chinatown)" data-flagged="0">
+      <td>San Francisco</td>
+      <td>training</td>
+      <td>Home (120 Hancock St, Castro) → Yummy's (607 Jackson, Chinatown)</td>
+      <td style="color:#2563eb"><span class="fail">FAIL</span></td>
+      <td style="color:#ea580c">5.5 km · 16%</td>
+      <td style="color:#059669">5.3 km · 16%</td>
+      <td></td>
+      <td><a href="185-sf-training-home-120-hancock-st-castro-to-yummy-s-607-jackson-chinatown.html">open</a></td>
+    </tr></tbody>
+</table>
+
+<script>
+  const city = document.getElementById('f-city')
+  const mode = document.getElementById('f-mode')
+  const pair = document.getElementById('f-pair')
+  const flag = document.getElementById('f-flag')
+  const clear = document.getElementById('f-clear')
+  const count = document.getElementById('f-count')
+  const rows = document.querySelectorAll('#rows tr')
+  function apply() {
+    const c = city.value, m = mode.value, p = pair.value.trim().toLowerCase(), f = flag.checked
+    let shown = 0
+    for (const r of rows) {
+      const ok = (!c || r.dataset.city === c)
+        && (!m || r.dataset.mode === m)
+        && (!p || r.dataset.pair.includes(p))
+        && (!f || r.dataset.flagged === '1')
+      r.classList.toggle('hidden', !ok)
+      if (ok) shown++
+    }
+    count.textContent = shown + ' / ' + rows.length
+  }
+  city.addEventListener('change', apply)
+  mode.addEventListener('change', apply)
+  pair.addEventListener('input', apply)
+  flag.addEventListener('change', apply)
+  clear.addEventListener('click', () => { city.value=''; mode.value=''; pair.value=''; flag.checked=false; apply() })
+  apply()
+</script>
+</body></html>

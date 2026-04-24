@@ -15,6 +15,7 @@ import { getDefaultPreferredItems } from '../src/utils/classify'
 import { classifyEdge } from '../src/utils/lts'
 import type { PathLevel } from '../src/utils/lts'
 import type { OsmWay } from '../src/utils/types'
+import { CITIES as SHARED_CITIES, verifyFixtures, printVerifyReport, hasVerifyErrors } from './lib/fixtures'
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -318,24 +319,27 @@ const BERLIN: CityConfig = {
   displayName: 'Berlin',
   bbox: { south: 52.34, west: 13.08, north: 52.68, east: 13.80 },
   origins: [
-    { lat: 52.5016, lng: 13.4103, label: 'Home' },     // Dresdener Str area, Kreuzberg
+    { lat: 52.5051, lng: 13.4145, label: 'Home' },     // Dresdener Str. 112, 10179 Berlin
     { lat: 52.5105, lng: 13.4247, label: 'School' },   // Wilhelmine-Gemberg-Weg
   ],
+  // Coords synced with scripts/lib/fixtures.ts — verified against
+  // Nominatim 2026-04-24 (Berlin Zoo, Fischerinsel, Garten der Welt,
+  // Stadtbad Neukölln, Nonne und Zwerg all realigned from old drift).
   destinations: [
-    { lat: 52.5079, lng: 13.3376, label: 'Berlin Zoo' },
+    { lat: 52.5084, lng: 13.3392, label: 'Berlin Zoo' },
     { lat: 52.5284, lng: 13.3727, label: 'Hamburger Bahnhof' },
     { lat: 52.5219, lng: 13.4133, label: 'Alexanderplatz' },
-    { lat: 52.5130, lng: 13.4070, label: 'Fischerinsel Swimming' },
+    { lat: 52.5125, lng: 13.4047, label: 'Fischerinsel Swimming' },
     { lat: 52.5169, lng: 13.4019, label: 'Humboldt Forum' },
-    { lat: 52.4910, lng: 13.4220, label: 'Nonne und Zwerg' },
-    { lat: 52.4750, lng: 13.4340, label: 'Stadtbad Neukoelln' },
-    { lat: 52.5410, lng: 13.5790, label: 'Garten der Welt' },
+    { lat: 52.4926, lng: 13.3966, label: 'Nonne und Zwerg' },
+    { lat: 52.4792, lng: 13.4397, label: 'Stadtbad Neukoelln' },
+    { lat: 52.5373, lng: 13.5749, label: 'Garten der Welt' },
     { lat: 52.5300, lng: 13.4519, label: 'SSE Schwimmhalle' },
     { lat: 52.4898, lng: 13.3904, label: 'Ararat Bergmannstr' },
   ],
   extraRoutes: [
     { origin: { lat: 52.5163, lng: 13.3777, label: 'Brandenburger Tor' },
-      dest:   { lat: 52.5079, lng: 13.3376, label: 'Berlin Zoo' } },
+      dest:   { lat: 52.5084, lng: 13.3392, label: 'Berlin Zoo' } },
     { origin: { lat: 52.4921, lng: 13.3147, label: 'Thaipark' },
       dest:   { lat: 52.4867, lng: 13.3546, label: 'Tranxx' } },
   ],
@@ -357,15 +361,15 @@ const SF: CityConfig = {
   ],
   destinations: [
     { lat: 37.7955, lng: -122.3935, label: 'Ferry Building' },
-    { lat: 37.7838, lng: -122.5068, label: 'Lands End' },
-    { lat: 37.7696, lng: -122.4541, label: 'JFK Promenade east end (Stanyan)' },
+    { lat: 37.7798, lng: -122.5116, label: 'Lands End' },
+    { lat: 37.7711, lng: -122.4542, label: 'JFK Promenade east end (Stanyan)' },
     { lat: 37.7507, lng: -122.5085, label: 'Sunset Dunes (Ocean Beach)' },
     { lat: 37.7261, lng: -122.4434, label: 'Balboa Pool' },
     { lat: 37.7619, lng: -122.4219, label: 'Dumpling Story (694 Valencia)' },
     { lat: 37.7615, lng: -122.4239, label: 'Tartine (600 Guerrero)' },
     { lat: 37.7573, lng: -122.3924, label: '22nd St Caltrain' },
     { lat: 37.7769, lng: -122.3951, label: '4th + King Caltrain' },
-    { lat: 37.7651, lng: -122.4197, label: '16th St Mission BART' },
+    { lat: 37.7650, lng: -122.4204, label: '16th St Mission BART' },
     { lat: 37.7475, lng: -122.4216, label: 'CPMC Mission Bernal (Cesar Chavez + Valencia)' },
     { lat: 37.7631, lng: -122.4574, label: 'UCSF Parnassus (505 Parnassus)' },
     { lat: 37.7896, lng: -122.4079, label: '450 Sutter Medical Building' },
@@ -385,6 +389,7 @@ interface RoutePair { origin: { lat: number; lng: number; label: string }; dest:
 
 async function main() {
   const skipExternal = process.argv.includes('--no-external')
+  const skipVerify = process.argv.includes('--no-verify')
   const cityFlag = process.argv.find((a) => a.startsWith('--city='))
   const cityKey = cityFlag ? cityFlag.slice('--city='.length) : 'berlin'
   const city = CITIES[cityKey]
@@ -393,7 +398,24 @@ async function main() {
     process.exit(1)
   }
 
-  console.log(`=== Routing Benchmark: ${city.displayName} · Client (5 modes)${skipExternal ? '' : ' + Valhalla + BRouter'} ===\n`)
+  // Fail fast on bad fixture coords before we burn 10 minutes routing to
+  // the wrong address.
+  if (!skipVerify) {
+    console.log(`Verifying fixtures against Nominatim…`)
+    const sharedCity = SHARED_CITIES.find((c) => c.key === cityKey)
+    const toCheck = sharedCity ? [sharedCity] : SHARED_CITIES
+    const report = await verifyFixtures(toCheck, {
+      onProgress: (done, total) => process.stdout.write(`\r  ${done}/${total}`),
+    })
+    console.log('')
+    printVerifyReport(report)
+    if (hasVerifyErrors(report)) {
+      console.error('\n✘ Fixture verification failed (≥150 m error). Fix fixtures or pass --no-verify.')
+      process.exit(1)
+    }
+  }
+
+  console.log(`\n=== Routing Benchmark: ${city.displayName} · Client (5 modes)${skipExternal ? '' : ' + Valhalla + BRouter'} ===\n`)
 
   const allWays = await fetchTilesForCity(city.displayName, city.bbox)
 

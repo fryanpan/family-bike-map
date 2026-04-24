@@ -2107,6 +2107,11 @@ body.mobile-preview .profile-chip svg { max-width: 44px; }
   background: none; border: none; padding: 0; white-space: nowrap;
 }
 .sc-toggle:hover { text-decoration: underline; }
+.sc-note {
+  font-size: 11px; color: #374151; font-style: italic;
+  padding: 4px 10px 6px; border-bottom: 1px solid #f3f4f6;
+  line-height: 1.4;
+}
 
 /* Image grid — 6 columns on desktop (≥768px) so at least 4 level
    sections fit in a viewport; 3 columns on narrow panels where 6 would
