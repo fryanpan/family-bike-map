@@ -804,17 +804,46 @@ async function gitHead(): Promise<string | null> {
   } catch { return null }
 }
 
-/** Matches vite.config.ts's resolveAppVersion. Keep in sync. */
+/**
+ * Version string used as the benchmark folder prefix. Three layers:
+ *   1. $VITE_APP_VERSION       (set in CI — pass-through)
+ *   2. Live prod version from https://bike-map.fryanpan.com/version.json
+ *      composed with local git sha — folder is "<prod-version>-local-<sha>[-dirty]"
+ *      so the folder tells you both what's deployed AND what you
+ *      actually ran the benchmark against.
+ *   3. Fall-through to "0.1.0-dev-<sha>[-dirty]" if prod is unreachable.
+ */
 async function resolveVersion(): Promise<string> {
   const envVer = process.env.VITE_APP_VERSION
   if (envVer) return envVer
+
+  // Local git sha + dirty flag.
+  let sha = 'unknown'
+  let dirty = false
   try {
-    const sha = Bun.spawn(['git', 'rev-parse', '--short', 'HEAD'], { stdout: 'pipe' })
-    const shaText = (await new Response(sha.stdout).text()).trim()
+    const shaProc = Bun.spawn(['git', 'rev-parse', '--short', 'HEAD'], { stdout: 'pipe' })
+    sha = (await new Response(shaProc.stdout).text()).trim() || 'unknown'
     const dirtyProc = Bun.spawn(['git', 'status', '--porcelain'], { stdout: 'pipe' })
-    const dirty = (await new Response(dirtyProc.stdout).text()).trim().length > 0
-    return `0.1.0-dev-${shaText}${dirty ? '-dirty' : ''}`
-  } catch { return '0.1.0-dev-unknown' }
+    dirty = (await new Response(dirtyProc.stdout).text()).trim().length > 0
+  } catch { /* sha stays 'unknown' */ }
+
+  // Prod version (optional). Short timeout — we're just building a
+  // folder name; don't block the whole benchmark on a slow/offline
+  // network.
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    const resp = await fetch('https://bike-map.fryanpan.com/version.json', { signal: controller.signal })
+    clearTimeout(timer)
+    if (resp.ok) {
+      const data = await resp.json() as { version?: string }
+      if (data.version) {
+        return `${data.version}-local-${sha}${dirty ? '-dirty' : ''}`
+      }
+    }
+  } catch { /* fall through to local-only format */ }
+
+  return `0.1.0-dev-${sha}${dirty ? '-dirty' : ''}`
 }
 
 main().catch((e) => { console.error(e); process.exit(1) })
