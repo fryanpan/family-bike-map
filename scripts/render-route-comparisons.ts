@@ -346,15 +346,105 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
 
   // Aggregate stats.
   const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0
-  const cPrefs  = sorted.filter((s) => s.client)  .map((s) => s.client! .preferredPct)
-  const vPrefs  = sorted.filter((s) => s.valhalla).map((s) => s.valhalla!.preferredPct)
-  const bPrefs  = sorted.filter((s) => s.brouter) .map((s) => s.brouter! .preferredPct)
-  const gPrefs  = sorted.filter((s) => s.google)  .map((s) => s.google!  .preferredPct)
-  const cDists  = sorted.filter((s) => s.client)  .map((s) => s.client! .distanceKm)
-  const vDists  = sorted.filter((s) => s.valhalla).map((s) => s.valhalla!.distanceKm)
-  const bDists  = sorted.filter((s) => s.brouter) .map((s) => s.brouter! .distanceKm)
-  const gDists  = sorted.filter((s) => s.google)  .map((s) => s.google!  .distanceKm)
   const flagged = sorted.filter((s) => s.distanceFlag).length
+
+  // Per-mode aggregates. Overall numbers hide big mode-to-mode gaps
+  // (e.g. Google's bicycling route is the same for every mode — its
+  // preferred-% varies wildly by mode because the preference *set* shifts)
+  // so the summary table and charts break down by travel mode.
+  const ROUTER_ORDER = ['client', 'valhalla', 'brouter', 'google'] as const
+  type RouterKey = typeof ROUTER_ORDER[number]
+  const ROUTER_LABELS: Record<RouterKey, string> = { client: 'Client', valhalla: 'Valhalla', brouter: 'BRouter', google: 'Google' }
+  const ROUTER_COLORS: Record<RouterKey, string> = { client: '#2563eb', valhalla: '#ea580c', brouter: '#059669', google: '#dc2626' }
+
+  interface ModeStats {
+    mode: string
+    pref: Record<RouterKey, number>
+    dist: Record<RouterKey, number>
+    counts: Record<RouterKey, number>
+    total: number
+  }
+  const byMode: ModeStats[] = modes.map((mode) => {
+    const inMode = sorted.filter((s) => s.mode === mode)
+    const pref = {} as Record<RouterKey, number>
+    const dist = {} as Record<RouterKey, number>
+    const counts = {} as Record<RouterKey, number>
+    for (const r of ROUTER_ORDER) {
+      const legs = inMode.map((s) => s[r]).filter((x): x is ScoredLeg => x != null)
+      pref[r] = avg(legs.map((l) => l.preferredPct))
+      dist[r] = avg(legs.map((l) => l.distanceKm))
+      counts[r] = legs.length
+    }
+    return { mode, pref, dist, counts, total: inMode.length }
+  })
+
+  // Nice y-axis max for the distance chart — round up to the next 0.5 km so
+  // ticks at 0, 0.25, 0.5, 0.75, 1.0 of max come out clean.
+  const maxDist = Math.max(0.5, ...byMode.flatMap((m) => ROUTER_ORDER.map((r) => m.dist[r])))
+  const distYMax = Math.ceil(maxDist * 2) / 2
+  const prefYMax = 1.0
+
+  function renderBarChart(opts: {
+    yMax: number
+    yTicks: number[]
+    formatTick: (v: number) => string
+    formatBar: (v: number) => string
+    accessor: (m: ModeStats, r: RouterKey) => number
+    ariaLabel: string
+  }): string {
+    const W = 620, H = 280
+    const padL = 42, padR = 14, padT = 14, padB = 68
+    const plotW = W - padL - padR
+    const plotH = H - padT - padB
+    const nG = byMode.length
+    const nR = ROUTER_ORDER.length
+    const groupW = plotW / nG
+    const innerPad = groupW * 0.12
+    const barW = (groupW - innerPad * 2) / nR
+    const y = (v: number) => padT + plotH - (v / opts.yMax) * plotH
+
+    const grid = opts.yTicks.map((t) => `
+      <line x1="${padL}" x2="${W - padR}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="${padL - 6}" y="${(y(t) + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">${opts.formatTick(t)}</text>
+    `).join('')
+
+    const bars = byMode.map((g, gi) => {
+      const gx = padL + gi * groupW + innerPad
+      return ROUTER_ORDER.map((r, ri) => {
+        const v = opts.accessor(g, r)
+        const bx = gx + ri * barW
+        const by = y(v)
+        const bh = Math.max(0, padT + plotH - by)
+        return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${(barW - 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="${ROUTER_COLORS[r]}"><title>${ROUTER_LABELS[r]} — ${g.mode}: ${opts.formatBar(v)} (n=${g.counts[r]})</title></rect>`
+      }).join('')
+    }).join('')
+
+    const modeLabels = byMode.map((g, gi) => {
+      const cx = padL + gi * groupW + groupW / 2
+      return `<text x="${cx.toFixed(1)}" y="${(padT + plotH + 14).toFixed(1)}" text-anchor="middle" font-size="10" fill="#374151">${g.mode}</text>`
+    }).join('')
+
+    const legendY = H - 12
+    const legendItems = ROUTER_ORDER.map((r, i) => {
+      const lx = padL + i * (plotW / nR)
+      return `
+        <rect x="${lx.toFixed(1)}" y="${(legendY - 9).toFixed(1)}" width="11" height="11" fill="${ROUTER_COLORS[r]}"/>
+        <text x="${(lx + 16).toFixed(1)}" y="${(legendY + 0.5).toFixed(1)}" font-size="11" fill="#374151">${ROUTER_LABELS[r]}</text>
+      `
+    }).join('')
+
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${opts.ariaLabel}">
+      ${grid}
+      ${bars}
+      ${modeLabels}
+      ${legendItems}
+      <line x1="${padL}" x2="${padL}" y1="${padT}" y2="${padT + plotH}" stroke="#374151" stroke-width="1"/>
+      <line x1="${padL}" x2="${W - padR}" y1="${padT + plotH}" y2="${padT + plotH}" stroke="#374151" stroke-width="1"/>
+    </svg>`
+  }
+
+  const prefTicks = [0, 0.25, 0.5, 0.75, 1.0]
+  const distTicks = [0, distYMax * 0.25, distYMax * 0.5, distYMax * 0.75, distYMax]
 
   // ── Heatmap palettes (colorblind-safe) ───────────────────────────
   //
@@ -455,14 +545,22 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
   .legend span { display: inline-block; margin-right: 14px; }
   .sw { display: inline-block; width: 14px; height: 4px; vertical-align: middle; margin-right: 4px; }
 
-  .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0 20px; }
-  .summary-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; }
-  .summary-card h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin: 0 0 6px; }
-  .summary-card .client   { color: #2563eb; }
-  .summary-card .valhalla { color: #ea580c; }
-  .summary-card .brouter  { color: #059669; }
-  .summary-card .google   { color: #dc2626; }
-  .summary-card .metric   { font-family: ui-monospace, Menlo, monospace; font-size: 13px; margin: 2px 0; }
+  .card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 14px; margin: 16px 0; }
+  .card h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin: 0 0 8px; }
+  .mode-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .mode-table th, .mode-table td { padding: 5px 8px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
+  .mode-table th { background: transparent; font-size: 11px; color: #6b7280; font-weight: 600; position: static; }
+  .mode-table th.mode-head, .mode-table td.mode-cell { text-align: left; font-weight: 600; color: #111827; }
+  .mode-table td.metric-cell { font-family: ui-monospace, Menlo, monospace; }
+  .mode-table .group-pref { border-left: 3px solid #08306b; }
+  .mode-table .group-dist { border-left: 3px solid #2166ac; }
+  .mode-table .count { color: #9ca3af; font-size: 11px; margin-left: 2px; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+  @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+  .chart { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 14px; }
+  .chart h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin: 0 0 6px; }
+  .chart .sub { font-size: 11px; color: #6b7280; margin: -4px 0 8px; }
+  .chart svg { width: 100%; height: auto; display: block; }
 
   .flag-banner { background: #fef3c7; color: #78350f; padding: 8px 12px; border-radius: 6px; margin: 14px 0; font-size: 13px; }
 
@@ -500,26 +598,73 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
   <span><span class="sw" style="background:#dc2626"></span>Google Maps (bicycling)</span>
 </div>
 
-<div class="summary">
-  <div class="summary-card">
-    <h3>Avg preferred %</h3>
-    <div class="metric client">Client:   ${(avg(cPrefs) * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${cPrefs.length})</span></div>
-    <div class="metric valhalla">Valhalla: ${(avg(vPrefs) * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${vPrefs.length})</span></div>
-    <div class="metric brouter">BRouter:  ${(avg(bPrefs) * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${bPrefs.length})</span></div>
-    <div class="metric google">Google:   ${(avg(gPrefs) * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${gPrefs.length})</span></div>
+<div class="card">
+  <h3>Averages by travel mode</h3>
+  <table class="mode-table">
+    <thead>
+      <tr>
+        <th rowspan="2" class="mode-head">Mode</th>
+        <th colspan="4" class="group-pref">Avg preferred %</th>
+        <th colspan="4" class="group-dist">Avg distance (km)</th>
+      </tr>
+      <tr>
+        <th class="group-pref">Client</th><th>Valhalla</th><th>BRouter</th><th>Google</th>
+        <th class="group-dist">Client</th><th>Valhalla</th><th>BRouter</th><th>Google</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${byMode.map((m) => {
+        // When every sample for a router FAILed in this mode, counts[r]===0
+        // and the average is 0 by definition — render as em-dash instead of
+        // a real "0%" / "0.00" so it doesn't look like a surprising result.
+        const prefCell = (r: RouterKey) => m.counts[r] > 0
+          ? `<td class="metric-cell${r === 'client' ? ' group-pref' : ''}" style="color:${ROUTER_COLORS[r]}">${(m.pref[r] * 100).toFixed(0)}%</td>`
+          : `<td class="metric-cell${r === 'client' ? ' group-pref' : ''}" style="color:#9ca3af">—</td>`
+        const distCell = (r: RouterKey) => m.counts[r] > 0
+          ? `<td class="metric-cell${r === 'client' ? ' group-dist' : ''}" style="color:${ROUTER_COLORS[r]}">${m.dist[r].toFixed(2)}</td>`
+          : `<td class="metric-cell${r === 'client' ? ' group-dist' : ''}" style="color:#9ca3af">—</td>`
+        return `
+        <tr>
+          <td class="mode-cell">${m.mode} <span class="count">(n=${m.total})</span></td>
+          ${prefCell('client')}${prefCell('valhalla')}${prefCell('brouter')}${prefCell('google')}
+          ${distCell('client')}${distCell('valhalla')}${distCell('brouter')}${distCell('google')}
+        </tr>`
+      }).join('')}
+    </tbody>
+  </table>
+</div>
+
+<div class="charts">
+  <div class="chart">
+    <h3>Avg preferred % by mode</h3>
+    <div class="sub">Higher = more of the route is on infrastructure the rider's profile prefers.</div>
+    ${renderBarChart({
+      yMax: prefYMax,
+      yTicks: prefTicks,
+      formatTick: (v) => `${(v * 100).toFixed(0)}%`,
+      formatBar: (v) => `${(v * 100).toFixed(0)}%`,
+      accessor: (m, r) => m.pref[r],
+      ariaLabel: 'Average preferred percent by travel mode',
+    })}
   </div>
-  <div class="summary-card">
-    <h3>Avg distance</h3>
-    <div class="metric client">Client:   ${avg(cDists).toFixed(2)} km</div>
-    <div class="metric valhalla">Valhalla: ${avg(vDists).toFixed(2)} km</div>
-    <div class="metric brouter">BRouter:  ${avg(bDists).toFixed(2)} km</div>
-    <div class="metric google">Google:   ${avg(gDists).toFixed(2)} km</div>
+  <div class="chart">
+    <h3>Avg distance (km) by mode</h3>
+    <div class="sub">Lower = shorter route. Client may trade distance for safety.</div>
+    ${renderBarChart({
+      yMax: distYMax,
+      yTicks: distTicks,
+      formatTick: (v) => v.toFixed(1),
+      formatBar: (v) => `${v.toFixed(2)} km`,
+      accessor: (m, r) => m.dist[r],
+      ariaLabel: 'Average distance in km by travel mode',
+    })}
   </div>
-  <div class="summary-card">
-    <h3>Distance flags</h3>
-    <div class="metric">${flagged} / ${sorted.length} routes where client &gt; 1.2× min(Valhalla, BRouter)</div>
-    <div class="metric" style="color:#6b7280;font-size:11px;margin-top:6px">Likely detour. Worth reviewing on the map — may still be correct (e.g. safer corridor) but flag it.</div>
-  </div>
+</div>
+
+<div class="card">
+  <h3>Distance flags</h3>
+  <div style="font-family:ui-monospace,Menlo,monospace;font-size:13px">${flagged} / ${sorted.length} routes where client &gt; 1.2× min(Valhalla, BRouter, Google)</div>
+  <div style="color:#6b7280;font-size:11px;margin-top:6px">Likely detour. Worth reviewing on the map — may still be correct (e.g. safer corridor) but flag it.</div>
 </div>
 
 ${flagged > 0 ? `<div class="flag-banner">⚠ ${flagged} route(s) flagged for long detour. Use the “flagged only” filter below.</div>` : ''}
@@ -602,6 +747,15 @@ async function main() {
   const cityArg = args.find((a) => a.startsWith('--city='))?.slice('--city='.length) ?? null
   const skipVerify = args.includes('--no-verify')
   const skipExternal = args.includes('--no-external')
+  const indexOnlyArg = args.find((a) => a.startsWith('--index-only='))?.slice('--index-only='.length) ?? null
+
+  // --index-only=<folder> rebuilds only the index.html from a previous
+  // run's metrics.json. Use when the index template changes but the
+  // per-sample routing data hasn't — saves a full re-run.
+  if (indexOnlyArg) {
+    await rebuildIndexOnly(indexOnlyArg)
+    return
+  }
 
   const cities = cityArg ? CITIES.filter((c) => c.key === cityArg) : CITIES
   if (cities.length === 0) { console.error(`Unknown city "${cityArg}"`); process.exit(1) }
@@ -794,6 +948,64 @@ async function main() {
   console.log(`\n✓ Wrote ${samples.length} samples + index.html + metrics.json to ${outDir}`)
   console.log(`  appended 1 line to ${historyPath}`)
   console.log(`  Browse: http://localhost:5173/route-compare/${folderName}/index.html`)
+}
+
+/**
+ * Rebuild only the index.html for a previously-rendered run by reading its
+ * metrics.json. Lets us iterate on the index layout (summary, charts,
+ * heatmap table) without re-routing + re-rendering every per-sample page.
+ */
+async function rebuildIndexOnly(folderArg: string): Promise<void> {
+  // Accept either a folder name ("2026-04-24-0.1.181-local-10fb94a") or
+  // an absolute path — resolve to the public/route-compare path in either case.
+  const baseDir = join(process.cwd(), 'public/route-compare')
+  const folderPath = folderArg.startsWith('/') ? folderArg : join(baseDir, folderArg)
+  const metricsPath = join(folderPath, 'metrics.json')
+  const raw = await readFile(metricsPath, 'utf-8')
+  interface RawSample {
+    index: number
+    city: 'berlin' | 'sf'
+    mode: ModeKey
+    origin: { label: string; lat: number; lng: number }
+    dest:   { label: string; lat: number; lng: number }
+    distanceFlag: boolean
+    client:   { km: number; min: number; preferredPct: number; coords: [number, number][] } | null
+    valhalla: { km: number; min: number; preferredPct: number; coords: [number, number][] } | null
+    brouter:  { km: number; min: number; preferredPct: number; coords: [number, number][] } | null
+    google:   { km: number; min: number; preferredPct: number; coords: [number, number][] } | null
+  }
+  interface RawMetrics {
+    runDate: string
+    version?: string
+    commit?: string | null
+    samples: RawSample[]
+  }
+  const metrics = JSON.parse(raw) as RawMetrics
+  const cityDisplayFor = (key: 'berlin' | 'sf'): string =>
+    CITIES.find((c) => c.key === key)?.displayName ?? key
+
+  const toLeg = (r: { km: number; min: number; preferredPct: number; coords: [number, number][] } | null): ScoredLeg | null =>
+    r ? { coords: r.coords, distanceKm: r.km, durationMin: r.min, preferredPct: r.preferredPct } : null
+
+  const samples: Sample[] = metrics.samples.map((s) => ({
+    index: s.index,
+    city: s.city,
+    cityDisplay: cityDisplayFor(s.city),
+    mode: s.mode,
+    origin: { label: s.origin.label, shortLabel: s.origin.label, lat: s.origin.lat, lng: s.origin.lng },
+    dest:   { label: s.dest.label,   shortLabel: s.dest.label,   lat: s.dest.lat,   lng: s.dest.lng },
+    client:   toLeg(s.client),
+    valhalla: toLeg(s.valhalla),
+    brouter:  toLeg(s.brouter),
+    google:   toLeg(s.google),
+    distanceFlag: s.distanceFlag,
+  }))
+
+  const version = metrics.version ?? 'unknown'
+  const html = renderIndexHtml(samples, metrics.runDate, version)
+  const indexPath = join(folderPath, 'index.html')
+  await writeFile(indexPath, html)
+  console.log(`✓ Rebuilt ${indexPath} from ${metricsPath} (${samples.length} samples)`)
 }
 
 async function gitHead(): Promise<string | null> {
