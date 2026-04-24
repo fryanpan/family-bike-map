@@ -6,9 +6,9 @@ import type { CityScan, AuditWay } from '../services/audit'
 import { classifyOsmTagsToItem } from '../services/overpass'
 import type { ClassificationRule } from '../services/rules'
 import { classifyEdge, PATH_LEVELS, PATH_LEVEL_LABELS } from '../utils/lts'
-import type { PathLevel } from '../utils/lts'
-import { pathLevelAcceptanceForMode, routingNoteForModeLevel } from '../data/modes'
-import type { RideMode } from '../data/modes'
+import type { PathLevel, LtsClassification } from '../utils/lts'
+import { MODE_RULES, applyModeRule } from '../data/modes'
+import type { RideMode, ModeDecision } from '../data/modes'
 
 interface Props {
   scan: CityScan | null
@@ -124,10 +124,12 @@ function ClassCard({
   classification,
   ways,
   isPreferred,
+  note,
 }: {
   classification: string
   ways: AuditWay[]
   isPreferred: boolean
+  note?: string
 }) {
   const [found, setFound] = useState<FoundImage[]>([])
   const [searching, setSearching] = useState(false)
@@ -182,8 +184,9 @@ function ClassCard({
           </button>
         )}
       </div>
+      {note && <div className="sc-note">{note}</div>}
 
-      {/* Image grid: 3 columns collapsed, 3 columns expanded (but more rows) */}
+      {/* Image grid: 6 columns on desktop (see .sc-images CSS). */}
       <div className="sc-images">
         {visible.map((s, i) => (
           <div key={i} className="sc-img-wrap" onClick={() => openLightbox(i)}>
@@ -214,32 +217,86 @@ function ClassCard({
 
 // ── Main tab ────────────────────────────────────────────────────────────
 
+type Bucket = 'preferred' | 'not-preferred'
+
+// Bucket a group by the router's ACTUAL decision, not just by level.
+// A bike path with surface=grass is LTS 1a but rejected by the mode rule
+// for kid-starting-out, so it belongs in "Not preferred" — this mirrors
+// the router exactly (no parallel classifier).
+function bucketForDecision(decision: ModeDecision): Bucket {
+  if (!decision.accepted) return 'not-preferred'
+  if (decision.isWalking) return 'not-preferred'
+  if (decision.costMultiplier > 1.01) return 'not-preferred'
+  return 'preferred'
+}
+
+function noteForDecision(decision: ModeDecision, rule: ReturnType<typeof resolveRule>, classification: LtsClassification): string {
+  const { surface, smoothness } = classification
+  if (!decision.accepted) {
+    return `Rejected by this mode (${decision.reason}). Routed as a walked bridge only where there's no alternative.`
+  }
+  if (decision.isWalking) {
+    return `Walked on the sidewalk at ${rule.walkingSpeedKmh} km/h (cobble or rough surface). Router avoids unless no alternative.`
+  }
+  if (decision.costMultiplier > 1.01) {
+    const why =
+      smoothness && ['bad', 'very_bad', 'horrible', 'very_horrible', 'impassable'].includes(smoothness)
+        ? `smoothness=${smoothness}`
+        : (surface ? `surface=${surface}` : 'rough')
+    return `Rideable at ${decision.speedKmh} km/h but ${decision.costMultiplier.toFixed(1)}× cost (${why}) — router detours when it can.`
+  }
+  return `Routed at ${decision.speedKmh} km/h. First-choice path for this mode.`
+}
+
+function resolveRule(mode: RideMode) { return MODE_RULES[mode] }
+
 export default function AuditSamplesTab({ scan, regionRules }: Props) {
   const [travelMode, setTravelMode] = useState<RideMode>('kid-starting-out')
 
-  // Group by PathLevel → classification → ways. Each ClassCard still
-  // represents one classification item (e.g. "Bike path") but cards are
-  // now nested inside level sections so Bryan can audit each tier's
-  // acceptance under the currently-selected mode.
-  const byLevel = useMemo(() => {
-    const out = new Map<PathLevel, Map<string, AuditWay[]>>()
-    for (const lvl of PATH_LEVELS) out.set(lvl, new Map())
+  // Two-level bucket: bucket (Preferred / Not preferred) → PathLevel →
+  // classification item → { ways, note, decision }. Each scan.groups
+  // entry is tag-uniform, so one `applyModeRule` call classifies all
+  // ways in that group. We key the nested card on (classification +
+  // primary bucketing reason) so a way with the same classification
+  // name but a different decision (e.g. asphalt Bike path vs grass
+  // Bike path) gets its own card.
+  interface ItemEntry { ways: AuditWay[]; decision: ModeDecision; classification: LtsClassification }
+
+  const byBucket = useMemo(() => {
+    const out = new Map<Bucket, Map<PathLevel, Map<string, ItemEntry>>>()
+    for (const bucket of ['preferred', 'not-preferred'] as const) {
+      const m = new Map<PathLevel, Map<string, ItemEntry>>()
+      for (const lvl of PATH_LEVELS) m.set(lvl, new Map())
+      out.set(bucket, m)
+    }
     if (!scan) return out
 
-    const preferredItems = getDefaultPreferredItems(travelMode)
+    const rule = MODE_RULES[travelMode]
 
     for (const group of scan.groups) {
       const sampleTags = group.samples[0]?.tags
       if (!sampleTags) continue
-      const { pathLevel } = classifyEdge(sampleTags)
+      const classification = classifyEdge(sampleTags)
+      const decision = applyModeRule(rule, classification, null)
+      const bucket = bucketForDecision(decision)
       const cls = classifyOsmTagsToItem(sampleTags, travelMode, regionRules) ?? 'Unclassified'
-      const levelMap = out.get(pathLevel)!
-      const existing = levelMap.get(cls) ?? []
-      existing.push(...group.samples.filter((w) => w.center))
-      levelMap.set(cls, existing)
-      // Kept for future: could surface preferredItems per-card, currently
-      // mode-acceptance is shown at the level header which is sufficient.
-      void preferredItems
+      // Include a short decision tag in the key so same-name groups with
+      // different decisions don't collide (asphalt vs grass Bike path).
+      const decisionTag = decision.accepted
+        ? (decision.isWalking ? 'walk' : decision.costMultiplier > 1.01 ? 'rough' : 'ok')
+        : 'rej'
+      const cardKey = `${cls}::${decisionTag}`
+      const levelMap = out.get(bucket)!.get(classification.pathLevel)!
+      const existing = levelMap.get(cardKey)
+      if (existing) {
+        existing.ways.push(...group.samples.filter((w) => w.center))
+      } else {
+        levelMap.set(cardKey, {
+          ways: [...group.samples.filter((w) => w.center)],
+          decision,
+          classification,
+        })
+      }
     }
     return out
   }, [scan, travelMode, regionRules])
@@ -247,6 +304,8 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
   if (!scan) {
     return <div className="audit-empty">Scan a city first to see samples by class.</div>
   }
+
+  const rule = resolveRule(travelMode)
 
   return (
     <div className="st">
@@ -265,23 +324,20 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
         </select>
       </div>
 
-      {(['accepted', 'bridge-walked'] as const).map((bucket) => {
-        const levelsInBucket = PATH_LEVELS.filter((lvl) =>
-          pathLevelAcceptanceForMode(travelMode, lvl) === bucket &&
-          (byLevel.get(lvl)?.size ?? 0) > 0,
-        )
+      {(['preferred', 'not-preferred'] as const).map((bucket) => {
+        const byLevel = byBucket.get(bucket)!
+        const levelsInBucket = PATH_LEVELS.filter((lvl) => (byLevel.get(lvl)?.size ?? 0) > 0)
         if (levelsInBucket.length === 0) return null
-        const sortBySize = (a: [string, AuditWay[]], b: [string, AuditWay[]]) => b[1].length - a[1].length
+        const sortBySize = (a: [string, ItemEntry], b: [string, ItemEntry]) => b[1].ways.length - a[1].ways.length
         return (
           <div key={bucket} className={`st-bucket st-bucket-${bucket}`}>
             <h2 className={`st-bucket-heading st-bucket-heading-${bucket}`}>
-              {bucket === 'accepted' ? 'Preferred paths' : 'Not preferred paths'}
+              {bucket === 'preferred' ? 'Preferred paths' : 'Not preferred paths'}
             </h2>
             {levelsInBucket.map((lvl) => {
-              const classMap = byLevel.get(lvl)!
+              const itemMap = byLevel.get(lvl)!
               const info = PATH_LEVEL_LABELS[lvl]
-              const note = routingNoteForModeLevel(travelMode, lvl)
-              const entries = [...classMap.entries()].sort(sortBySize)
+              const entries = [...itemMap.entries()].sort(sortBySize)
               return (
                 <div key={lvl} className={`st-section st-level st-level-${bucket}`}>
                   <div className="st-level-header">
@@ -289,10 +345,19 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
                     <span className="st-level-name">{info.short}</span>
                   </div>
                   <p className="st-level-desc">{info.description}</p>
-                  <p className="st-level-note">{note}</p>
-                  {entries.map(([cls, ways]) => (
-                    <ClassCard key={cls} classification={cls} ways={ways} isPreferred={bucket === 'accepted'} />
-                  ))}
+                  {entries.map(([cardKey, entry]) => {
+                    const displayName = cardKey.split('::')[0]
+                    const note = noteForDecision(entry.decision, rule, entry.classification)
+                    return (
+                      <ClassCard
+                        key={cardKey}
+                        classification={displayName}
+                        ways={entry.ways}
+                        isPreferred={bucket === 'preferred'}
+                        note={note}
+                      />
+                    )
+                  })}
                 </div>
               )
             })}

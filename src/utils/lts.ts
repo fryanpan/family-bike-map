@@ -34,8 +34,8 @@ export const PATH_LEVELS: readonly PathLevel[] = ['1a', '1b', '2a', '2b', '3', '
 /**
  * Human-readable labels for PathLevel. Short name is a 1-3 word header
  * suitable for a card; description expands with concrete examples.
- * Stable across modes — mode-specific acceptance is expressed via
- * `pathLevelAcceptanceForMode` in src/data/modes.ts.
+ * Stable across modes — mode-specific acceptance is expressed by calling
+ * `applyModeRule` on a full classification in src/data/modes.ts.
  */
 export const PATH_LEVEL_LABELS: Record<PathLevel, { short: string; description: string }> = {
   '1a': {
