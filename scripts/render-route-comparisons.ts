@@ -364,27 +364,25 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
     counts: Record<RouterKey, number>
     total: number
   }
-  const byMode: ModeStats[] = modes.map((mode) => {
-    const inMode = sorted.filter((s) => s.mode === mode)
-    const pref = {} as Record<RouterKey, number>
-    const dist = {} as Record<RouterKey, number>
-    const counts = {} as Record<RouterKey, number>
-    for (const r of ROUTER_ORDER) {
-      const legs = inMode.map((s) => s[r]).filter((x): x is ScoredLeg => x != null)
-      pref[r] = avg(legs.map((l) => l.preferredPct))
-      dist[r] = avg(legs.map((l) => l.distanceKm))
-      counts[r] = legs.length
-    }
-    return { mode, pref, dist, counts, total: inMode.length }
-  })
 
-  // Nice y-axis max for the distance chart — round up to the next 0.5 km so
-  // ticks at 0, 0.25, 0.5, 0.75, 1.0 of max come out clean.
-  const maxDist = Math.max(0.5, ...byMode.flatMap((m) => ROUTER_ORDER.map((r) => m.dist[r])))
-  const distYMax = Math.ceil(maxDist * 2) / 2
-  const prefYMax = 1.0
+  function computeByMode(samples: Sample[]): ModeStats[] {
+    return modes.map((mode) => {
+      const inMode = samples.filter((s) => s.mode === mode)
+      const pref = {} as Record<RouterKey, number>
+      const dist = {} as Record<RouterKey, number>
+      const counts = {} as Record<RouterKey, number>
+      for (const r of ROUTER_ORDER) {
+        const legs = inMode.map((s) => s[r]).filter((x): x is ScoredLeg => x != null)
+        pref[r] = avg(legs.map((l) => l.preferredPct))
+        dist[r] = avg(legs.map((l) => l.distanceKm))
+        counts[r] = legs.length
+      }
+      return { mode, pref, dist, counts, total: inMode.length }
+    })
+  }
 
   function renderBarChart(opts: {
+    byMode: ModeStats[]
     yMax: number
     yTicks: number[]
     formatTick: (v: number) => string
@@ -396,7 +394,7 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
     const padL = 42, padR = 14, padT = 14, padB = 68
     const plotW = W - padL - padR
     const plotH = H - padT - padB
-    const nG = byMode.length
+    const nG = opts.byMode.length
     const nR = ROUTER_ORDER.length
     const groupW = plotW / nG
     const innerPad = groupW * 0.12
@@ -408,7 +406,7 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
       <text x="${padL - 6}" y="${(y(t) + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">${opts.formatTick(t)}</text>
     `).join('')
 
-    const bars = byMode.map((g, gi) => {
+    const bars = opts.byMode.map((g, gi) => {
       const gx = padL + gi * groupW + innerPad
       return ROUTER_ORDER.map((r, ri) => {
         const v = opts.accessor(g, r)
@@ -419,7 +417,7 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
       }).join('')
     }).join('')
 
-    const modeLabels = byMode.map((g, gi) => {
+    const modeLabels = opts.byMode.map((g, gi) => {
       const cx = padL + gi * groupW + groupW / 2
       return `<text x="${cx.toFixed(1)}" y="${(padT + plotH + 14).toFixed(1)}" text-anchor="middle" font-size="10" fill="#374151">${g.mode}</text>`
     }).join('')
@@ -444,7 +442,100 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
   }
 
   const prefTicks = [0, 0.25, 0.5, 0.75, 1.0]
-  const distTicks = [0, distYMax * 0.25, distYMax * 0.5, distYMax * 0.75, distYMax]
+  const prefYMax = 1.0
+
+  // Build one summary section per city filter (plus "all"). JS toggles
+  // visibility based on the city dropdown. Pre-rendering (rather than
+  // computing in browser JS) keeps chart math on the server side and
+  // avoids duplicating the ~80-line SVG builder.
+  function renderSummarySection(scopeSamples: Sample[], scopeKey: string): string {
+    const byMode = computeByMode(scopeSamples)
+    const scopeFlagged = scopeSamples.filter((s) => s.distanceFlag).length
+    const maxDist = Math.max(0.5, ...byMode.flatMap((m) => ROUTER_ORDER.map((r) => m.dist[r])))
+    const distYMax = Math.ceil(maxDist * 2) / 2
+    const distTicks = [0, distYMax * 0.25, distYMax * 0.5, distYMax * 0.75, distYMax]
+
+    const tableBody = byMode.map((m) => {
+      const prefCell = (r: RouterKey) => m.counts[r] > 0
+        ? `<td class="metric-cell${r === 'client' ? ' group-pref' : ''}" style="color:${ROUTER_COLORS[r]}">${(m.pref[r] * 100).toFixed(0)}%</td>`
+        : `<td class="metric-cell${r === 'client' ? ' group-pref' : ''}" style="color:#9ca3af">—</td>`
+      const distCell = (r: RouterKey) => m.counts[r] > 0
+        ? `<td class="metric-cell${r === 'client' ? ' group-dist' : ''}" style="color:${ROUTER_COLORS[r]}">${m.dist[r].toFixed(2)}</td>`
+        : `<td class="metric-cell${r === 'client' ? ' group-dist' : ''}" style="color:#9ca3af">—</td>`
+      return `
+        <tr>
+          <td class="mode-cell">${m.mode} <span class="count">(n=${m.total})</span></td>
+          ${prefCell('client')}${prefCell('valhalla')}${prefCell('brouter')}${prefCell('google')}
+          ${distCell('client')}${distCell('valhalla')}${distCell('brouter')}${distCell('google')}
+        </tr>`
+    }).join('')
+
+    const prefChart = renderBarChart({
+      byMode,
+      yMax: prefYMax,
+      yTicks: prefTicks,
+      formatTick: (v) => `${(v * 100).toFixed(0)}%`,
+      formatBar: (v) => `${(v * 100).toFixed(0)}%`,
+      accessor: (m, r) => m.pref[r],
+      ariaLabel: `Average preferred percent by travel mode (${scopeKey})`,
+    })
+    const distChart = renderBarChart({
+      byMode,
+      yMax: distYMax,
+      yTicks: distTicks,
+      formatTick: (v) => v.toFixed(1),
+      formatBar: (v) => `${v.toFixed(2)} km`,
+      accessor: (m, r) => m.dist[r],
+      ariaLabel: `Average distance in km by travel mode (${scopeKey})`,
+    })
+
+    return `<div class="summary-section" data-city="${scopeKey}">
+  <div class="card">
+    <h3>Averages by travel mode <span class="scope-label">— ${scopeKey} (${scopeSamples.length} samples)</span></h3>
+    <table class="mode-table">
+      <thead>
+        <tr>
+          <th rowspan="2" class="mode-head">Mode</th>
+          <th colspan="4" class="group-pref">Avg preferred %</th>
+          <th colspan="4" class="group-dist">Avg distance (km)</th>
+        </tr>
+        <tr>
+          <th class="group-pref">Client</th><th>Valhalla</th><th>BRouter</th><th>Google</th>
+          <th class="group-dist">Client</th><th>Valhalla</th><th>BRouter</th><th>Google</th>
+        </tr>
+      </thead>
+      <tbody>${tableBody}</tbody>
+    </table>
+  </div>
+
+  <div class="charts">
+    <div class="chart">
+      <h3>Avg preferred % by mode</h3>
+      <div class="sub">Higher = more of the route is on infrastructure the rider's profile prefers.</div>
+      ${prefChart}
+    </div>
+    <div class="chart">
+      <h3>Avg distance (km) by mode</h3>
+      <div class="sub">Lower = shorter route. Client may trade distance for safety.</div>
+      ${distChart}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Distance flags</h3>
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:13px">${scopeFlagged} / ${scopeSamples.length} routes where client &gt; 1.2× min(Valhalla, BRouter, Google)</div>
+    <div style="color:#6b7280;font-size:11px;margin-top:6px">Likely detour. Worth reviewing on the map — may still be correct (e.g. safer corridor) but flag it.</div>
+  </div>
+</div>`
+  }
+
+  // Default to Berlin if present, otherwise the first listed city; fall
+  // back to "all" only when nothing else is available.
+  const defaultCity = cities.includes('Berlin') ? 'Berlin' : (cities[0] ?? '')
+  const citySummaries = [
+    ...cities.map((c) => renderSummarySection(sorted.filter((s) => s.cityDisplay === c), c)),
+    renderSummarySection(sorted, 'all'),
+  ].join('\n')
 
   // ── Heatmap palettes (colorblind-safe) ───────────────────────────
   //
@@ -581,6 +672,8 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
   .group-dist { border-left: 3px solid #2166ac; }
   .group-pref { border-left: 3px solid #08306b; }
   tr.hidden { display: none; }
+  .summary-section.hidden { display: none; }
+  .scope-label { font-weight: 500; color: #6b7280; text-transform: none; letter-spacing: 0; font-size: 12px; }
   .fail { color: #b91c1c; font-weight: 600; background: #fef2f2; text-align: center; }
   .flag { color: #b45309; font-weight: 600; }
   /* Heatmap legend strip next to each column group title. */
@@ -598,79 +691,12 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
   <span><span class="sw" style="background:#dc2626"></span>Google Maps (bicycling)</span>
 </div>
 
-<div class="card">
-  <h3>Averages by travel mode</h3>
-  <table class="mode-table">
-    <thead>
-      <tr>
-        <th rowspan="2" class="mode-head">Mode</th>
-        <th colspan="4" class="group-pref">Avg preferred %</th>
-        <th colspan="4" class="group-dist">Avg distance (km)</th>
-      </tr>
-      <tr>
-        <th class="group-pref">Client</th><th>Valhalla</th><th>BRouter</th><th>Google</th>
-        <th class="group-dist">Client</th><th>Valhalla</th><th>BRouter</th><th>Google</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${byMode.map((m) => {
-        // When every sample for a router FAILed in this mode, counts[r]===0
-        // and the average is 0 by definition — render as em-dash instead of
-        // a real "0%" / "0.00" so it doesn't look like a surprising result.
-        const prefCell = (r: RouterKey) => m.counts[r] > 0
-          ? `<td class="metric-cell${r === 'client' ? ' group-pref' : ''}" style="color:${ROUTER_COLORS[r]}">${(m.pref[r] * 100).toFixed(0)}%</td>`
-          : `<td class="metric-cell${r === 'client' ? ' group-pref' : ''}" style="color:#9ca3af">—</td>`
-        const distCell = (r: RouterKey) => m.counts[r] > 0
-          ? `<td class="metric-cell${r === 'client' ? ' group-dist' : ''}" style="color:${ROUTER_COLORS[r]}">${m.dist[r].toFixed(2)}</td>`
-          : `<td class="metric-cell${r === 'client' ? ' group-dist' : ''}" style="color:#9ca3af">—</td>`
-        return `
-        <tr>
-          <td class="mode-cell">${m.mode} <span class="count">(n=${m.total})</span></td>
-          ${prefCell('client')}${prefCell('valhalla')}${prefCell('brouter')}${prefCell('google')}
-          ${distCell('client')}${distCell('valhalla')}${distCell('brouter')}${distCell('google')}
-        </tr>`
-      }).join('')}
-    </tbody>
-  </table>
-</div>
-
-<div class="charts">
-  <div class="chart">
-    <h3>Avg preferred % by mode</h3>
-    <div class="sub">Higher = more of the route is on infrastructure the rider's profile prefers.</div>
-    ${renderBarChart({
-      yMax: prefYMax,
-      yTicks: prefTicks,
-      formatTick: (v) => `${(v * 100).toFixed(0)}%`,
-      formatBar: (v) => `${(v * 100).toFixed(0)}%`,
-      accessor: (m, r) => m.pref[r],
-      ariaLabel: 'Average preferred percent by travel mode',
-    })}
-  </div>
-  <div class="chart">
-    <h3>Avg distance (km) by mode</h3>
-    <div class="sub">Lower = shorter route. Client may trade distance for safety.</div>
-    ${renderBarChart({
-      yMax: distYMax,
-      yTicks: distTicks,
-      formatTick: (v) => v.toFixed(1),
-      formatBar: (v) => `${v.toFixed(2)} km`,
-      accessor: (m, r) => m.dist[r],
-      ariaLabel: 'Average distance in km by travel mode',
-    })}
-  </div>
-</div>
-
-<div class="card">
-  <h3>Distance flags</h3>
-  <div style="font-family:ui-monospace,Menlo,monospace;font-size:13px">${flagged} / ${sorted.length} routes where client &gt; 1.2× min(Valhalla, BRouter, Google)</div>
-  <div style="color:#6b7280;font-size:11px;margin-top:6px">Likely detour. Worth reviewing on the map — may still be correct (e.g. safer corridor) but flag it.</div>
-</div>
+${citySummaries}
 
 ${flagged > 0 ? `<div class="flag-banner">⚠ ${flagged} route(s) flagged for long detour. Use the “flagged only” filter below.</div>` : ''}
 
 <div class="filters">
-  <label>City <select id="f-city"><option value="">all</option>${cities.map((c) => `<option>${c}</option>`).join('')}</select></label>
+  <label>City <select id="f-city">${cities.map((c) => `<option${c === defaultCity ? ' selected' : ''}>${c}</option>`).join('')}<option value="">all</option></select></label>
   <label>Mode <select id="f-mode"><option value="">all</option>${modes.map((m) => `<option>${m}</option>`).join('')}</select></label>
   <label>Pair <input id="f-pair" type="search" placeholder="search origin/dest…" /></label>
   <label><input id="f-flag" type="checkbox" /> flagged only</label>
@@ -717,6 +743,14 @@ ${flagged > 0 ? `<div class="flag-banner">⚠ ${flagged} route(s) flagged for lo
   const clear = document.getElementById('f-clear')
   const count = document.getElementById('f-count')
   const rows = document.querySelectorAll('#rows tr')
+  const summaries = document.querySelectorAll('.summary-section')
+  const defaultCity = ${JSON.stringify(defaultCity)}
+  function applySummary() {
+    const c = city.value || 'all'
+    for (const s of summaries) {
+      s.classList.toggle('hidden', s.dataset.city !== c)
+    }
+  }
   function apply() {
     const c = city.value, m = mode.value, p = pair.value.trim().toLowerCase(), f = flag.checked
     let shown = 0
@@ -729,12 +763,13 @@ ${flagged > 0 ? `<div class="flag-banner">⚠ ${flagged} route(s) flagged for lo
       if (ok) shown++
     }
     count.textContent = shown + ' / ' + rows.length
+    applySummary()
   }
   city.addEventListener('change', apply)
   mode.addEventListener('change', apply)
   pair.addEventListener('input', apply)
   flag.addEventListener('change', apply)
-  clear.addEventListener('click', () => { city.value=''; mode.value=''; pair.value=''; flag.checked=false; apply() })
+  clear.addEventListener('click', () => { city.value=defaultCity; mode.value=''; pair.value=''; flag.checked=false; apply() })
   apply()
 </script>
 </body></html>`
