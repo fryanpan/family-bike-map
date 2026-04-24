@@ -241,6 +241,23 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
 import type { LtsClassification } from '../utils/lts'
 
 /**
+ * UI-facing: how does this travel mode treat this PathLevel?
+ *   'accepted'      — router rides the edge at full mode speed.
+ *   'bridge-walked' — rejected as preferred but still traversable at
+ *                     walking pace to preserve connectivity. See
+ *                     clientRouter's bridge-walk branch.
+ * Admin's AuditSamplesTab displays this badge on each level header.
+ */
+export type LevelAcceptance = 'accepted' | 'bridge-walked'
+
+export function pathLevelAcceptanceForMode(
+  mode: RideMode,
+  level: PathLevel,
+): LevelAcceptance {
+  return MODE_RULES[mode].acceptedLevels.has(level) ? 'accepted' : 'bridge-walked'
+}
+
+/**
  * Decision returned by the mode-rule acceptance check.
  *   accepted — edge is usable; use `speedKmh` for cost computation
  *   rejected — edge is excluded from the routing graph entirely

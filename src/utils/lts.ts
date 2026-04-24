@@ -32,6 +32,39 @@ export type PathLevel = '1a' | '1b' | '2a' | '2b' | '3' | '4'
 export const PATH_LEVELS: readonly PathLevel[] = ['1a', '1b', '2a', '2b', '3', '4']
 
 /**
+ * Human-readable labels for PathLevel. Short name is a 1-3 word header
+ * suitable for a card; description expands with concrete examples.
+ * Stable across modes — mode-specific acceptance is expressed via
+ * `pathLevelAcceptanceForMode` in src/data/modes.ts.
+ */
+export const PATH_LEVEL_LABELS: Record<PathLevel, { short: string; description: string }> = {
+  '1a': {
+    short: 'Car-free',
+    description: 'Cycleways, bike paths, park paths, curb-separated cycle tracks, forest/farm tracks.',
+  },
+  '1b': {
+    short: 'Bike-priority',
+    description: 'Fahrradstraße, living street, bike boulevard, SF Slow Street — cars present but legally yielding.',
+  },
+  '2a': {
+    short: 'Lane + quiet street',
+    description: 'Painted bike lane or shared bus lane on a street capped ≤30 km/h.',
+  },
+  '2b': {
+    short: 'Quiet residential',
+    description: 'Residential street without bike infra, low speed / low volume.',
+  },
+  '3': {
+    short: 'Busy street',
+    description: 'Tertiary, busy residentials, painted lane on 31-50 km/h — cyclist-in-traffic.',
+  },
+  '4': {
+    short: 'Major road',
+    description: 'Primary/secondary/trunk without bike infra — unsafe for families.',
+  },
+}
+
+/**
  * Human-readable labels for LTS levels.
  *
  * `short` is the user-facing label (no jargon, no Geller terminology).
