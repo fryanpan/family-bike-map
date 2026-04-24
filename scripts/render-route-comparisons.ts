@@ -7,9 +7,14 @@
  * router, Valhalla (osm.org profile), and BRouter overlaid on an OSM tile
  * backdrop.
  *
- * Output: `docs/research/YYYY-MM-DD-route-compare/` with
+ * Output: `public/route-compare/YYYY-MM-DD/` with
  *   - one HTML per sample: `NN-<city>-<mode>-<origin>-to-<dest>.html`
  *   - an `index.html` with a summary table and links
+ *
+ * Placed under public/ so Vite serves it both in dev and in the prod
+ * bundle at `/route-compare/YYYY-MM-DD/`. Leaflet's tile loader can't
+ * fetch OSM tiles from a `file://` origin, so serving over http:// is
+ * required for the maps to render.
  *
  * Run:   bun scripts/render-route-comparisons.ts [--count=30] [--seed=42]
  *
@@ -396,9 +401,10 @@ async function main() {
   const seed  = seedArg  ? parseInt(seedArg.slice('--seed='.length),   10) : DEFAULT_SEED
 
   const today = new Date().toISOString().slice(0, 10)
-  const outDir = join(process.cwd(), 'docs/research', `${today}-route-compare`)
+  const outDir = join(process.cwd(), 'public/route-compare', today)
   await mkdir(outDir, { recursive: true })
   console.log(`Output: ${outDir}`)
+  console.log(`Browse at: /route-compare/${today}/index.html (served by vite dev or prod)`)
 
   // Build the combo universe, then sample.
   const universe: Array<{ city: CityConfig; pair: { origin: LatLng; dest: LatLng }; mode: ModeKey }> = []
