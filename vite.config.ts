@@ -1,7 +1,9 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 import { execSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /**
  * Resolve the app version at build time.
@@ -23,12 +25,31 @@ function resolveAppVersion(): string {
 const APP_VERSION = resolveAppVersion()
 console.log(`[vite] APP_VERSION = ${APP_VERSION}`)
 
+/**
+ * Emit /version.json at the site root so any tool can cheaply ask
+ * "what's the deployed version?" without downloading the main bundle.
+ * Benchmark scripts use this to prefix local-generated folders with
+ * the *live prod* version instead of a dev sha (less confusing).
+ */
+function emitVersionJson(): Plugin {
+  return {
+    name: 'emit-version-json',
+    apply: 'build',
+    closeBundle() {
+      const outFile = join(process.cwd(), 'dist', 'version.json')
+      writeFileSync(outFile, JSON.stringify({ version: APP_VERSION }, null, 2) + '\n')
+      console.log(`[vite] wrote ${outFile}`)
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
   },
   plugins: [
     react(),
+    emitVersionJson(),
     // Uploads source maps to Sentry on production builds so stack traces resolve
     // to real file/line numbers. Requires SENTRY_AUTH_TOKEN env var (CI secret).
     // No-ops silently if the token is absent (local dev, preview builds).
