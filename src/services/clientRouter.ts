@@ -315,6 +315,18 @@ export function buildRoutingGraph(
  * Skips isolated nodes (degree 0) which can't participate in routing.
  * Falls back to any nearest node if no connected nodes exist.
  */
+/**
+ * Max distance (m) the nearest-node snap will accept before giving up.
+ * If the closest valid node is farther than this from the requested
+ * point, the caller is treated as "off the graph" and routing returns
+ * null. Calibrated from the 2026-04-24 benchmark: the hardest successful
+ * snap was ~486 m (SF Apple Store in kid-starting-out), so 1 km is a
+ * safe 2× margin. The disconnected-graph test case in
+ * `tests/clientRouter.test.ts` relies on this threshold producing null
+ * rather than a long-distance snap onto an isolated cluster.
+ */
+const MAX_SNAP_M = 1000
+
 function findNearestNode(
   graph: Graph<NodeData, EdgeData>,
   lat: number,
@@ -366,6 +378,12 @@ function findNearestNode(
     }
   })
 
+  // Cap the snap distance. Without this the role+allowedSet check can
+  // snap to a node 10+ km away (in a disconnected-graph edge case); the
+  // caller almost certainly wants "no route" in that case, not a route
+  // that starts/ends nowhere near the requested point.
+  if (bestId !== null && bestDist > MAX_SNAP_M) return null
+  if (bestId === null && fallbackDist > MAX_SNAP_M) return null
   return bestId ?? fallbackId
 }
 
