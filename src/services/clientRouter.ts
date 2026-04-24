@@ -315,37 +315,105 @@ export function buildRoutingGraph(
  * Skips isolated nodes (degree 0) which can't participate in routing.
  * Falls back to any nearest node if no connected nodes exist.
  */
+/**
+ * Max distance (m) the nearest-node snap will accept before giving up.
+ * If the closest valid node is farther than this from the requested
+ * point, the caller is treated as "off the graph" and routing returns
+ * null. Calibrated from the 2026-04-24 benchmark: the hardest successful
+ * snap was ~486 m (SF Apple Store in kid-starting-out), so 1 km is a
+ * safe 2× margin. The disconnected-graph test case in
+ * `tests/clientRouter.test.ts` relies on this threshold producing null
+ * rather than a long-distance snap onto an isolated cluster.
+ */
+const MAX_SNAP_M = 1000
+
 function findNearestNode(
   graph: Graph<NodeData, EdgeData>,
   lat: number,
   lng: number,
+  role: 'start' | 'end',
+  allowedSet?: Set<string>,
 ): string | null {
+  // A start node must have at least one OUTGOING edge (so A* can leave it).
+  // An end node must have at least one INCOMING edge (so A* can reach it).
+  // Without this check, `findNearestNode` happily snaps to the upstream
+  // terminus of a one-way street — 1 outgoing, 0 incoming — and A*
+  // returns null even though a perfectly good node a block away has
+  // incoming edges. This bit us for ~25% of SF samples in the 10fb94a
+  // benchmark (see docs/process/learnings.md).
+  //
+  // `allowedSet` optionally restricts the snap to a pre-computed set
+  // (e.g. the directed-reachable set from the start). Used for the
+  // end-node snap to avoid landing on a directed island that A* can't
+  // reach even though the node has incoming edges.
   let bestId: string | null = null
   let bestDist = Infinity
-  let fallbackId: string | null = null
+  let fallbackId: string | null = null  // any node with ANY edge — last resort
   let fallbackDist = Infinity
 
   graph.forEachNode((node: Node<NodeData>) => {
     const d = haversineM(lat, lng, node.data.lat, node.data.lng)
 
-    // ngraph stores links as a linked list on node.links; null means no links
     const links = graph.getLinks(node.id)
-    const connected = links !== null
+    if (links === null) return  // isolated node, skip entirely
 
-    if (connected) {
-      if (d < bestDist) {
-        bestDist = d
-        bestId = node.id as string
+    let hasRoleEdge = false
+    let hasAnyEdge = false
+    for (const link of links) {
+      hasAnyEdge = true
+      if (role === 'start' ? link.fromId === node.id : link.toId === node.id) {
+        hasRoleEdge = true
+        break
       }
-    } else {
-      if (d < fallbackDist) {
-        fallbackDist = d
-        fallbackId = node.id as string
-      }
+    }
+
+    const inAllowed = !allowedSet || allowedSet.has(node.id as string)
+
+    if (hasRoleEdge && inAllowed && d < bestDist) {
+      bestDist = d
+      bestId = node.id as string
+    } else if (hasAnyEdge && d < fallbackDist) {
+      fallbackDist = d
+      fallbackId = node.id as string
     }
   })
 
+  // Cap the snap distance. Without this the role+allowedSet check can
+  // snap to a node 10+ km away (in a disconnected-graph edge case); the
+  // caller almost certainly wants "no route" in that case, not a route
+  // that starts/ends nowhere near the requested point.
+  if (bestId !== null && bestDist > MAX_SNAP_M) return null
+  if (bestId === null && fallbackDist > MAX_SNAP_M) return null
   return bestId ?? fallbackId
+}
+
+/**
+ * Forward BFS from `startId` following only outgoing edges, returning the
+ * set of node IDs reachable via some directed path. O(V + E).
+ *
+ * We pre-compute this when routing so the end-node snap can be restricted
+ * to a node A* can actually reach — the SF graph has ~47% of nodes in
+ * directed islands that look fine locally (have incoming edges) but are
+ * unreachable from the Castro origin.
+ */
+function computeReachableSet(
+  graph: Graph<NodeData, EdgeData>,
+  startId: string,
+): Set<string> {
+  const reachable = new Set<string>([startId])
+  const queue: string[] = [startId]
+  while (queue.length) {
+    const id = queue.pop()!
+    const links = graph.getLinks(id)
+    if (!links) continue
+    for (const link of links) {
+      if (link.fromId === id && !reachable.has(link.toId as string)) {
+        reachable.add(link.toId as string)
+        queue.push(link.toId as string)
+      }
+    }
+  }
+  return reachable
 }
 
 // ── Route on graph ─────────────────────────────────────────────────────────
@@ -375,9 +443,13 @@ export function routeOnGraph(
   preferredItemNames: Set<string>,
   regionRules?: ClassificationRule[],
 ): ClientRouteResult | null {
-  const startId = findNearestNode(graph, startLat, startLng)
-  const endId = findNearestNode(graph, endLat, endLng)
-  if (!startId || !endId) return null
+  const startId = findNearestNode(graph, startLat, startLng, 'start')
+  if (!startId) return null
+  // Restrict end-node snap to the start's directed-reachable set so we
+  // don't snap onto a disconnected island (cheap BFS, O(V + E)).
+  const reachable = computeReachableSet(graph, startId)
+  const endId = findNearestNode(graph, endLat, endLng, 'end', reachable)
+  if (!endId) return null
 
   const rule = resolveRule(profileKey)
   const maxSpeedMs = rule.ridingSpeedKmh / 3.6  // optimistic lower-bound for A*
