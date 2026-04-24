@@ -55,6 +55,10 @@ export interface AdminSettings {
   /** Toggle: show "Compare on BRouter / Valhalla" links in the route
    *  panel for benchmark sanity-checking. Default off. */
   showExternalRouterLinks: boolean
+  /** Toggle: show the Start Navigation button in the directions panel.
+   *  Navigation UX isn't ready for public use (2026-04 launch scope) — hidden
+   *  by default, enable here to exercise it in prod. */
+  showStartNavigation: boolean
   /** Per-mode routing parameters. Merge with compiled defaults from
    *  MODE_RULES — user-edited values win. */
   modeRouting: Partial<Record<RideMode, Partial<ModeRoutingParams>>>
@@ -79,6 +83,7 @@ export const DEFAULT_SETTINGS: AdminSettings = {
   showNonPreferredInLegend: false,
   showTrainingMode: false,
   showExternalRouterLinks: false,
+  showStartNavigation: false,
   modeRouting: {},
 }
 

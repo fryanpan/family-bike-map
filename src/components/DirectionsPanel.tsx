@@ -285,9 +285,11 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
         </div>
       ) : (
         <>
-          <button className="start-nav-btn" onClick={startNav}>
-            ▶ Start Navigation
-          </button>
+          {settings.showStartNavigation && (
+            <button className="start-nav-btn" onClick={startNav}>
+              ▶ Start Navigation
+            </button>
+          )}
 
           {/* Collapsible turn-by-turn — hidden in compact mode */}
           {!compact && (

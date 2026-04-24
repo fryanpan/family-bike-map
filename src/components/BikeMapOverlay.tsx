@@ -3,7 +3,7 @@ import { useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import { fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey, classifyOsmTagsToItem, isOverlayHiddenSurface } from '../services/overpass'
 import { PREFERRED_COLOR, OTHER_COLOR, PROFILE_LEGEND } from '../utils/classify'
-import { classifyEdge } from '../utils/lts'
+import { classifyEdge, PATH_LEVEL_LABELS } from '../utils/lts'
 import type { PathLevel } from '../utils/lts'
 import { colorForLevel, weightMultiplierForLevel } from './SimpleLegend'
 import { useAdminSettings } from '../services/adminSettings'
@@ -60,9 +60,19 @@ function buildTooltipHtml(
   const imageHtml = imageUrl
     ? `<img src="${escapeHtml(imageUrl)}" alt="Street view" style="width:100%;border-radius:4px;margin-top:6px;display:block" loading="lazy" />`
     : ''
-  return `<div style="font-size:12px;line-height:1.5;width:220px">
+  // LTS tier line — same classifier the router uses, derived at popup
+  // build time from raw OSM tags. Helps Bryan audit why a way is shown
+  // the way it is (and is legibly distinct from the per-mode item name).
+  const { pathLevel } = classifyEdge(tags)
+  const info = PATH_LEVEL_LABELS[pathLevel]
+  const ltsHtml = `<div style="margin-top:6px;padding:5px 7px;background:#f3f4f6;border-radius:4px">
+    <div style="font-size:11px"><b>LTS ${pathLevel}</b> · ${escapeHtml(info.short)}</div>
+    <div style="font-size:11px;color:#4b5563;margin-top:2px">${escapeHtml(info.description)}</div>
+  </div>`
+  return `<div style="font-size:12px;line-height:1.5;width:240px">
     <div style="font-weight:700;white-space:normal;word-break:break-word">${itemName ?? 'Unknown'}${name}</div>
     <div style="margin-top:2px">${preferredLabel}</div>
+    ${ltsHtml}
     ${tagsHtml ? `<div style="color:#6b7280;font-size:11px;margin-top:4px">${tagsHtml}</div>` : ''}
     ${imageHtml}
   </div>`

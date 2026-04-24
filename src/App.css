@@ -984,11 +984,18 @@ button { font-family: inherit; cursor: pointer; }
   100% { transform: scale(1.8); opacity: 0; }
 }
 
-/* Recenter-on-current-location button — sits next to the Leaflet zoom controls. */
+/* Recenter-on-current-location button — stacks ABOVE the Leaflet zoom
+   controls. The zoom cluster is repositioned to bottom-right above
+   (.leaflet-top.leaflet-left), so we offset this one by:
+   - zoom base (24 mobile / 80 desktop)
+   - + zoom cluster height (~54 px: two 26 px buttons + border)
+   - + 12 px gap
+   to make sure the tip of the recenter button clears the top of the
+   zoom cluster on both viewports. */
 .recenter-btn {
   position: absolute;
   right: 10px;
-  bottom: 110px; /* above leaflet zoom controls (bottom-right by default) */
+  bottom: 90px; /* mobile: zoom(24) + 54 + 12 ≈ 90 */
   z-index: 500;
   width: 56px; height: 56px;
   border-radius: 12px;
@@ -1000,6 +1007,9 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 2px 8px rgba(0,0,0,.25);
   transition: background .12s, transform .12s;
   line-height: 1;
+}
+@media (min-width: 768px) {
+  body:not(.mobile-preview) .recenter-btn { bottom: 146px; /* desktop: zoom(80) + 54 + 12 */ }
 }
 .recenter-btn:hover { background: #f3f4f6; }
 .recenter-btn:active { transform: scale(0.96); }
@@ -2248,6 +2258,21 @@ body.mobile-preview-label {
 .segment-popup-name {
   font-size: 12px; color: #4b5563;
   margin-top: -4px;
+}
+.segment-popup-lts {
+  background: #f3f4f6; border-radius: 5px;
+  padding: 5px 8px; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 6px 8px;
+}
+.segment-popup-lts-tag {
+  font-size: 11px; font-weight: 700; color: #374151;
+  background: #fff; padding: 1px 5px; border-radius: 3px;
+  border: 1px solid #e5e7eb;
+}
+.segment-popup-lts-name { font-size: 12px; font-weight: 600; color: #111827; }
+.segment-popup-lts-desc {
+  flex: 0 0 100%;
+  font-size: 11px; color: #4b5563; line-height: 1.35;
 }
 .segment-popup-img {
   width: 100%; border-radius: 6px; display: block;
