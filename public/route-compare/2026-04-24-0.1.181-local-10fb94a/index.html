@@ -9,14 +9,22 @@
   .legend span { display: inline-block; margin-right: 14px; }
   .sw { display: inline-block; width: 14px; height: 4px; vertical-align: middle; margin-right: 4px; }
 
-  .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0 20px; }
-  .summary-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; }
-  .summary-card h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin: 0 0 6px; }
-  .summary-card .client   { color: #2563eb; }
-  .summary-card .valhalla { color: #ea580c; }
-  .summary-card .brouter  { color: #059669; }
-  .summary-card .google   { color: #dc2626; }
-  .summary-card .metric   { font-family: ui-monospace, Menlo, monospace; font-size: 13px; margin: 2px 0; }
+  .card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 14px; margin: 16px 0; }
+  .card h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin: 0 0 8px; }
+  .mode-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .mode-table th, .mode-table td { padding: 5px 8px; border-bottom: 1px solid #f3f4f6; text-align: right; font-variant-numeric: tabular-nums; }
+  .mode-table th { background: transparent; font-size: 11px; color: #6b7280; font-weight: 600; position: static; }
+  .mode-table th.mode-head, .mode-table td.mode-cell { text-align: left; font-weight: 600; color: #111827; }
+  .mode-table td.metric-cell { font-family: ui-monospace, Menlo, monospace; }
+  .mode-table .group-pref { border-left: 3px solid #08306b; }
+  .mode-table .group-dist { border-left: 3px solid #2166ac; }
+  .mode-table .count { color: #9ca3af; font-size: 11px; margin-left: 2px; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+  @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+  .chart { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 14px; }
+  .chart h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin: 0 0 6px; }
+  .chart .sub { font-size: 11px; color: #6b7280; margin: -4px 0 8px; }
+  .chart svg { width: 100%; height: auto; display: block; }
 
   .flag-banner { background: #fef3c7; color: #78350f; padding: 8px 12px; border-radius: 6px; margin: 14px 0; font-size: 13px; }
 
@@ -54,26 +62,136 @@
   <span><span class="sw" style="background:#dc2626"></span>Google Maps (bicycling)</span>
 </div>
 
-<div class="summary">
-  <div class="summary-card">
-    <h3>Avg preferred %</h3>
-    <div class="metric client">Client:   54% <span style="color:#9ca3af">(n=150)</span></div>
-    <div class="metric valhalla">Valhalla: 33% <span style="color:#9ca3af">(n=191)</span></div>
-    <div class="metric brouter">BRouter:  33% <span style="color:#9ca3af">(n=195)</span></div>
-    <div class="metric google">Google:   32% <span style="color:#9ca3af">(n=195)</span></div>
+<div class="card">
+  <h3>Averages by travel mode</h3>
+  <table class="mode-table">
+    <thead>
+      <tr>
+        <th rowspan="2" class="mode-head">Mode</th>
+        <th colspan="4" class="group-pref">Avg preferred %</th>
+        <th colspan="4" class="group-dist">Avg distance (km)</th>
+      </tr>
+      <tr>
+        <th class="group-pref">Client</th><th>Valhalla</th><th>BRouter</th><th>Google</th>
+        <th class="group-dist">Client</th><th>Valhalla</th><th>BRouter</th><th>Google</th>
+      </tr>
+    </thead>
+    <tbody>
+      
+        <tr>
+          <td class="mode-cell">carrying-kid <span class="count">(n=39)</span></td>
+          <td class="metric-cell group-pref" style="color:#2563eb">50%</td><td class="metric-cell" style="color:#ea580c">30%</td><td class="metric-cell" style="color:#059669">36%</td><td class="metric-cell" style="color:#dc2626">32%</td>
+          <td class="metric-cell group-dist" style="color:#2563eb">5.74</td><td class="metric-cell" style="color:#ea580c">4.86</td><td class="metric-cell" style="color:#059669">4.85</td><td class="metric-cell" style="color:#dc2626">5.00</td>
+        </tr>
+        <tr>
+          <td class="mode-cell">kid-confident <span class="count">(n=39)</span></td>
+          <td class="metric-cell group-pref" style="color:#2563eb">63%</td><td class="metric-cell" style="color:#ea580c">35%</td><td class="metric-cell" style="color:#059669">37%</td><td class="metric-cell" style="color:#dc2626">31%</td>
+          <td class="metric-cell group-dist" style="color:#2563eb">6.30</td><td class="metric-cell" style="color:#ea580c">4.97</td><td class="metric-cell" style="color:#059669">4.90</td><td class="metric-cell" style="color:#dc2626">5.00</td>
+        </tr>
+        <tr>
+          <td class="mode-cell">kid-starting-out <span class="count">(n=39)</span></td>
+          <td class="metric-cell group-pref" style="color:#2563eb">47%</td><td class="metric-cell" style="color:#ea580c">31%</td><td class="metric-cell" style="color:#059669">25%</td><td class="metric-cell" style="color:#dc2626">27%</td>
+          <td class="metric-cell group-dist" style="color:#2563eb">5.80</td><td class="metric-cell" style="color:#ea580c">4.83</td><td class="metric-cell" style="color:#059669">4.90</td><td class="metric-cell" style="color:#dc2626">5.00</td>
+        </tr>
+        <tr>
+          <td class="mode-cell">kid-traffic-savvy <span class="count">(n=39)</span></td>
+          <td class="metric-cell group-pref" style="color:#2563eb">61%</td><td class="metric-cell" style="color:#ea580c">41%</td><td class="metric-cell" style="color:#059669">43%</td><td class="metric-cell" style="color:#dc2626">40%</td>
+          <td class="metric-cell group-dist" style="color:#2563eb">5.49</td><td class="metric-cell" style="color:#ea580c">4.85</td><td class="metric-cell" style="color:#059669">4.85</td><td class="metric-cell" style="color:#dc2626">5.00</td>
+        </tr>
+        <tr>
+          <td class="mode-cell">training <span class="count">(n=39)</span></td>
+          <td class="metric-cell group-pref" style="color:#2563eb">46%</td><td class="metric-cell" style="color:#ea580c">27%</td><td class="metric-cell" style="color:#059669">25%</td><td class="metric-cell" style="color:#dc2626">32%</td>
+          <td class="metric-cell group-dist" style="color:#2563eb">5.63</td><td class="metric-cell" style="color:#ea580c">4.82</td><td class="metric-cell" style="color:#059669">4.67</td><td class="metric-cell" style="color:#dc2626">5.00</td>
+        </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="charts">
+  <div class="chart">
+    <h3>Avg preferred % by mode</h3>
+    <div class="sub">Higher = more of the route is on infrastructure the rider's profile prefers.</div>
+    <svg viewBox="0 0 620 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Average preferred percent by travel mode">
+      
+      <line x1="42" x2="606" y1="212.0" y2="212.0" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="215.0" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">0%</text>
+    
+      <line x1="42" x2="606" y1="162.5" y2="162.5" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="165.5" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">25%</text>
+    
+      <line x1="42" x2="606" y1="113.0" y2="113.0" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="116.0" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">50%</text>
+    
+      <line x1="42" x2="606" y1="63.5" y2="63.5" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="66.5" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">75%</text>
+    
+      <line x1="42" x2="606" y1="14.0" y2="14.0" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="17.0" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">100%</text>
+    
+      <rect x="55.5" y="113.3" width="20.4" height="98.7" fill="#2563eb"><title>Client — carrying-kid: 50% (n=30)</title></rect><rect x="77.0" y="153.5" width="20.4" height="58.5" fill="#ea580c"><title>Valhalla — carrying-kid: 30% (n=38)</title></rect><rect x="98.4" y="140.5" width="20.4" height="71.5" fill="#059669"><title>BRouter — carrying-kid: 36% (n=39)</title></rect><rect x="119.8" y="148.6" width="20.4" height="63.4" fill="#dc2626"><title>Google — carrying-kid: 32% (n=39)</title></rect><rect x="168.3" y="86.7" width="20.4" height="125.3" fill="#2563eb"><title>Client — kid-confident: 63% (n=30)</title></rect><rect x="189.8" y="142.6" width="20.4" height="69.4" fill="#ea580c"><title>Valhalla — kid-confident: 35% (n=36)</title></rect><rect x="211.2" y="139.2" width="20.4" height="72.8" fill="#059669"><title>BRouter — kid-confident: 37% (n=39)</title></rect><rect x="232.6" y="150.1" width="20.4" height="61.9" fill="#dc2626"><title>Google — kid-confident: 31% (n=39)</title></rect><rect x="281.1" y="118.5" width="20.4" height="93.5" fill="#2563eb"><title>Client — kid-starting-out: 47% (n=30)</title></rect><rect x="302.6" y="149.8" width="20.4" height="62.2" fill="#ea580c"><title>Valhalla — kid-starting-out: 31% (n=39)</title></rect><rect x="324.0" y="161.6" width="20.4" height="50.4" fill="#059669"><title>BRouter — kid-starting-out: 25% (n=39)</title></rect><rect x="345.4" y="158.7" width="20.4" height="53.3" fill="#dc2626"><title>Google — kid-starting-out: 27% (n=39)</title></rect><rect x="393.9" y="90.4" width="20.4" height="121.6" fill="#2563eb"><title>Client — kid-traffic-savvy: 61% (n=30)</title></rect><rect x="415.4" y="130.2" width="20.4" height="81.8" fill="#ea580c"><title>Valhalla — kid-traffic-savvy: 41% (n=39)</title></rect><rect x="436.8" y="126.4" width="20.4" height="85.6" fill="#059669"><title>BRouter — kid-traffic-savvy: 43% (n=39)</title></rect><rect x="458.2" y="133.4" width="20.4" height="78.6" fill="#dc2626"><title>Google — kid-traffic-savvy: 40% (n=39)</title></rect><rect x="506.7" y="120.2" width="20.4" height="91.8" fill="#2563eb"><title>Client — training: 46% (n=30)</title></rect><rect x="528.2" y="157.7" width="20.4" height="54.3" fill="#ea580c"><title>Valhalla — training: 27% (n=39)</title></rect><rect x="549.6" y="162.1" width="20.4" height="49.9" fill="#059669"><title>BRouter — training: 25% (n=39)</title></rect><rect x="571.0" y="148.6" width="20.4" height="63.4" fill="#dc2626"><title>Google — training: 32% (n=39)</title></rect>
+      <text x="98.4" y="226.0" text-anchor="middle" font-size="10" fill="#374151">carrying-kid</text><text x="211.2" y="226.0" text-anchor="middle" font-size="10" fill="#374151">kid-confident</text><text x="324.0" y="226.0" text-anchor="middle" font-size="10" fill="#374151">kid-starting-out</text><text x="436.8" y="226.0" text-anchor="middle" font-size="10" fill="#374151">kid-traffic-savvy</text><text x="549.6" y="226.0" text-anchor="middle" font-size="10" fill="#374151">training</text>
+      
+        <rect x="42.0" y="259.0" width="11" height="11" fill="#2563eb"/>
+        <text x="58.0" y="268.5" font-size="11" fill="#374151">Client</text>
+      
+        <rect x="183.0" y="259.0" width="11" height="11" fill="#ea580c"/>
+        <text x="199.0" y="268.5" font-size="11" fill="#374151">Valhalla</text>
+      
+        <rect x="324.0" y="259.0" width="11" height="11" fill="#059669"/>
+        <text x="340.0" y="268.5" font-size="11" fill="#374151">BRouter</text>
+      
+        <rect x="465.0" y="259.0" width="11" height="11" fill="#dc2626"/>
+        <text x="481.0" y="268.5" font-size="11" fill="#374151">Google</text>
+      
+      <line x1="42" x2="42" y1="14" y2="212" stroke="#374151" stroke-width="1"/>
+      <line x1="42" x2="606" y1="212" y2="212" stroke="#374151" stroke-width="1"/>
+    </svg>
   </div>
-  <div class="summary-card">
-    <h3>Avg distance</h3>
-    <div class="metric client">Client:   5.79 km</div>
-    <div class="metric valhalla">Valhalla: 4.86 km</div>
-    <div class="metric brouter">BRouter:  4.83 km</div>
-    <div class="metric google">Google:   5.00 km</div>
+  <div class="chart">
+    <h3>Avg distance (km) by mode</h3>
+    <div class="sub">Lower = shorter route. Client may trade distance for safety.</div>
+    <svg viewBox="0 0 620 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Average distance in km by travel mode">
+      
+      <line x1="42" x2="606" y1="212.0" y2="212.0" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="215.0" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">0.0</text>
+    
+      <line x1="42" x2="606" y1="162.5" y2="162.5" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="165.5" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">1.6</text>
+    
+      <line x1="42" x2="606" y1="113.0" y2="113.0" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="116.0" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">3.3</text>
+    
+      <line x1="42" x2="606" y1="63.5" y2="63.5" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="66.5" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">4.9</text>
+    
+      <line x1="42" x2="606" y1="14.0" y2="14.0" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="36" y="17.0" text-anchor="end" font-size="10" fill="#6b7280" font-family="ui-monospace,Menlo,monospace">6.5</text>
+    
+      <rect x="55.5" y="37.2" width="20.4" height="174.8" fill="#2563eb"><title>Client — carrying-kid: 5.74 km (n=30)</title></rect><rect x="77.0" y="63.9" width="20.4" height="148.1" fill="#ea580c"><title>Valhalla — carrying-kid: 4.86 km (n=38)</title></rect><rect x="98.4" y="64.4" width="20.4" height="147.6" fill="#059669"><title>BRouter — carrying-kid: 4.85 km (n=39)</title></rect><rect x="119.8" y="59.6" width="20.4" height="152.4" fill="#dc2626"><title>Google — carrying-kid: 5.00 km (n=39)</title></rect><rect x="168.3" y="20.0" width="20.4" height="192.0" fill="#2563eb"><title>Client — kid-confident: 6.30 km (n=30)</title></rect><rect x="189.8" y="60.7" width="20.4" height="151.3" fill="#ea580c"><title>Valhalla — kid-confident: 4.97 km (n=36)</title></rect><rect x="211.2" y="62.6" width="20.4" height="149.4" fill="#059669"><title>BRouter — kid-confident: 4.90 km (n=39)</title></rect><rect x="232.6" y="59.6" width="20.4" height="152.4" fill="#dc2626"><title>Google — kid-confident: 5.00 km (n=39)</title></rect><rect x="281.1" y="35.4" width="20.4" height="176.6" fill="#2563eb"><title>Client — kid-starting-out: 5.80 km (n=30)</title></rect><rect x="302.6" y="65.0" width="20.4" height="147.0" fill="#ea580c"><title>Valhalla — kid-starting-out: 4.83 km (n=39)</title></rect><rect x="324.0" y="62.6" width="20.4" height="149.4" fill="#059669"><title>BRouter — kid-starting-out: 4.90 km (n=39)</title></rect><rect x="345.4" y="59.6" width="20.4" height="152.4" fill="#dc2626"><title>Google — kid-starting-out: 5.00 km (n=39)</title></rect><rect x="393.9" y="44.6" width="20.4" height="167.4" fill="#2563eb"><title>Client — kid-traffic-savvy: 5.49 km (n=30)</title></rect><rect x="415.4" y="64.3" width="20.4" height="147.7" fill="#ea580c"><title>Valhalla — kid-traffic-savvy: 4.85 km (n=39)</title></rect><rect x="436.8" y="64.4" width="20.4" height="147.6" fill="#059669"><title>BRouter — kid-traffic-savvy: 4.85 km (n=39)</title></rect><rect x="458.2" y="59.6" width="20.4" height="152.4" fill="#dc2626"><title>Google — kid-traffic-savvy: 5.00 km (n=39)</title></rect><rect x="506.7" y="40.4" width="20.4" height="171.6" fill="#2563eb"><title>Client — training: 5.63 km (n=30)</title></rect><rect x="528.2" y="65.0" width="20.4" height="147.0" fill="#ea580c"><title>Valhalla — training: 4.82 km (n=39)</title></rect><rect x="549.6" y="69.8" width="20.4" height="142.2" fill="#059669"><title>BRouter — training: 4.67 km (n=39)</title></rect><rect x="571.0" y="59.6" width="20.4" height="152.4" fill="#dc2626"><title>Google — training: 5.00 km (n=39)</title></rect>
+      <text x="98.4" y="226.0" text-anchor="middle" font-size="10" fill="#374151">carrying-kid</text><text x="211.2" y="226.0" text-anchor="middle" font-size="10" fill="#374151">kid-confident</text><text x="324.0" y="226.0" text-anchor="middle" font-size="10" fill="#374151">kid-starting-out</text><text x="436.8" y="226.0" text-anchor="middle" font-size="10" fill="#374151">kid-traffic-savvy</text><text x="549.6" y="226.0" text-anchor="middle" font-size="10" fill="#374151">training</text>
+      
+        <rect x="42.0" y="259.0" width="11" height="11" fill="#2563eb"/>
+        <text x="58.0" y="268.5" font-size="11" fill="#374151">Client</text>
+      
+        <rect x="183.0" y="259.0" width="11" height="11" fill="#ea580c"/>
+        <text x="199.0" y="268.5" font-size="11" fill="#374151">Valhalla</text>
+      
+        <rect x="324.0" y="259.0" width="11" height="11" fill="#059669"/>
+        <text x="340.0" y="268.5" font-size="11" fill="#374151">BRouter</text>
+      
+        <rect x="465.0" y="259.0" width="11" height="11" fill="#dc2626"/>
+        <text x="481.0" y="268.5" font-size="11" fill="#374151">Google</text>
+      
+      <line x1="42" x2="42" y1="14" y2="212" stroke="#374151" stroke-width="1"/>
+      <line x1="42" x2="606" y1="212" y2="212" stroke="#374151" stroke-width="1"/>
+    </svg>
   </div>
-  <div class="summary-card">
-    <h3>Distance flags</h3>
-    <div class="metric">81 / 195 routes where client &gt; 1.2× min(Valhalla, BRouter)</div>
-    <div class="metric" style="color:#6b7280;font-size:11px;margin-top:6px">Likely detour. Worth reviewing on the map — may still be correct (e.g. safer corridor) but flag it.</div>
-  </div>
+</div>
+
+<div class="card">
+  <h3>Distance flags</h3>
+  <div style="font-family:ui-monospace,Menlo,monospace;font-size:13px">81 / 195 routes where client &gt; 1.2× min(Valhalla, BRouter, Google)</div>
+  <div style="color:#6b7280;font-size:11px;margin-top:6px">Likely detour. Worth reviewing on the map — may still be correct (e.g. safer corridor) but flag it.</div>
 </div>
 
 <div class="flag-banner">⚠ 81 route(s) flagged for long detour. Use the “flagged only” filter below.</div>

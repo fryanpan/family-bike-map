@@ -5,11 +5,12 @@ import { saveScan, loadScan } from '../services/auditCache'
 import AuditGroupDetail from './AuditGroupDetail'
 import AuditSamplesTab from './AuditSamplesTab'
 import AdminSettingsTab from './AdminSettingsTab'
+import AdminBenchmarksTab from './AdminBenchmarksTab'
 import type { CityScan, AuditGroup } from '../services/audit'
 import { fetchRules } from '../services/rules'
 import type { RegionRules } from '../services/rules'
 
-type OuterTab = 'audit' | 'settings'
+type OuterTab = 'audit' | 'settings' | 'benchmarks'
 type InnerTab = 'samples' | 'groups'
 type FilterStatus = 'all' | 'classified' | 'unclassified'
 
@@ -44,7 +45,7 @@ async function getCurrentLocationBbox(): Promise<CityPreset['bbox']> {
   })
 }
 
-const VALID_OUTER: OuterTab[] = ['audit', 'settings']
+const VALID_OUTER: OuterTab[] = ['audit', 'settings', 'benchmarks']
 const VALID_INNER: InnerTab[] = ['samples', 'groups']
 
 function parseOuterFromUrl(): OuterTab {
@@ -185,7 +186,7 @@ export default function AdminPanel({ onClose, initialTab }: Props) {
         </button>
       </div>
 
-      {/* Outer tabs — Classification Audit | Settings */}
+      {/* Outer tabs — Classification Audit | Settings | Benchmarks */}
       <div className="audit-tabs audit-tabs-outer">
         <button
           className={`audit-tab${outerTab === 'audit' ? ' audit-tab-active' : ''}`}
@@ -199,10 +200,20 @@ export default function AdminPanel({ onClose, initialTab }: Props) {
         >
           Settings
         </button>
+        <button
+          className={`audit-tab${outerTab === 'benchmarks' ? ' audit-tab-active' : ''}`}
+          onClick={() => setOuterTab('benchmarks')}
+        >
+          Routing Benchmarks
+        </button>
       </div>
 
       {outerTab === 'settings' && (
         <AdminSettingsTab />
+      )}
+
+      {outerTab === 'benchmarks' && (
+        <AdminBenchmarksTab />
       )}
 
       {outerTab === 'audit' && (

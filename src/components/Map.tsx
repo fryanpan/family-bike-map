@@ -514,16 +514,44 @@ function RouteDisplay({
   )
 }
 
-/** Build a current-location divIcon, optionally showing a heading arrow.
- *  When `heading` is a number (0 = north, clockwise), a blue wedge rotates
- *  around the dot to show travel direction. When null, just the pulsing dot.
+/**
+ * Overhead-view baby turtle, reused for both the on-map current-location
+ * marker and the recenter-on-me button so the two read as the same object.
+ * Drawn in a 64×64 viewBox — facing north by default so rotating by
+ * `heading` (0 = north, clockwise) aims the head in the direction of
+ * travel.
  */
+const TURTLE_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="12" cy="44" rx="7" ry="4.5" fill="#85038c" transform="rotate(-40 12 44)"/>
+  <ellipse cx="52" cy="44" rx="7" ry="4.5" fill="#85038c" transform="rotate(40 52 44)"/>
+  <ellipse cx="11" cy="22" rx="7" ry="4.5" fill="#85038c" transform="rotate(-140 11 22)"/>
+  <ellipse cx="53" cy="22" rx="7" ry="4.5" fill="#85038c" transform="rotate(140 53 22)"/>
+  <path d="M 29 52 L 32 58 L 35 52 Z" fill="#85038c"/>
+  <circle cx="32" cy="10" r="6" fill="#85038c"/>
+  <circle cx="29.5" cy="9.2" r="1" fill="#fff"/>
+  <circle cx="34.5" cy="9.2" r="1" fill="#fff"/>
+  <circle cx="29.5" cy="9.2" r="0.5" fill="#111"/>
+  <circle cx="34.5" cy="9.2" r="0.5" fill="#111"/>
+  <ellipse cx="32" cy="32" rx="17" ry="16" fill="#85038c"/>
+  <ellipse cx="27" cy="26" rx="6" ry="4" fill="#b956c1" opacity="0.55"/>
+  <ellipse cx="32" cy="32" rx="17" ry="16" fill="none" stroke="#4c0252" stroke-width="1.25"/>
+  <g stroke="#4c0252" stroke-width="0.9" fill="none" opacity="0.6">
+    <path d="M 32 20 L 41 25.5 L 41 38.5 L 32 44 L 23 38.5 L 23 25.5 Z"/>
+    <path d="M 32 20 L 32 44"/>
+    <path d="M 23 25.5 L 41 38.5"/>
+    <path d="M 41 25.5 L 23 38.5"/>
+  </g>
+</svg>`
+
+/** Build a current-location divIcon. Rotates the whole turtle by `heading`
+ *  (0 = north, clockwise) so the head points in the direction of travel.
+ *  When heading is null the turtle stays oriented north and the pulse ring
+ *  conveys "I know where you are but not which way you're facing." */
 function makeCurrentLocationIcon(heading: number | null): L.DivIcon {
-  const arrowHtml = heading != null
-    ? `<div class="current-location-arrow" style="transform: translate(-50%, -50%) rotate(${heading}deg);"></div>`
-    : ''
+  const rotatePart = heading != null ? ` rotate(${heading}deg)` : ''
+  const transform = `transform: translate(-50%, -50%)${rotatePart};`
   return L.divIcon({
-    html: `${arrowHtml}<div class="current-location-dot"><div class="current-location-pulse"></div></div>`,
+    html: `<div class="current-location-pulse"></div><div class="current-location-turtle" style="${transform}">${TURTLE_SVG}</div>`,
     className: 'current-location-icon',
     iconSize: [64, 64],
     iconAnchor: [32, 32],
@@ -557,7 +585,7 @@ function RecenterButton({ currentLocation }: { currentLocation: { lat: number; l
         )
       }}
     >
-      ◎
+      <span className="recenter-btn-turtle" dangerouslySetInnerHTML={{ __html: TURTLE_SVG }} />
     </button>
   )
 }
