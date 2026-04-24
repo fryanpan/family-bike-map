@@ -7,7 +7,7 @@ import { classifyOsmTagsToItem } from '../services/overpass'
 import type { ClassificationRule } from '../services/rules'
 import { classifyEdge, PATH_LEVELS, PATH_LEVEL_LABELS } from '../utils/lts'
 import type { PathLevel } from '../utils/lts'
-import { pathLevelAcceptanceForMode } from '../data/modes'
+import { pathLevelAcceptanceForMode, routingNoteForModeLevel } from '../data/modes'
 import type { RideMode } from '../data/modes'
 
 interface Props {
@@ -265,26 +265,37 @@ export default function AuditSamplesTab({ scan, regionRules }: Props) {
         </select>
       </div>
 
-      {PATH_LEVELS.map((lvl) => {
-        const classMap = byLevel.get(lvl)!
-        if (classMap.size === 0) return null
-        const info = PATH_LEVEL_LABELS[lvl]
-        const acceptance = pathLevelAcceptanceForMode(travelMode, lvl)
+      {(['accepted', 'bridge-walked'] as const).map((bucket) => {
+        const levelsInBucket = PATH_LEVELS.filter((lvl) =>
+          pathLevelAcceptanceForMode(travelMode, lvl) === bucket &&
+          (byLevel.get(lvl)?.size ?? 0) > 0,
+        )
+        if (levelsInBucket.length === 0) return null
         const sortBySize = (a: [string, AuditWay[]], b: [string, AuditWay[]]) => b[1].length - a[1].length
-        const entries = [...classMap.entries()].sort(sortBySize)
         return (
-          <div key={lvl} className={`st-section st-level st-level-${acceptance}`}>
-            <div className="st-level-header">
-              <span className="st-level-code">LTS {lvl}</span>
-              <span className="st-level-name">{info.short}</span>
-              <span className={`st-level-badge st-level-badge-${acceptance}`}>
-                {acceptance === 'accepted' ? '✓ Accepted' : '✗ Bridge-walked'}
-              </span>
-            </div>
-            <p className="st-level-desc">{info.description}</p>
-            {entries.map(([cls, ways]) => (
-              <ClassCard key={cls} classification={cls} ways={ways} isPreferred={acceptance === 'accepted'} />
-            ))}
+          <div key={bucket} className={`st-bucket st-bucket-${bucket}`}>
+            <h2 className={`st-bucket-heading st-bucket-heading-${bucket}`}>
+              {bucket === 'accepted' ? 'Preferred paths' : 'Not preferred paths'}
+            </h2>
+            {levelsInBucket.map((lvl) => {
+              const classMap = byLevel.get(lvl)!
+              const info = PATH_LEVEL_LABELS[lvl]
+              const note = routingNoteForModeLevel(travelMode, lvl)
+              const entries = [...classMap.entries()].sort(sortBySize)
+              return (
+                <div key={lvl} className={`st-section st-level st-level-${bucket}`}>
+                  <div className="st-level-header">
+                    <span className="st-level-code">LTS {lvl}</span>
+                    <span className="st-level-name">{info.short}</span>
+                  </div>
+                  <p className="st-level-desc">{info.description}</p>
+                  <p className="st-level-note">{note}</p>
+                  {entries.map(([cls, ways]) => (
+                    <ClassCard key={cls} classification={cls} ways={ways} isPreferred={bucket === 'accepted'} />
+                  ))}
+                </div>
+              )
+            })}
           </div>
         )
       })}
