@@ -5,7 +5,7 @@ import { PREFERRED_COLOR, OTHER_COLOR, getLegendItem } from '../utils/classify'
 import { colorForLevel } from './SimpleLegend'
 import { useAdminSettings } from '../services/adminSettings'
 import { getVisibleTiles, getCachedTile, latLngToTile, classifyOsmTagsToItem } from '../services/overpass'
-import { getStreetImage } from '../services/mapillary'
+import { getStreetViewUrl } from '../services/streetview'
 import BikeMapOverlay from './BikeMapOverlay'
 import type { ClassificationRule } from '../services/rules'
 import type { Place, Route, RouteSegment, OsmWay } from '../utils/types'
@@ -265,14 +265,11 @@ function SegmentPopup({
     : latlng
 
   useEffect(() => {
-    let cancelled = false
-    setImgLoading(true)
-    getStreetImage(segMid[0], segMid[1]).then((img) => {
-      if (cancelled) return
-      setImgUrl(img?.thumbUrl ?? null)
-      setImgLoading(false)
-    }).catch(() => { if (!cancelled) setImgLoading(false) })
-    return () => { cancelled = true }
+    // Street View Static is served directly as an <img src>; no async
+    // fetch needed. Load state stops at "loading" until the img onLoad
+    // fires (handled by the <img> below).
+    setImgUrl(getStreetViewUrl(segMid[0], segMid[1], { size: '400x240' }))
+    setImgLoading(false)
   }, [segMid])
 
   const tagRows = useMemo(() => {

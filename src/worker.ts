@@ -35,6 +35,7 @@ interface D1PreparedStatement {
 
 type Env = {
   MAPILLARY_TOKEN?: string
+  GOOGLE_MAPS_API_KEY?: string
   CLASSIFICATION_RULES: KVNamespace
   ROUTE_LOGS: D1Database
   ASSETS: { fetch: (request: Request) => Promise<Response> }
@@ -215,6 +216,78 @@ export default {
         // clone() because we need to consume the response body again below
         const toCache = response.clone()
         // waitUntil would be nicer, but we don't have ctx here; fire-and-forget is fine
+        edgeCache.put(cacheKey, toCache).catch(() => {})
+      }
+
+      return response
+    }
+
+// ── Google Street View Static proxy ───────────────────────────────
+    // Used by single-image popovers (routing-mode segment click, overlay
+    // way click). Bulk image grids in the admin audit still use Mapillary
+    // because Street View is $7/1000 and audit scans pull thousands.
+    //
+    // Pattern mirrors the Mapillary proxy: server-side API key, long edge
+    // cache, strip any client-supplied key to prevent spoofing.
+    //
+    // Accepts: lat, lng, size (default 400x300), heading, pitch, fov.
+    // Anything else in the query string is passed through.
+    if (path === '/api/streetview') {
+      if (!env.GOOGLE_MAPS_API_KEY) {
+        return new Response(JSON.stringify({ error: 'Google Maps API key not configured' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      const params = new URLSearchParams(url.search)
+      params.delete('key')
+      const lat = params.get('lat')
+      const lng = params.get('lng')
+      if (!lat || !lng) {
+        return new Response(JSON.stringify({ error: 'lat and lng required' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      params.delete('lat')
+      params.delete('lng')
+      params.set('location', `${lat},${lng}`)
+      if (!params.get('size')) params.set('size', '400x300')
+      params.set('key', env.GOOGLE_MAPS_API_KEY)
+      const target = `https://maps.googleapis.com/maps/api/streetview?${params}`
+
+      // Cache key: strip the key so the edge cache is shared across requests
+      // with identical visible parameters.
+      const cacheKeyParams = new URLSearchParams(url.search)
+      cacheKeyParams.delete('key')
+      const cacheKeyUrl = `${url.origin}${path}?${cacheKeyParams}`
+      const cacheKey = new Request(cacheKeyUrl, { method: 'GET' })
+      const edgeCache = caches.default
+      const cached = await edgeCache.match(cacheKey)
+      if (cached) {
+        return new Response(cached.body, {
+          status: cached.status,
+          headers: { ...Object.fromEntries(cached.headers), 'X-Cache': 'HIT' },
+        })
+      }
+
+      const resp = await fetch(target)
+      const body = await resp.arrayBuffer()
+      const response = new Response(body, {
+        status: resp.status,
+        headers: {
+          'Content-Type': resp.headers.get('Content-Type') ?? 'image/jpeg',
+          // Street View imagery is indexed; re-shoots happen every few
+          // years in Berlin/SF. 30-day edge cache is safe and keeps our
+          // per-viewer Google cost close to zero.
+          'Cache-Control': 'public, max-age=2592000', // 30 days
+          'X-Cache': 'MISS',
+        },
+      })
+
+      if (resp.ok) {
+        const toCache = response.clone()
         edgeCache.put(cacheKey, toCache).catch(() => {})
       }
 

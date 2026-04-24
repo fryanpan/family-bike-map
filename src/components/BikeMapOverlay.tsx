@@ -7,7 +7,7 @@ import { classifyEdge } from '../utils/lts'
 import type { PathLevel } from '../utils/lts'
 import { colorForLevel, weightMultiplierForLevel } from './SimpleLegend'
 import { useAdminSettings } from '../services/adminSettings'
-import { getStreetImage } from '../services/mapillary'
+import { getStreetViewUrl } from '../services/streetview'
 import type { ClassificationRule } from '../services/rules'
 import type { OsmWay } from '../utils/types'
 
@@ -210,19 +210,21 @@ function OverlayRenderer({ ways, profileKey, preferredItemNames, showOtherPaths,
         className: 'bike-segment-popup',
       })
 
-      let imageFetched = false
+      // Street View URL is a proxy URL — the browser requests the image
+      // directly via <img src>, no JSON fetch first. Rebuild the popup
+      // content once on open so the lazy load only fires when the user
+      // actually clicks a way.
+      let imageSet = false
       polyline.on('popupopen', () => {
-        if (imageFetched) return
-        imageFetched = true
+        if (imageSet) return
+        imageSet = true
         const coords = way.coordinates
         const mid = coords[Math.floor(coords.length / 2)]
-        getStreetImage(mid[0], mid[1]).then((img) => {
-          if (!img) return
-          const popup = polyline.getPopup()
-          if (!popup) return
-          popup.setContent(buildTooltipHtml(itemName, way.tags, isPreferred, img.thumbUrl))
-          popup.update()
-        })
+        const imgUrl = getStreetViewUrl(mid[0], mid[1], { size: '400x240' })
+        const popup = polyline.getPopup()
+        if (!popup) return
+        popup.setContent(buildTooltipHtml(itemName, way.tags, isPreferred, imgUrl))
+        popup.update()
       })
 
       polyline.addTo(lg)

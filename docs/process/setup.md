@@ -66,6 +66,7 @@ Set these once (or when rotating) via `wrangler secret put`:
 
 ```bash
 npx wrangler secret put MAPILLARY_TOKEN      # Mapillary API token (proxied server-side)
+npx wrangler secret put GOOGLE_MAPS_API_KEY  # Google Maps API key — Street View Static + Directions (proxied server-side)
 ```
 
 ### GitHub Actions (automated CI/CD)

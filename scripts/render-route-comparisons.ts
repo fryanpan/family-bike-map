@@ -28,7 +28,7 @@
  *                                                [--no-external]
  */
 
-import { mkdir, writeFile, appendFile } from 'node:fs/promises'
+import { mkdir, writeFile, appendFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { buildRoutingGraph, routeOnGraph, haversineM } from '../src/services/clientRouter'
 import { buildQuery, classifyOsmTagsToItem } from '../src/services/overpass'
@@ -251,13 +251,20 @@ interface Sample {
   client: ScoredLeg | null
   valhalla: ScoredLeg | null
   brouter: ScoredLeg | null
-  /** client distance > 1.2 × min(valhalla, brouter) → flagged for review */
+  /**
+   * Google's bike route is the same for every mode (Google has no
+   * mode concept), so it's fetched once per pair via scripts/fetch-
+   * google-routes.ts and cached. Null if the cache is missing or the
+   * fetch failed.
+   */
+  google: ScoredLeg | null
+  /** client distance > 1.2 × min(valhalla, brouter, google) → flagged */
   distanceFlag: boolean
 }
 
-function computeDistanceFlag(s: Pick<Sample, 'client' | 'valhalla' | 'brouter'>): boolean {
+function computeDistanceFlag(s: Pick<Sample, 'client' | 'valhalla' | 'brouter' | 'google'>): boolean {
   if (!s.client) return false
-  const externals = [s.valhalla, s.brouter].filter((x): x is ScoredLeg => x != null)
+  const externals = [s.valhalla, s.brouter, s.google].filter((x): x is ScoredLeg => x != null)
   if (externals.length === 0) return false
   const minExt = Math.min(...externals.map((x) => x.distanceKm))
   if (minExt <= 0) return false
@@ -296,13 +303,14 @@ function renderSampleHtml(s: Sample): string {
   #map{position:absolute;top:60px;left:0;right:0;bottom:0}
 </style>
 </head><body>
-<div id="hdr"><h1>${title} ${flagBadge}</h1>${stat('Client', s.client, '#2563eb')} ${stat('Valhalla', s.valhalla, '#ea580c')} ${stat('BRouter', s.brouter, '#059669')}</div>
+<div id="hdr"><h1>${title} ${flagBadge}</h1>${stat('Client', s.client, '#2563eb')} ${stat('Valhalla', s.valhalla, '#ea580c')} ${stat('BRouter', s.brouter, '#059669')} ${stat('Google', s.google, '#dc2626')}</div>
 <div id="map"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
   const client   = ${s.client   ? j(s.client.coords)   : 'null'};
   const valhalla = ${s.valhalla ? j(s.valhalla.coords) : 'null'};
   const brouter  = ${s.brouter  ? j(s.brouter.coords)  : 'null'};
+  const google   = ${s.google   ? j(s.google.coords)   : 'null'};
   const start    = ${j([s.origin.lat, s.origin.lng])};
   const end      = ${j([s.dest.lat,   s.dest.lng])};
   const m = L.map('map');
@@ -311,12 +319,13 @@ function renderSampleHtml(s: Sample): string {
     L.polyline(coords, { color: '#fff', weight: weight + 4, opacity: 0.9 }).addTo(m);
     L.polyline(coords, { color, weight, opacity: 0.95 }).bindTooltip(label).addTo(m);
   }
+  if (google)   paint(google,   '#dc2626', 4, 'Google');
   if (valhalla) paint(valhalla, '#ea580c', 4, 'Valhalla');
   if (brouter)  paint(brouter,  '#059669', 4, 'BRouter');
   if (client)   paint(client,   '#2563eb', 6, 'Client');
   L.circleMarker(start, { radius: 6, color: '#000', fillColor: '#10b981', fillOpacity: 1 }).bindTooltip('Start').addTo(m);
   L.circleMarker(end,   { radius: 6, color: '#000', fillColor: '#ef4444', fillOpacity: 1 }).bindTooltip('End').addTo(m);
-  const all = [start, end].concat(client || []).concat(valhalla || []).concat(brouter || []);
+  const all = [start, end].concat(client || []).concat(valhalla || []).concat(brouter || []).concat(google || []);
   m.fitBounds(L.latLngBounds(all), { padding: [30, 30] });
 </script>
 </body></html>`
@@ -340,9 +349,11 @@ function renderIndexHtml(samples: Sample[], runDate: string): string {
   const cPrefs  = sorted.filter((s) => s.client)  .map((s) => s.client! .preferredPct)
   const vPrefs  = sorted.filter((s) => s.valhalla).map((s) => s.valhalla!.preferredPct)
   const bPrefs  = sorted.filter((s) => s.brouter) .map((s) => s.brouter! .preferredPct)
+  const gPrefs  = sorted.filter((s) => s.google)  .map((s) => s.google!  .preferredPct)
   const cDists  = sorted.filter((s) => s.client)  .map((s) => s.client! .distanceKm)
   const vDists  = sorted.filter((s) => s.valhalla).map((s) => s.valhalla!.distanceKm)
   const bDists  = sorted.filter((s) => s.brouter) .map((s) => s.brouter! .distanceKm)
+  const gDists  = sorted.filter((s) => s.google)  .map((s) => s.google!  .distanceKm)
   const flagged = sorted.filter((s) => s.distanceFlag).length
 
   const rows = sorted.map((s) => {
@@ -356,6 +367,7 @@ function renderIndexHtml(samples: Sample[], runDate: string): string {
       <td style="color:#2563eb">${cell(s.client)}</td>
       <td style="color:#ea580c">${cell(s.valhalla)}</td>
       <td style="color:#059669">${cell(s.brouter)}</td>
+      <td style="color:#dc2626">${cell(s.google)}</td>
       <td>${s.distanceFlag ? '<span class="flag">⚠</span>' : ''}</td>
       <td><a href="${fn}">open</a></td>
     </tr>`
@@ -378,6 +390,7 @@ function renderIndexHtml(samples: Sample[], runDate: string): string {
   .summary-card .client   { color: #2563eb; }
   .summary-card .valhalla { color: #ea580c; }
   .summary-card .brouter  { color: #059669; }
+  .summary-card .google   { color: #dc2626; }
   .summary-card .metric   { font-family: ui-monospace, Menlo, monospace; font-size: 13px; margin: 2px 0; }
 
   .flag-banner { background: #fef3c7; color: #78350f; padding: 8px 12px; border-radius: 6px; margin: 14px 0; font-size: 13px; }
@@ -392,7 +405,7 @@ function renderIndexHtml(samples: Sample[], runDate: string): string {
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   th, td { padding: 6px 10px; border-bottom: 1px solid #eee; text-align: left; }
   th { background: #f9fafb; font-weight: 600; position: sticky; top: 0; }
-  td:nth-child(4), td:nth-child(5), td:nth-child(6) { font-family: ui-monospace, Menlo, monospace; white-space: nowrap; }
+  td:nth-child(4), td:nth-child(5), td:nth-child(6), td:nth-child(7) { font-family: ui-monospace, Menlo, monospace; white-space: nowrap; }
   tr.hidden { display: none; }
   .fail { color: #b91c1c; font-weight: 500; }
   .flag { color: #b45309; font-weight: 600; }
@@ -405,6 +418,7 @@ function renderIndexHtml(samples: Sample[], runDate: string): string {
   <span><span class="sw" style="background:#2563eb"></span>Client router (ours)</span>
   <span><span class="sw" style="background:#ea580c"></span>Valhalla (osm.org bicycle)</span>
   <span><span class="sw" style="background:#059669"></span>BRouter</span>
+  <span><span class="sw" style="background:#dc2626"></span>Google Maps (bicycling)</span>
 </div>
 
 <div class="summary">
@@ -413,12 +427,14 @@ function renderIndexHtml(samples: Sample[], runDate: string): string {
     <div class="metric client">Client:   ${(avg(cPrefs) * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${cPrefs.length})</span></div>
     <div class="metric valhalla">Valhalla: ${(avg(vPrefs) * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${vPrefs.length})</span></div>
     <div class="metric brouter">BRouter:  ${(avg(bPrefs) * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${bPrefs.length})</span></div>
+    <div class="metric google">Google:   ${(avg(gPrefs) * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${gPrefs.length})</span></div>
   </div>
   <div class="summary-card">
     <h3>Avg distance</h3>
     <div class="metric client">Client:   ${avg(cDists).toFixed(2)} km</div>
     <div class="metric valhalla">Valhalla: ${avg(vDists).toFixed(2)} km</div>
     <div class="metric brouter">BRouter:  ${avg(bDists).toFixed(2)} km</div>
+    <div class="metric google">Google:   ${avg(gDists).toFixed(2)} km</div>
   </div>
   <div class="summary-card">
     <h3>Distance flags</h3>
@@ -441,7 +457,7 @@ ${flagged > 0 ? `<div class="flag-banner">⚠ ${flagged} route(s) flagged for lo
 <table>
   <thead><tr>
     <th>City</th><th>Mode</th><th>Route</th>
-    <th>Client</th><th>Valhalla</th><th>BRouter</th>
+    <th>Client</th><th>Valhalla</th><th>BRouter</th><th>Google</th>
     <th>Flag</th><th></th>
   </tr></thead>
   <tbody id="rows">${rows}</tbody>
@@ -510,6 +526,21 @@ async function main() {
   await mkdir(outDir, { recursive: true })
   console.log(`\nOutput: ${outDir}`)
 
+  // Load Google routes cache (written by scripts/fetch-google-routes.ts).
+  // Key format: "<city>:<origin.label>→<dest.label>". Missing file or
+  // missing keys are non-fatal; those samples render without a Google
+  // line and Google columns show FAIL.
+  interface GoogleCacheEntry { coords: [number, number][]; distanceKm: number; durationMin: number }
+  let googleCache: Record<string, GoogleCacheEntry | null> = {}
+  try {
+    const raw = await readFile(join(process.cwd(), 'public/route-compare/google-routes.json'), 'utf-8')
+    googleCache = JSON.parse(raw)
+    const hits = Object.values(googleCache).filter((v) => v != null).length
+    console.log(`Loaded Google routes cache: ${hits} pairs`)
+  } catch {
+    console.log(`No Google routes cache found (public/route-compare/google-routes.json). Run scripts/fetch-google-routes.ts first if you want Google in the comparison.`)
+  }
+
   // ── Enumerate samples ────────────────────────────────────────────
   const combos: Array<{ city: CityConfig; pair: { origin: Location; dest: Location }; mode: ModeKey }> = []
   for (const city of cities)
@@ -573,7 +604,15 @@ async function main() {
     } : null
     const v: ScoredLeg | null = valhalla ? { ...valhalla, preferredPct: score(valhalla.coords) } : null
     const b: ScoredLeg | null = brouter  ? { ...brouter,  preferredPct: score(brouter.coords)  } : null
-    const distanceFlag = computeDistanceFlag({ client, valhalla: v, brouter: b })
+    // Google: same route for every mode, but preferredPct is scored
+    // against THIS mode's preferred-items set so the comparison is
+    // apples-to-apples per mode.
+    const gKey = `${city.key}:${pair.origin.label}→${pair.dest.label}`
+    const gCached = googleCache[gKey]
+    const g: ScoredLeg | null = gCached
+      ? { coords: gCached.coords, distanceKm: gCached.distanceKm, durationMin: gCached.durationMin, preferredPct: score(gCached.coords) }
+      : null
+    const distanceFlag = computeDistanceFlag({ client, valhalla: v, brouter: b, google: g })
 
     const s: Sample = {
       index: i,
@@ -582,7 +621,7 @@ async function main() {
       mode,
       origin: pair.origin,
       dest: pair.dest,
-      client, valhalla: v, brouter: b,
+      client, valhalla: v, brouter: b, google: g,
       distanceFlag,
     }
     samples.push(s)
@@ -599,9 +638,11 @@ async function main() {
   const cPrefs = samples.filter((s) => s.client)  .map((s) => s.client! .preferredPct)
   const vPrefs = samples.filter((s) => s.valhalla).map((s) => s.valhalla!.preferredPct)
   const bPrefs = samples.filter((s) => s.brouter) .map((s) => s.brouter! .preferredPct)
+  const gPrefs = samples.filter((s) => s.google)  .map((s) => s.google!  .preferredPct)
   const cDists = samples.filter((s) => s.client)  .map((s) => s.client! .distanceKm)
   const vDists = samples.filter((s) => s.valhalla).map((s) => s.valhalla!.distanceKm)
   const bDists = samples.filter((s) => s.brouter) .map((s) => s.brouter! .distanceKm)
+  const gDists = samples.filter((s) => s.google)  .map((s) => s.google!  .distanceKm)
   const flagged = samples.filter((s) => s.distanceFlag).length
 
   const metrics = {
@@ -609,8 +650,8 @@ async function main() {
     commit,
     count: samples.length,
     summary: {
-      avgPreferredPct: { client: avg(cPrefs), valhalla: avg(vPrefs), brouter: avg(bPrefs) },
-      avgDistanceKm:   { client: avg(cDists), valhalla: avg(vDists), brouter: avg(bDists) },
+      avgPreferredPct: { client: avg(cPrefs), valhalla: avg(vPrefs), brouter: avg(bPrefs), google: avg(gPrefs) },
+      avgDistanceKm:   { client: avg(cDists), valhalla: avg(vDists), brouter: avg(bDists), google: avg(gDists) },
       flaggedCount: flagged,
     },
     samples: samples.map((s) => ({
@@ -623,6 +664,7 @@ async function main() {
       client:   s.client   ? { km: s.client.distanceKm,   min: s.client.durationMin,   preferredPct: s.client.preferredPct,   coords: s.client.coords }   : null,
       valhalla: s.valhalla ? { km: s.valhalla.distanceKm, min: s.valhalla.durationMin, preferredPct: s.valhalla.preferredPct, coords: s.valhalla.coords } : null,
       brouter:  s.brouter  ? { km: s.brouter.distanceKm,  min: s.brouter.durationMin,  preferredPct: s.brouter.preferredPct,  coords: s.brouter.coords  } : null,
+      google:   s.google   ? { km: s.google.distanceKm,   min: s.google.durationMin,   preferredPct: s.google.preferredPct,   coords: s.google.coords }   : null,
     })),
   }
   await writeFile(join(outDir, 'metrics.json'), JSON.stringify(metrics, null, 2))

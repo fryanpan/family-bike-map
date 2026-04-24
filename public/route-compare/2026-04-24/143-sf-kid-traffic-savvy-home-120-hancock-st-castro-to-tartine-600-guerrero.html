@@ -11,13 +11,14 @@
   #map{position:absolute;top:60px;left:0;right:0;bottom:0}
 </style>
 </head><body>
-<div id="hdr"><h1>#143: Home (120 Hancock St, Castro) → Tartine (600 Guerrero) [kid-traffic-savvy] (San Francisco) </h1><span class="stat" style="color:#2563eb"><b>Client:</b> FAIL</span> <span class="stat" style="color:#ea580c"><b>Valhalla:</b> 0.7 km · 3 min · 0% preferred</span> <span class="stat" style="color:#059669"><b>BRouter:</b> 0.7 km · 1 min · 0% preferred</span></div>
+<div id="hdr"><h1>#143: Home (120 Hancock St, Castro) → Tartine (600 Guerrero) [kid-traffic-savvy] (San Francisco) </h1><span class="stat" style="color:#2563eb"><b>Client:</b> FAIL</span> <span class="stat" style="color:#ea580c"><b>Valhalla:</b> 0.7 km · 3 min · 0% preferred</span> <span class="stat" style="color:#059669"><b>BRouter:</b> 0.7 km · 1 min · 0% preferred</span> <span class="stat" style="color:#dc2626"><b>Google:</b> 1.0 km · 4 min · 0% preferred</span></div>
 <div id="map"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
   const client   = null;
   const valhalla = [[37.760324,-122.431083],[37.760352,-122.430629],[37.760359,-122.430518],[37.760365,-122.430416],[37.760485,-122.42842],[37.760491,-122.428324],[37.761226,-122.42839],[37.761281,-122.428391],[37.761285,-122.428355],[37.761291,-122.428297],[37.761297,-122.428229],[37.761302,-122.428163],[37.761323,-122.427845],[37.761338,-122.427617],[37.761345,-122.427502],[37.761361,-122.427248],[37.761385,-122.426824],[37.761405,-122.426466],[37.761416,-122.426266],[37.761422,-122.426165],[37.761431,-122.426016],[37.761438,-122.425908],[37.761449,-122.425719],[37.761491,-122.425025],[37.761545,-122.424148],[37.761557,-122.423956],[37.761564,-122.423838],[37.761511,-122.423833],[37.761504,-122.423832]];
   const brouter  = [[37.760324,-122.431084],[37.760352,-122.430629],[37.760359,-122.430518],[37.760438,-122.430526],[37.761107,-122.430592],[37.761166,-122.430598],[37.761172,-122.430492],[37.761271,-122.428496],[37.761281,-122.428391],[37.761285,-122.428355],[37.761291,-122.428297],[37.761297,-122.428229],[37.761345,-122.427502],[37.761385,-122.426824],[37.761416,-122.426266],[37.761422,-122.426165],[37.761431,-122.426016],[37.761438,-122.425908],[37.761491,-122.425025],[37.761557,-122.423956],[37.761504,-122.423951],[37.761506,-122.423902]];
+  const google   = [[37.76034,-122.43108],[37.76025,-122.43251],[37.76024,-122.43274],[37.76035,-122.43275],[37.76074,-122.43279],[37.76079,-122.43279],[37.76086,-122.4328],[37.76103,-122.43282],[37.76106,-122.43238],[37.76116,-122.43077],[37.76117,-122.43047],[37.76129,-122.42863],[37.76133,-122.42792],[37.76144,-122.42619],[37.76156,-122.42419],[37.76157,-122.42388],[37.7615,-122.42388]];
   const start    = [37.7605,-122.4311];
   const end      = [37.7615,-122.4239];
   const m = L.map('map');
@@ -26,12 +27,13 @@
     L.polyline(coords, { color: '#fff', weight: weight + 4, opacity: 0.9 }).addTo(m);
     L.polyline(coords, { color, weight, opacity: 0.95 }).bindTooltip(label).addTo(m);
   }
+  if (google)   paint(google,   '#dc2626', 4, 'Google');
   if (valhalla) paint(valhalla, '#ea580c', 4, 'Valhalla');
   if (brouter)  paint(brouter,  '#059669', 4, 'BRouter');
   if (client)   paint(client,   '#2563eb', 6, 'Client');
   L.circleMarker(start, { radius: 6, color: '#000', fillColor: '#10b981', fillOpacity: 1 }).bindTooltip('Start').addTo(m);
   L.circleMarker(end,   { radius: 6, color: '#000', fillColor: '#ef4444', fillOpacity: 1 }).bindTooltip('End').addTo(m);
-  const all = [start, end].concat(client || []).concat(valhalla || []).concat(brouter || []);
+  const all = [start, end].concat(client || []).concat(valhalla || []).concat(brouter || []).concat(google || []);
   m.fitBounds(L.latLngBounds(all), { padding: [30, 30] });
 </script>
 </body></html>
