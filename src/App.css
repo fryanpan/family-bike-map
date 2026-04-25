@@ -988,6 +988,32 @@ button { font-family: inherit; cursor: pointer; }
 }
 .recenter-btn-turtle { display: inline-flex; width: 38px; height: 38px; }
 .recenter-btn-turtle svg { width: 100%; height: 100%; display: block; }
+
+/* Re-fit-to-route button — sits just above the recenter button. Visible
+   only when a route is set; rescue control for "I lost my route" after
+   the user pans/zooms away. Mirrors recenter-btn sizing/shadow so the
+   stack reads as one control cluster. */
+.fit-route-btn {
+  position: absolute;
+  right: 10px;
+  bottom: 154px; /* recenter-btn bottom (90) + height (56) + gap (8) */
+  z-index: 500;
+  width: 56px; height: 56px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,.2);
+  padding: 0;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  transition: background .12s, transform .12s;
+  line-height: 0;
+}
+@media (min-width: 768px) {
+  body:not(.mobile-preview) .fit-route-btn { bottom: 210px; /* desktop recenter (146) + height (56) + gap (8) */ }
+}
+.fit-route-btn:hover { background: #f3f4f6; }
+.fit-route-btn:active { transform: scale(0.96); }
 @media (min-width: 768px) {
   body:not(.mobile-preview) .recenter-btn { bottom: 146px; /* desktop: zoom(80) + 54 + 12 */ }
 }

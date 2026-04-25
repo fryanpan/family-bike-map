@@ -205,10 +205,14 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
               <div className="qb-segment qb-other" style={{ flex: quality.other }} title={`${Math.round(quality.other * 100)}% other`} />
             )}
           </div>
+          {/* Labels show every category with > 0 share so the displayed
+              percentages always sum to 100% (the prior 5% cutoff produced
+              92% + 6% = 98% bar legends, eroding trust). Sub-1% slivers
+              are still skipped to avoid 0%-rounded entries. */}
           <ul className="quality-labels">
             {SIMPLE_TIERS.map((tier) => {
               const frac = quality.byLevel[tier.level] ?? 0
-              if (frac <= 0.05) return null
+              if (frac < 0.005) return null
               return (
                 <li key={tier.level} className="ql-row">
                   <span className="ql-dot" style={{ background: colorForLevel(tier.level, settings.tiers) }} />
@@ -217,18 +221,18 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
                 </li>
               )
             })}
-            {quality.walking > 0.05 && (
+            {quality.walking >= 0.005 && (
               <li className="ql-row">
                 <span className="ql-dot" style={{ background: '#6b7280' }} />
                 <span className="ql-pct ql-walking">{Math.round(quality.walking * 100)}%</span>
-                <span className="ql-label">walking</span>
+                <span className="ql-label">walk the bike</span>
               </li>
             )}
-            {quality.other > 0.05 && (
+            {quality.other >= 0.005 && (
               <li className="ql-row">
                 <span className="ql-dot" style={{ background: '#f97316' }} />
                 <span className="ql-pct ql-other">{Math.round(quality.other * 100)}%</span>
-                <span className="ql-label">other</span>
+                <span className="ql-label">non-preferred</span>
               </li>
             )}
           </ul>

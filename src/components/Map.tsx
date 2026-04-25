@@ -591,6 +591,45 @@ function RecenterButton({ currentLocation }: { currentLocation: { lat: number; l
 }
 
 /**
+ * Re-fit-to-route button. Visible only when a route is set. Single click
+ * snaps the camera back to the route's bounds. Rescue button for the
+ * "I zoomed in or panned away and lost my route" scenario surfaced in
+ * the 2026-04-25 UX walkthrough — the most common workflow that
+ * otherwise leaves a first-time user stranded.
+ */
+function FitRouteButton({ route }: { route: Route | null }) {
+  const map = useMap()
+  if (!route || route.coordinates.length < 2) return null
+  return (
+    <button
+      className="fit-route-btn"
+      title="Re-fit map to your route"
+      aria-label="Re-fit map to your route"
+      onClick={() => {
+        const bounds = L.latLngBounds(route.coordinates.map(([lat, lng]) => [lat, lng]))
+        const isMobile = window.innerWidth < 768
+        const paddingTopLeft: [number, number] = isMobile ? [40, 100] : [360, 40]
+        const paddingBottomRight: [number, number] = isMobile ? [40, Math.round(window.innerHeight * 0.38)] : [40, 40]
+        map.fitBounds(bounds, { paddingTopLeft, paddingBottomRight, animate: true })
+      }}
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path
+          d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"
+          stroke="#1f2937" strokeWidth="2" strokeLinecap="round" fill="none"
+        />
+        <path
+          d="M8 14c1.5-1 2.5-2 3.5-3.5C12.5 9 13 8 15 8c1.5 0 2 .5 1 2.5"
+          stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"
+        />
+        <circle cx="8" cy="14" r="1.6" fill="#10b981" />
+        <circle cx="16" cy="10" r="1.6" fill="#ef4444" />
+      </svg>
+    </button>
+  )
+}
+
+/**
  * Show preferred infrastructure segments near the route as clickable suggestions.
  * Click a suggestion to add a waypoint at that point, forcing the route through it.
  */
@@ -832,6 +871,7 @@ export default function Map({
       )}
 
       <RecenterButton currentLocation={currentLocation} />
+      <FitRouteButton route={route} />
     </MapContainer>
   )
 }

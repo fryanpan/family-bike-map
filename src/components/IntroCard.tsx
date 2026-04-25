@@ -40,15 +40,16 @@ export default function IntroCard({ forced = false, onClose }: Props) {
     <div className="intro-backdrop" onClick={dismiss}>
       <div className="intro-card" onClick={(e) => e.stopPropagation()}>
         <div className="intro-header">
-          <h2 className="intro-title">Family bike routes</h2>
+          <h2 className="intro-title">Family Bike Map</h2>
           <button className="intro-close" onClick={dismiss} aria-label="Close">×</button>
         </div>
 
         <p className="intro-lede">
-          A bike route planner for parents — routes that match who
-          you're riding with, from a toddler on a balance bike to an
-          adult training ride. Walks your family past scary
-          intersections rather than routing you through them.
+          A bike route planner for parents biking with kids. Picks
+          routes that match your rider's level — from a toddler on a
+          balance bike to a confident kid in traffic — and walks your
+          family past scary intersections instead of routing you
+          through them.
         </p>
 
         <ol className="intro-steps">
