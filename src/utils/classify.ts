@@ -206,9 +206,37 @@ export interface RouteQuality {
   byLevel: Partial<Record<PathLevel, number>>
 }
 
+/** Haversine distance in metres. Inlined here to avoid a circular import
+ *  with clientRouter (which already imports from this file). */
+function segLengthM(coords: [number, number][]): number {
+  if (coords.length < 2) return 0
+  const R = 6_371_000
+  const toRad = (d: number) => (d * Math.PI) / 180
+  let total = 0
+  for (let i = 1; i < coords.length; i++) {
+    const [lat1, lng1] = coords[i - 1]
+    const [lat2, lng2] = coords[i]
+    const dLat = toRad(lat2 - lat1)
+    const dLng = toRad(lng2 - lng1)
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+    total += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  }
+  return total
+}
+
 /**
- * Fraction of route (by coordinate count) on preferred, other, and walking
- * infrastructure, plus a per-tier breakdown for the preferred portion.
+ * Fraction of route (by actual on-the-ground distance) on preferred, other,
+ * and walking infrastructure, plus a per-tier breakdown for the preferred
+ * portion.
+ *
+ * Distance-weighted, NOT coordinate-count-weighted: OSM way vertex density
+ * varies wildly (straight cycleways often have 4-5 coords for 800 m, while
+ * curvy residential streets pack 10+ coords into 200 m). Coord-count
+ * weighting systematically over-counts curvy non-preferred segments
+ * relative to straight preferred ones, producing a breakdown bar that
+ * doesn't match what the user visually sees on the map (Bryan reported
+ * 53% non-preferred on a route that looked mostly green, 2026-04-26).
  *
  * `byLevel` buckets preferred segments by the PROFILE_LEGEND item's `level`
  * (1a/1b/2a). The distribution plot in DirectionsPanel uses this to render
@@ -228,16 +256,17 @@ export function computeRouteQuality(
   let preferred = 0, other = 0, walking = 0
   const levelCounts: Partial<Record<PathLevel, number>> = {}
   for (const seg of segments) {
-    const count = Math.max(1, seg.coordinates.length - 1)
-    if (seg.isWalking) walking += count
+    const lengthM = segLengthM(seg.coordinates)
+    if (lengthM <= 0) continue
+    if (seg.isWalking) walking += lengthM
     else if (seg.itemName && preferredItemNames.has(seg.itemName)) {
-      preferred += count
+      preferred += lengthM
       // Prefer seg.pathLevel (populated in clientRouter from classifyEdge —
       // same source the map painter uses). Fall back to the legend-item
       // lookup for segments built before pathLevel was threaded through.
       const lvl = seg.pathLevel ?? (profileKey ? getLegendItem(seg.itemName, profileKey)?.level : undefined)
-      if (lvl) levelCounts[lvl] = (levelCounts[lvl] ?? 0) + count
-    } else other += count
+      if (lvl) levelCounts[lvl] = (levelCounts[lvl] ?? 0) + lengthM
+    } else other += lengthM
   }
   const total = preferred + other + walking || 1
   const byLevel: Partial<Record<PathLevel, number>> = {}
