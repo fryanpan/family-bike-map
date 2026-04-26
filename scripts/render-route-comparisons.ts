@@ -381,13 +381,17 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
     })
   }
 
-  function renderBarChart(opts: {
-    byMode: ModeStats[]
+  // Generic over the row shape so the multiplier chart (which uses a
+  // different per-mode object) can reuse the same renderer. Only `mode`
+  // and `counts` are read directly; the value comes from `accessor`.
+  function renderBarChart<G extends { mode: string; counts: Record<RouterKey, number> }>(opts: {
+    byMode: G[]
     yMax: number
+    yMin?: number  // defaults to 0; multiplier chart uses 1.0 to anchor "shortest = baseline"
     yTicks: number[]
     formatTick: (v: number) => string
     formatBar: (v: number) => string
-    accessor: (m: ModeStats, r: RouterKey) => number
+    accessor: (m: G, r: RouterKey) => number
     ariaLabel: string
   }): string {
     const W = 620, H = 280
@@ -399,7 +403,9 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
     const groupW = plotW / nG
     const innerPad = groupW * 0.12
     const barW = (groupW - innerPad * 2) / nR
-    const y = (v: number) => padT + plotH - (v / opts.yMax) * plotH
+    const yMin = opts.yMin ?? 0
+    const yRange = opts.yMax - yMin || 1
+    const y = (v: number) => padT + plotH - ((v - yMin) / yRange) * plotH
 
     const grid = opts.yTicks.map((t) => `
       <line x1="${padL}" x2="${W - padR}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/>
@@ -455,6 +461,28 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
     const distYMax = Math.ceil(maxDist * 2) / 2
     const distTicks = [0, distYMax * 0.25, distYMax * 0.5, distYMax * 0.75, distYMax]
 
+    // Distance multiplier per (mode, router) — router.distance / shortest router's
+    // distance for that mode. Shortest router = 1.00×; longer routers scale up.
+    // Communicates "the cost of taking the safer route" length-encoded so readers
+    // can preattentively compare across modes (Bertin's hierarchy: length is
+    // preattentive for quantitative comparison; color hue/value isn't).
+    type ModeMultipliers = { mode: string; mult: Record<RouterKey, number>; counts: Record<RouterKey, number> }
+    const byModeMult: ModeMultipliers[] = byMode.map((m) => {
+      const validDists = ROUTER_ORDER.map((r) => m.counts[r] > 0 ? m.dist[r] : Infinity)
+      const shortest = Math.min(...validDists)
+      const mult = {} as Record<RouterKey, number>
+      for (const r of ROUTER_ORDER) {
+        mult[r] = m.counts[r] > 0 && shortest > 0 ? m.dist[r] / shortest : 0
+      }
+      return { mode: m.mode, mult, counts: m.counts }
+    })
+    const maxMult = Math.max(1.1, ...byModeMult.flatMap((m) => ROUTER_ORDER.map((r) => m.mult[r])))
+    // Round up to next 0.1× for a clean tick grid.
+    const multYMax = Math.ceil(maxMult * 10) / 10
+    const multTicks: number[] = []
+    for (let t = 1.0; t <= multYMax + 1e-6; t += 0.1) multTicks.push(Math.round(t * 10) / 10)
+    if (multTicks[multTicks.length - 1] < multYMax) multTicks.push(multYMax)
+
     const tableBody = byMode.map((m) => {
       const prefCell = (r: RouterKey) => m.counts[r] > 0
         ? `<td class="metric-cell${r === 'client' ? ' group-pref' : ''}" style="color:${ROUTER_COLORS[r]}">${(m.pref[r] * 100).toFixed(0)}%</td>`
@@ -488,6 +516,16 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
       accessor: (m, r) => m.dist[r],
       ariaLabel: `Average distance in km by travel mode (${scopeKey})`,
     })
+    const multChart = renderBarChart({
+      byMode: byModeMult,
+      yMin: 1.0,
+      yMax: multYMax,
+      yTicks: multTicks,
+      formatTick: (v) => `${v.toFixed(1)}×`,
+      formatBar: (v) => v > 0 ? `${v.toFixed(2)}×` : '—',
+      accessor: (m, r) => m.mult[r],
+      ariaLabel: `Distance multiplier vs. shortest router by travel mode (${scopeKey})`,
+    })
 
     return `<div class="summary-section" data-city="${scopeKey}">
   <div class="card">
@@ -518,6 +556,11 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
       <h3>Avg distance (km) by mode</h3>
       <div class="sub">Lower = shorter route. Client may trade distance for safety.</div>
       ${distChart}
+    </div>
+    <div class="chart chart-wide">
+      <h3>Distance multiplier vs. shortest router by mode</h3>
+      <div class="sub">For each mode the shortest router sits at 1.00×; longer routers scale up. Quantifies "the cost of taking the safer route" — Client trades distance for preferred-path coverage.</div>
+      ${multChart}
     </div>
   </div>
 
@@ -652,6 +695,7 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
   .chart h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin: 0 0 6px; }
   .chart .sub { font-size: 11px; color: #6b7280; margin: -4px 0 8px; }
   .chart svg { width: 100%; height: auto; display: block; }
+  .chart.chart-wide { grid-column: 1 / -1; }
 
   .flag-banner { background: #fef3c7; color: #78350f; padding: 8px 12px; border-radius: 6px; margin: 14px 0; font-size: 13px; }
 
