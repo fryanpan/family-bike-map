@@ -387,7 +387,7 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
   function renderBarChart<G extends { mode: string; counts: Record<RouterKey, number> }>(opts: {
     byMode: G[]
     yMax: number
-    yMin?: number  // defaults to 0; multiplier chart uses 1.0 to anchor "shortest = baseline"
+    yMin?: number  // defaults to 0
     yTicks: number[]
     formatTick: (v: number) => string
     formatBar: (v: number) => string
@@ -461,27 +461,30 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
     const distYMax = Math.ceil(maxDist * 2) / 2
     const distTicks = [0, distYMax * 0.25, distYMax * 0.5, distYMax * 0.75, distYMax]
 
-    // Distance multiplier per (mode, router) — router.distance / shortest router's
-    // distance for that mode. Shortest router = 1.00×; longer routers scale up.
-    // Communicates "the cost of taking the safer route" length-encoded so readers
-    // can preattentively compare across modes (Bertin's hierarchy: length is
-    // preattentive for quantitative comparison; color hue/value isn't).
-    type ModeMultipliers = { mode: string; mult: Record<RouterKey, number>; counts: Record<RouterKey, number> }
-    const byModeMult: ModeMultipliers[] = byMode.map((m) => {
+    // Distance overhead per (mode, router): how many percent farther than
+    // the shortest router for that mode. Shortest = 0% (no overhead);
+    // longer routers go up. "0% baseline" reads as "matches the
+    // shortest" which is the honest interpretation — anchoring at 1.00×
+    // would visually exaggerate small ratio differences (a 5% bar at
+    // 1.0× truncated baseline looks 5× taller than a 1% bar; the real
+    // perceptual difference should be 5×, but only the ABSOLUTE 5pp).
+    // 0% baseline puts bar length proportional to the actual percentage
+    // gap, which is what readers visually map to "this much farther."
+    type ModeOverhead = { mode: string; overheadPct: Record<RouterKey, number>; counts: Record<RouterKey, number> }
+    const byModeOverhead: ModeOverhead[] = byMode.map((m) => {
       const validDists = ROUTER_ORDER.map((r) => m.counts[r] > 0 ? m.dist[r] : Infinity)
       const shortest = Math.min(...validDists)
-      const mult = {} as Record<RouterKey, number>
+      const overheadPct = {} as Record<RouterKey, number>
       for (const r of ROUTER_ORDER) {
-        mult[r] = m.counts[r] > 0 && shortest > 0 ? m.dist[r] / shortest : 0
+        overheadPct[r] = m.counts[r] > 0 && shortest > 0 ? (m.dist[r] / shortest - 1) * 100 : 0
       }
-      return { mode: m.mode, mult, counts: m.counts }
+      return { mode: m.mode, overheadPct, counts: m.counts }
     })
-    const maxMult = Math.max(1.1, ...byModeMult.flatMap((m) => ROUTER_ORDER.map((r) => m.mult[r])))
-    // Round up to next 0.1× for a clean tick grid.
-    const multYMax = Math.ceil(maxMult * 10) / 10
-    const multTicks: number[] = []
-    for (let t = 1.0; t <= multYMax + 1e-6; t += 0.1) multTicks.push(Math.round(t * 10) / 10)
-    if (multTicks[multTicks.length - 1] < multYMax) multTicks.push(multYMax)
+    const maxOverhead = Math.max(10, ...byModeOverhead.flatMap((m) => ROUTER_ORDER.map((r) => m.overheadPct[r])))
+    // Round up to next 10% so ticks are clean.
+    const overheadYMax = Math.ceil(maxOverhead / 10) * 10
+    const overheadTicks: number[] = []
+    for (let t = 0; t <= overheadYMax + 1e-6; t += 10) overheadTicks.push(t)
 
     const tableBody = byMode.map((m) => {
       const prefCell = (r: RouterKey) => m.counts[r] > 0
@@ -516,15 +519,14 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
       accessor: (m, r) => m.dist[r],
       ariaLabel: `Average distance in km by travel mode (${scopeKey})`,
     })
-    const multChart = renderBarChart({
-      byMode: byModeMult,
-      yMin: 1.0,
-      yMax: multYMax,
-      yTicks: multTicks,
-      formatTick: (v) => `${v.toFixed(1)}×`,
-      formatBar: (v) => v > 0 ? `${v.toFixed(2)}×` : '—',
-      accessor: (m, r) => m.mult[r],
-      ariaLabel: `Distance multiplier vs. shortest router by travel mode (${scopeKey})`,
+    const overheadChart = renderBarChart({
+      byMode: byModeOverhead,
+      yMax: overheadYMax,
+      yTicks: overheadTicks,
+      formatTick: (v) => `${v.toFixed(0)}%`,
+      formatBar: (v) => `+${v.toFixed(0)}%`,
+      accessor: (m, r) => m.overheadPct[r],
+      ariaLabel: `Percent farther than shortest router by travel mode (${scopeKey})`,
     })
 
     return `<div class="summary-section" data-city="${scopeKey}">
@@ -558,9 +560,9 @@ function renderIndexHtml(samples: Sample[], runDate: string, version: string): s
       ${distChart}
     </div>
     <div class="chart chart-wide">
-      <h3>Distance multiplier vs. shortest router by mode</h3>
-      <div class="sub">For each mode the shortest router sits at 1.00×; longer routers scale up. Quantifies "the cost of taking the safer route" — Client trades distance for preferred-path coverage.</div>
-      ${multChart}
+      <h3>How much farther than the shortest router, by mode</h3>
+      <div class="sub">For each mode the shortest router sits at 0% (no overhead); longer routers scale up by the percent of extra distance. Quantifies "the cost of taking the safer route" — Client trades distance for preferred-path coverage.</div>
+      ${overheadChart}
     </div>
   </div>
 
