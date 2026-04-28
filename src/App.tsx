@@ -377,6 +377,16 @@ export default function App() {
     const profile = profiles[profileKey]
     if (!profile) return
 
+    // Generation guard against async races. If the user switches modes
+    // (or otherwise triggers a new computeRoute) while this one is in
+    // flight, the older request must NOT setRoutes — its segments were
+    // classified under the previous mode and would land as stale state
+    // after the newer route resolved. Each call bumps the ref and
+    // captures the new id; setRoutes / setError checks the id is still
+    // current before mutating. (Bryan's 2026-04-28 launch-blocking
+    // 'colors don't match after switching modes' report.)
+    const myRequestId = ++routeRequestRef.current
+
     // When rerouteAroundSegment triggers a recompute it passes the
     // just-updated avoid set explicitly so we don't read a stale closure
     // value of `avoidedWayIds` here. Falls back to the state otherwise.
@@ -426,6 +436,10 @@ export default function App() {
             engine: 'client',
           }
 
+      // Bail out if a newer computeRoute has been kicked off while we
+      // were awaiting clientRoute — its setRoutes is the canonical state.
+      if (myRequestId !== routeRequestRef.current) return
+
       const initialRoutes = [combined]
       setRoutes(initialRoutes)
 
@@ -452,6 +466,10 @@ export default function App() {
         const segments = healSegmentGaps(rawSegments, preferredItemNames)
         return segments.length ? { ...result, segments } : result
       })).then((scored) => {
+        // Same generation guard as above — scoreRoute is also async and
+        // can resolve after a newer computeRoute supersedes us.
+        if (myRequestId !== routeRequestRef.current) return
+
         const fastest = Math.min(...scored.map((r) => r.summary.duration))
         const maxDuration = fastest * 1.75  // accept 75% longer for safer routes
 
@@ -474,11 +492,15 @@ export default function App() {
       })
 
     } catch (e) {
+      // Suppress superseded errors — a newer request is in flight; its
+      // result (or its own error) is the user-relevant signal.
+      if (myRequestId !== routeRequestRef.current) return
       const msg = (e as Error).message ?? 'Could not find a route'
       setError(msg)
       Sentry.captureException(e, { extra: { profileKey, start: `${start.lat},${start.lng}`, end: `${end.lat},${end.lng}` } })
     } finally {
-      setIsLoading(false)
+      // Only the LATEST request controls the loading spinner.
+      if (myRequestId === routeRequestRef.current) setIsLoading(false)
     }
   }
 
@@ -556,6 +578,11 @@ export default function App() {
   }
 
   const routeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Monotonic counter to detect superseded computeRoute calls. Bumped at
+  // the start of every call; each call captures its own id and bails on
+  // setRoutes/setError if the ref has moved past it. Prevents async
+  // races (mode-switch while previous compute is in flight).
+  const routeRequestRef = useRef(0)
 
   function debouncedComputeRoute(wps: Array<{ lat: number; lng: number }>) {
     if (routeDebounceRef.current) clearTimeout(routeDebounceRef.current)
