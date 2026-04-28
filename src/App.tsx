@@ -46,7 +46,6 @@ type UiState = 'search' | 'place-detail' | 'routing'
 // place card. The full Place (with geocoded lat/lng from Nominatim) is
 // persisted in localStorage so subsequent sessions have exact coords.
 const STORAGE_KEY = 'bike-route-profiles'
-const CUSTOM_PREFERRED_KEY = 'bike-route-custom-preferred'
 const TRAVEL_MODE_KEY = 'bike-route-travel-mode'
 const HOME_KEY = 'bike-route-home'
 const SCHOOL_KEY = 'bike-route-school'
@@ -93,48 +92,31 @@ function saveProfiles(profiles: ProfileMap): void {
   } catch { /* ignore */ }
 }
 
-function setsEqual(a: Set<string>, b: Set<string>): boolean {
-  if (a.size !== b.size) return false
-  for (const item of a) if (!b.has(item)) return false
-  return true
-}
-
-/** Read initial profile + preferred items from URL params, then localStorage, then defaults. */
-function getInitialState(): { profileKey: string; preferredItems: Set<string>; showOtherPaths: boolean } {
+/** Read initial profile from URL params, then localStorage, then default.
+ *  Custom preferences (via ?preferred= URL param or CUSTOM_PREFERRED_KEY
+ *  localStorage) are no longer supported — the legend UI to mutate them
+ *  was removed pre-launch and the persistence path was a source of stale-
+ *  state bugs across mode switches (2026-04-28). preferredItemNames is
+ *  now always derived from the active profile. */
+function getInitialState(): { profileKey: string; showOtherPaths: boolean } {
   const params = new URLSearchParams(window.location.search)
   const modeParam = params.get('travelMode')
-  const preferredParam = params.get('preferred')
   const showOtherParam = params.get('showOther')
 
   const showOtherPaths = showOtherParam === '1'
 
-  // URL preferred param takes top priority
-  if (preferredParam !== null) {
-    const items = new Set(preferredParam.split(',').filter(Boolean))
-    const profile = (modeParam && DEFAULT_PROFILES[modeParam]) ? modeParam : 'kid-starting-out'
-    return { profileKey: profile, preferredItems: items, showOtherPaths }
-  }
-
-  // URL travel mode param (no custom preferred)
   if (modeParam && DEFAULT_PROFILES[modeParam]) {
-    return { profileKey: modeParam, preferredItems: getDefaultPreferredItems(modeParam), showOtherPaths }
+    return { profileKey: modeParam, showOtherPaths }
   }
 
-  // Fall back to localStorage
   try {
     const savedMode = localStorage.getItem(TRAVEL_MODE_KEY)
-    const savedCustom = localStorage.getItem(CUSTOM_PREFERRED_KEY)
-    if (savedCustom) {
-      const items = new Set(JSON.parse(savedCustom) as string[])
-      const profile = (savedMode && DEFAULT_PROFILES[savedMode]) ? savedMode : 'kid-starting-out'
-      return { profileKey: profile, preferredItems: items, showOtherPaths }
-    }
     if (savedMode && DEFAULT_PROFILES[savedMode]) {
-      return { profileKey: savedMode, preferredItems: getDefaultPreferredItems(savedMode), showOtherPaths }
+      return { profileKey: savedMode, showOtherPaths }
     }
   } catch { /* ignore */ }
 
-  return { profileKey: 'kid-starting-out', preferredItems: getDefaultPreferredItems('kid-starting-out'), showOtherPaths }
+  return { profileKey: 'kid-starting-out', showOtherPaths }
 }
 
 /** Resolve the user's current location as a Place (async, returns null on failure). */
@@ -163,8 +145,14 @@ export default function App() {
 
   const initialState = getInitialState()
   const [selectedProfile, setSelectedProfile] = useState(initialState.profileKey)
-  const [preferredItemNames, setPreferredItemNames] = useState<Set<string>>(
-    () => initialState.preferredItems
+  // preferredItemNames is now derived from the active profile — custom
+  // per-item toggling was removed 2026-04-28 (no UX surface, persistence
+  // path was a stale-state-bug vector across mode switches). Memoized so
+  // referential equality holds across re-renders that don't change the
+  // profile, avoiding spurious cascades through downstream consumers.
+  const preferredItemNames = useMemo(
+    () => getDefaultPreferredItems(selectedProfile),
+    [selectedProfile],
   )
   const [showOtherPaths, setShowOtherPaths] = useState(initialState.showOtherPaths)
 
@@ -315,18 +303,11 @@ export default function App() {
     setIdbReady(true)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Derived: has the user customized their travel mode's preferred path types?
-  const isCustomTravelMode = !setsEqual(preferredItemNames, getDefaultPreferredItems(selectedProfile))
-
   // Sync URL params and localStorage on every state change
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     params.set('travelMode', selectedProfile)
-    if (isCustomTravelMode) {
-      params.set('preferred', [...preferredItemNames].join(','))
-    } else {
-      params.delete('preferred')
-    }
+    params.delete('preferred')  // legacy URL param, no longer honored
     if (showOtherPaths) {
       params.set('showOther', '1')
     } else {
@@ -336,36 +317,25 @@ export default function App() {
 
     try {
       localStorage.setItem(TRAVEL_MODE_KEY, selectedProfile)
-      if (isCustomTravelMode) {
-        localStorage.setItem(CUSTOM_PREFERRED_KEY, JSON.stringify([...preferredItemNames]))
-      } else {
-        localStorage.removeItem(CUSTOM_PREFERRED_KEY)
-      }
+      // Garbage-collect the legacy custom-prefs key from prior versions —
+      // some users have stale state from when the persistence path
+      // existed. One-shot cleanup; safe to keep indefinitely.
+      localStorage.removeItem('bike-route-custom-preferred')
     } catch { /* ignore */ }
-  }, [selectedProfile, preferredItemNames, isCustomTravelMode, showOtherPaths])
+  }, [selectedProfile, showOtherPaths])
 
   useEffect(() => {
     saveProfiles(profiles)
   }, [profiles])
 
-  // Re-route when preferred items change so costing reflects the new preferences.
-  const preferencesMountedRef = useRef(false)
-  useEffect(() => {
-    if (!preferencesMountedRef.current) { preferencesMountedRef.current = true; return }
-    if (startPoint && endPoint) void computeRoute(startPoint, endPoint, selectedProfile, waypoints)
-  }, [preferredItemNames]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  function moveToPreferred(name: string) {
-    setPreferredItemNames((prev) => new Set([...prev, name]))
-  }
-
-  function moveToOther(name: string) {
-    setPreferredItemNames((prev) => {
-      const next = new Set(prev)
-      next.delete(name)
-      return next
-    })
-  }
+  // Note: the prior 'auto-recompute when preferredItemNames changes'
+  // useEffect was removed 2026-04-28. preferredItemNames is now derived
+  // from selectedProfile (no per-item customization), so it can only
+  // change as a consequence of a mode switch — and handleProfileChange
+  // already kicks off the recompute synchronously. The redundant effect
+  // produced double-computeRoute calls on every mode switch, racing with
+  // each other (the routeRequestRef generation guard handled the race
+  // but the simpler path is just to not double-compute).
 
   async function computeRoute(
     start: Place,
@@ -553,16 +523,18 @@ export default function App() {
 
   function handleProfileChange(key: string) {
     setSelectedProfile(key)
-    // Reset preferred items to this travel mode's defaults
-    setPreferredItemNames(getDefaultPreferredItems(key))
+    // preferredItemNames is now derived from selectedProfile via useMemo,
+    // so it auto-updates on the next render. No setPreferredItemNames
+    // call needed — that was a vestige of the now-removed custom-prefs
+    // path.
+    //
     // Clear any existing routes BEFORE recomputing — segments classified
     // under the previous mode are stale (their itemName depends on the
     // mode-aware classifyOsmTagsToItem, so they paint with the wrong
     // colors against the new mode's preferredItemNames). computeRoute
     // also clears internally on entry, but doing it here covers the
     // edge case where computeRoute isn't called (no start/end yet) and
-    // the brief render window between setPreferredItemNames and
-    // computeRoute's internal setRoutes([]).
+    // any brief render window before the recompute fires.
     setRoutes([])
     setSelectedRouteIndex(0)
     if (startPoint && endPoint) computeRoute(startPoint, endPoint, key, waypoints)
@@ -734,7 +706,6 @@ export default function App() {
               profiles={profiles}
               selected={selectedProfile}
               onSelect={handleProfileChange}
-              isCustomTravelMode={isCustomTravelMode}
             />
           </div>
         )}
@@ -838,8 +809,7 @@ export default function App() {
                     profiles={profiles}
                     selected={selectedProfile}
                     onSelect={handleProfileChange}
-                    isCustomTravelMode={isCustomTravelMode}
-                  />
+                        />
                   <DirectionsPanel
                     route={route}
                     onClose={backToSearch}

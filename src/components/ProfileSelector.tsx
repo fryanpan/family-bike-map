@@ -33,10 +33,9 @@ interface Props {
   profiles: ProfileMap
   selected: string
   onSelect: (key: string) => void
-  isCustomTravelMode: boolean
 }
 
-export default function ProfileSelector({ profiles, selected, onSelect, isCustomTravelMode }: Props) {
+export default function ProfileSelector({ profiles, selected, onSelect }: Props) {
   const settings = useAdminSettings()
   // Training mode is hidden unless the user opts in via Admin Tools →
   // Settings. If the current selected profile is training, keep it in
@@ -51,7 +50,7 @@ export default function ProfileSelector({ profiles, selected, onSelect, isCustom
         {visibleEntries.map(([key, profile]) => (
           <button
             key={key}
-            className={`profile-chip${selected === key && !isCustomTravelMode ? ' selected' : ''}`}
+            className={`profile-chip${selected === key ? ' selected' : ''}`}
             onClick={() => onSelect(key)}
             title={`${profile.label}\n${profile.description}`}
           >
@@ -62,17 +61,6 @@ export default function ProfileSelector({ profiles, selected, onSelect, isCustom
             </span>
           </button>
         ))}
-        {isCustomTravelMode && (
-          <button
-            className="profile-chip profile-chip-custom selected"
-            title="Custom travel mode — you have edited the preferred path types"
-            onClick={() => onSelect(selected)}
-          >
-            <span className="profile-chip-icon">
-              <span className="profile-chip-emoji" style={{ fontSize: 14 }}>✎</span>
-            </span>
-          </button>
-        )}
       </div>
     </div>
   )
