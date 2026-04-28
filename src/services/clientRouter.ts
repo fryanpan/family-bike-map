@@ -16,7 +16,7 @@ import {
   tileKey,
   classifyOsmTagsToItem,
 } from './overpass'
-import { buildSegments, healSegmentGaps, getDisplayPathLevel } from '../utils/classify'
+import { buildSegments, healSegmentGaps, getLegendItem } from '../utils/classify'
 import { classifyEdge } from '../utils/lts'
 import { MODE_RULES, applyModeRule, getEffectiveModeRule } from '../data/modes'
 import { loadSettings } from './adminSettings'
@@ -485,14 +485,8 @@ export function routeOnGraph(
     coord: [number, number]
     isWalking?: boolean
     wayId?: number  // null on the first point (no inbound edge)
-    pathLevel?: import('../utils/lts').PathLevel
   }
   const classified: ClassifiedPoint[] = []
-  // Track per-coord pathLevel so we can attach it to the built segments
-  // below (segments are collapsed by itemName, but we need a representative
-  // pathLevel so downstream painters use the same classification as the
-  // overlay — single source of truth).
-  const pathLevelByCoord = new Map<string, import('../utils/lts').PathLevel>()
 
   for (let i = 0; i < nodes.length; i++) {
     if (i === 0) {
@@ -509,20 +503,12 @@ export function routeOnGraph(
       if (link.data.isWalking) walkingDistance += link.data.distance
 
       const itemName = classifyOsmTagsToItem(link.data.wayTags, profileKey, regionRules)
-      const { pathLevel: routingPathLevel } = classifyEdge(link.data.wayTags)
-      // Display level — canonical via the legend item when one matches,
-      // else fall back to classifyEdge's tier. This is what painter, bar,
-      // overlay, and legend all derive their colors from. Routing cost
-      // decisions in applyModeRule still read classifyEdge directly.
-      const pathLevel = getDisplayPathLevel(itemName, profileKey, routingPathLevel)
       classified.push({
         itemName,
         coord: [currNode.data.lat, currNode.data.lng],
         isWalking: link.data.isWalking,
         wayId: link.data.wayId,
-        pathLevel,
       })
-      pathLevelByCoord.set(`${currNode.data.lat},${currNode.data.lng}`, pathLevel)
     } else {
       classified.push({ itemName: null, coord: [currNode.data.lat, currNode.data.lng] })
     }
@@ -559,14 +545,17 @@ export function routeOnGraph(
       const found = wayIdsByCoord.get(k)
       if (found) for (const id of found) wayIds.add(id)
     }
-    // pathLevel — use the representative level from any coord on this
-    // segment. Within a segment itemName is constant, so pathLevel is
-    // effectively constant too; pick the first one we find.
-    let pathLevel: import('../utils/lts').PathLevel | undefined
-    for (const coord of seg.coordinates) {
-      const found = pathLevelByCoord.get(`${coord[0]},${coord[1]}`)
-      if (found) { pathLevel = found; break }
-    }
+    // pathLevel — derive directly from the legend item for this segment's
+    // itemName. The legend (PROFILE_LEGEND) is the source of truth for
+    // display tiers. Previously we read this from a per-coord cache, but
+    // buildSegments uses the prior segment's last coord as the bridge for
+    // visual continuity — so every segment after the first inherited the
+    // previous segment's pathLevel. Living streets (1b green) rendered
+    // pink (2b) because the preceding Quiet street segment's pathLevel
+    // leaked through. (Bryan's launch-blocking 2026-04-28 colors-don't-
+    // match-after-mode-switch report; root-cause found 2026-04-29.)
+    const legendItem = seg.itemName ? getLegendItem(seg.itemName, profileKey) : undefined
+    const pathLevel = legendItem?.level
     return { ...base, wayIds: [...wayIds], pathLevel }
   })
   const segments = healSegmentGaps(restoredSegments, preferredItemNames)
