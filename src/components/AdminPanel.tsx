@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { CITY_PRESETS, scanCity, reclassifyGroups } from '../services/audit'
+import { CITY_PRESETS, scanCity } from '../services/audit'
 import type { CityPreset } from '../services/audit'
 import { saveScan, loadScan } from '../services/auditCache'
 import AuditGroupDetail from './AuditGroupDetail'
@@ -7,8 +7,6 @@ import AuditSamplesTab from './AuditSamplesTab'
 import AdminSettingsTab from './AdminSettingsTab'
 import AdminBenchmarksTab from './AdminBenchmarksTab'
 import type { CityScan, AuditGroup } from '../services/audit'
-import { fetchRules } from '../services/rules'
-import type { RegionRules } from '../services/rules'
 
 type OuterTab = 'audit' | 'settings' | 'benchmarks'
 type InnerTab = 'samples' | 'groups'
@@ -96,23 +94,12 @@ export default function AdminPanel({ onClose, initialTab }: Props) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const [filterText, setFilterText] = useState('')
 
-  const [rules, setRulesRaw] = useState<RegionRules>({ rules: [], legendItems: [] })
-
-  const setRules = useCallback((newRules: RegionRules) => {
-    setRulesRaw(newRules)
-    setScan((prev) => prev ? reclassifyGroups(prev, newRules.rules) : prev)
-  }, [])
-
   useEffect(() => {
     let cancelled = false
-    Promise.all([
-      loadScan(selectedCity).catch(() => null),
-      fetchRules(selectedCity.toLowerCase()).catch(() => ({ rules: [], legendItems: [] } as RegionRules)),
-    ]).then(([cached, r]) => {
+    loadScan(selectedCity).catch(() => null).then((cached) => {
       if (cancelled) return
-      setRulesRaw(r)
       if (cached && Array.isArray(cached.groups) && cached.groups.every((g: AuditGroup) => typeof g.totalDistanceKm === 'number')) {
-        setScan(r.rules.length > 0 ? reclassifyGroups(cached, r.rules) : cached)
+        setScan(cached)
       }
     })
     return () => { cancelled = true }
@@ -122,7 +109,6 @@ export default function AdminPanel({ onClose, initialTab }: Props) {
     setSelectedCity(city)
     setScan(null)
     setProgress(null)
-    setRulesRaw({ rules: [], legendItems: [] })
   }, [])
 
   async function handleScan() {
@@ -313,12 +299,7 @@ export default function AdminPanel({ onClose, initialTab }: Props) {
                       </div>
                     </div>
                     {expandedGroup === i && (
-                      <AuditGroupDetail
-                        group={g}
-                        region={selectedCity.toLowerCase()}
-                        rules={rules}
-                        onRulesChange={setRules}
-                      />
+                      <AuditGroupDetail group={g} />
                     )}
                   </div>
                 ))}
@@ -327,7 +308,7 @@ export default function AdminPanel({ onClose, initialTab }: Props) {
           )}
 
           {innerTab === 'samples' && (
-            <AuditSamplesTab scan={scan} regionRules={rules.rules} />
+            <AuditSamplesTab scan={scan} />
           )}
         </>
       )}

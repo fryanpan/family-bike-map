@@ -409,8 +409,6 @@ export function getDisplayPathLevel(
 // `use_roads` from the user's preferred items. It has been removed: the main
 // app no longer uses Valhalla, and the client router reads preferences
 // directly from the preferred-item set without needing a costing translation.
-// If you need this for benchmarking against Valhalla, see
-// src/services/benchmark/valhalla.ts.
 
 // THE rough-surface list. Binary: a surface is either rough or it isn't.
 // Rough surfaces are hidden from the overlay AND carry the 5× routing

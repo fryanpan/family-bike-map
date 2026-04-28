@@ -23,10 +23,10 @@ custom_domain = true
 SENTRY_ENV = "production"
 APP_VERSION = "0.0.0-local"
 
-[[kv_namespaces]]
-binding = "CLASSIFICATION_RULES"
-id = "7245fe9209344518a731ee8569ea3fcc"
-preview_id = "3ad0d31a965a45da89ad16c1ef655d0a"
+# CLASSIFICATION_RULES KV binding removed 2026-04-28 with /api/rules/:region.
+# The Cloudflare KV namespace itself can be deleted via the Cloudflare
+# dashboard once any historical data is no longer needed; leaving it
+# unbound here is safe.
 
 [[d1_databases]]
 binding = "ROUTE_LOGS"

@@ -3,7 +3,6 @@ import { formatDistance, formatDuration } from '../utils/format'
 import { computeRouteQuality, OTHER_COLOR, WALKING_COLOR } from '../utils/classify'
 import { SIMPLE_TIERS, colorForLevel } from './SimpleLegend'
 import { useAdminSettings } from '../services/adminSettings'
-import SegmentFeedback from './SegmentFeedback'
 import type { Route, ValhallaManeuver, LatLng } from '../utils/types'
 
 // Valhalla maneuver type → direction icon
@@ -281,11 +280,9 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
           <button className="stop-nav-btn" onClick={stopNav}>
             Stop Navigation
           </button>
-
-          <SegmentFeedback
-            currentLocation={currentLocation ?? null}
-            travelMode={travelMode ?? 'unknown'}
-          />
+          {/* Per-segment 👍/👎 feedback removed 2026-04-28 — Userback widget
+              covers user-initiated feedback; the segment-feedback channel
+              wasn't useful enough to maintain a write surface. */}
         </div>
       ) : (
         <>

@@ -30,7 +30,6 @@ import {
   computeRouteQuality,
 } from './utils/classify'
 import { CITY_PRESETS } from './services/audit'
-import { fetchRules } from './services/rules'
 import type { ClassificationRule } from './services/rules'
 // Chunk A shelved: BERLIN_PROFILE import removed. See note above.
 import RouteList from './components/RouteList'
@@ -272,8 +271,11 @@ export default function App() {
     return params.has('admin')
   })
 
-  // Region classification rules (fetched from KV based on map viewport)
-  const [regionRules, setRegionRules] = useState<ClassificationRule[]>([])
+  // Region classification rules — kept as the parameter shape flowing
+  // through the classifier / router. No backing fetch right now (the
+  // KV-backed /api/rules/:region endpoint was removed 2026-04-28); future
+  // code-side region profiles will populate this from static data.
+  const [regionRules] = useState<ClassificationRule[]>([])
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
 
   // Chunk A (Layer 2 Berlin overlay) shelved — always null for now.
@@ -293,8 +295,6 @@ export default function App() {
     const region = match ? match.name.toLowerCase() : null
     if (region && region !== activeRegion) {
       setActiveRegion(region)
-      fetchRules(region).then((r) => setRegionRules(r.rules))
-        .catch(() => { /* ignore */ })
     }
   }, [currentLocation, activeRegion])
 

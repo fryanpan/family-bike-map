@@ -1,13 +1,14 @@
 // Default rider profiles — the 5 ride modes shown in the UX picker.
 //
 // This is the source of truth for mode metadata (label, description, emoji,
-// editability) and is consumed by both the main web app and the benchmark.
+// editability).
 //
-// `costingOptions` retains the Valhalla-shaped fields so the benchmark
-// (src/services/benchmark/valhalla.ts) can still drive a Valhalla request
-// for comparison purposes. The main app does NOT use these fields — it
-// reads mode → routing behavior via classify.ts PROFILE_LEGEND and the
-// per-mode tables in clientRouter.ts.
+// `costingOptions` retains the Valhalla-shaped fields as historical artefacts
+// from when the app routed through Valhalla. The main app does NOT use these
+// fields — it reads mode → routing behavior via classify.ts PROFILE_LEGEND and
+// the per-mode tables in clientRouter.ts. The fields can be removed once we
+// confirm nothing else (e.g. saved-profile JSON shapes in IndexedDB) depends
+// on them.
 //
 // See docs/product/plans/2026-04-13-three-layer-scoring-plan.md for the
 // 5-mode rationale and Layer 3 plans.

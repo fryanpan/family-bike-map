@@ -1,15 +1,27 @@
 /**
  * Unified Cloudflare Worker for Berlin Bike Route Finder
  *
- * Handles API routes (Valhalla proxy, Nominatim proxy, etc.).
- * Static assets are served automatically by the [assets] binding for non-API paths.
+ * Handles API routes (Overpass / Mapillary / Street View / Nominatim
+ * proxies + D1 route logging). Static assets are served automatically by
+ * the [assets] binding for non-API paths.
  *
  * Routes:
- *   /api/valhalla/*   → proxy to valhalla1.openstreetmap.de
- *   /api/nominatim/*  → proxy to nominatim.openstreetmap.org
- *   /api/overpass     → proxy to overpass-api.de with 30-day edge cache
- *   /api/mapillary/*  → proxy to graph.mapillary.com with server-injected
- *                       token + 7-day edge cache
+ *   /api/overpass        → proxy to overpass-api.de with 30-day edge cache
+ *   /api/mapillary/*     → proxy to graph.mapillary.com with server-injected
+ *                          token + 7-day edge cache
+ *   /api/streetview      → proxy to Google Street View Static with server-
+ *                          injected key + 7-day edge cache
+ *   /api/nominatim/*     → proxy to nominatim.openstreetmap.org
+ *   /api/route-log POST  → write a routing event to D1
+ *
+ * Endpoints removed for the public launch (2026-04-28):
+ *   /api/valhalla/*    — unused (benchmark scripts hit upstream directly)
+ *   /api/brouter       — unused (admin compare-links go to brouter.de directly)
+ *   /api/rules/:region — unauthenticated KV write surface; never made it
+ *                        useful in practice; classifier rules now compile-time only
+ *   /api/feedback      — replaced by Userback widget
+ *   /api/route-logs GET — exposed every logged trip unauthenticated;
+ *                         inspection now via `wrangler d1 execute`
  *
  * Error reporting goes to the same Sentry project as the frontend, with
  * `tags.runtime = 'worker'` so the two stacks are filterable but cross-
@@ -21,14 +33,6 @@ import * as Sentry from '@sentry/cloudflare'
 // Cloudflare Workers extends the standard CacheStorage interface with a `default`
 // cache instance. This is not in the DOM lib types, so we declare it here.
 declare const caches: CacheStorage & { default: Cache }
-
-// Minimal KV type — the full @cloudflare/workers-types package isn't in the
-// tsconfig `types` array (this is a Vite-managed project), so we declare the
-// subset we actually use.
-interface KVNamespace {
-  get(key: string): Promise<string | null>
-  put(key: string, value: string): Promise<void>
-}
 
 interface D1Database {
   prepare(query: string): D1PreparedStatement
@@ -51,7 +55,6 @@ type Env = {
   APP_VERSION?: string
   /** 'production' on prod; absent or 'development' for `wrangler dev`. */
   SENTRY_ENV?: string
-  CLASSIFICATION_RULES: KVNamespace
   ROUTE_LOGS: D1Database
   ASSETS: { fetch: (request: Request) => Promise<Response> }
 }
@@ -60,41 +63,6 @@ const handler = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
     const path = url.pathname
-
-    // ── Valhalla proxy ────────────────────────────────────────────────
-    if (path.startsWith('/api/valhalla/')) {
-      const upstream = path.replace(/^\/api\/valhalla/, '')
-      const target = `https://valhalla1.openstreetmap.de${upstream}${url.search}`
-
-      const body = request.method !== 'GET' ? await request.arrayBuffer() : undefined
-
-      const resp = await fetch(target, {
-        method: request.method,
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      })
-
-      return new Response(await resp.arrayBuffer(), {
-        status: resp.status,
-        headers: { 'Content-Type': resp.headers.get('Content-Type') ?? 'application/json' },
-      })
-    }
-
-    // ── BRouter proxy ──────────────────────────────────────────────────
-    if (path === '/api/brouter') {
-      const target = `https://brouter.de/brouter${url.search}`
-      const resp = await fetch(target, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'FamilyBikeMap/0.1 (github.com/fryanpan/family-bike-map)',
-          'Accept': 'application/json',
-        },
-      })
-      return new Response(await resp.arrayBuffer(), {
-        status: resp.status,
-        headers: { 'Content-Type': resp.headers.get('Content-Type') ?? 'application/json' },
-      })
-    }
 
     // ── Overpass proxy with Cloudflare edge cache ─────────────────────
     // Proxying through the Worker (same-origin) avoids iOS content blockers
@@ -328,52 +296,6 @@ const handler = {
       })
     }
 
-    // ── Segment feedback ────────────────────────────────────────────
-    if (path === '/api/segment-feedback' && request.method === 'POST') {
-      return handleSegmentFeedback(request)
-    }
-
-    // ── Classification rules (KV-backed) ──────────────────────────────
-    const rulesMatch = path.match(/^\/api\/rules\/([a-zA-Z0-9_-]+)$/)
-    if (rulesMatch) {
-      const region = rulesMatch[1]
-      const kvKey = `rules:${region}`
-
-      if (request.method === 'GET') {
-        const value = await env.CLASSIFICATION_RULES.get(kvKey)
-        const body = value ?? JSON.stringify({ rules: [], legendItems: [] })
-        return new Response(body, {
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-
-      if (request.method === 'PUT') {
-        let body: unknown
-        try {
-          body = await request.json()
-        } catch {
-          return Response.json({ error: 'Invalid JSON' }, { status: 400 })
-        }
-
-        if (
-          typeof body !== 'object' ||
-          body === null ||
-          !Array.isArray((body as Record<string, unknown>).rules) ||
-          !Array.isArray((body as Record<string, unknown>).legendItems)
-        ) {
-          return Response.json(
-            { error: 'Body must contain "rules" (array) and "legendItems" (array)' },
-            { status: 400 },
-          )
-        }
-
-        await env.CLASSIFICATION_RULES.put(kvKey, JSON.stringify(body))
-        return Response.json({ ok: true })
-      }
-
-      return Response.json({ error: 'Method not allowed' }, { status: 405 })
-    }
-
     // ── Route logging (D1) ───────────────────────────────────────────
     if (path === '/api/route-log' && request.method === 'POST') {
       try {
@@ -399,14 +321,6 @@ const handler = {
       }
     }
 
-    if (path === '/api/route-logs' && request.method === 'GET') {
-      const limit = parseInt(url.searchParams.get('limit') ?? '50')
-      const result = await env.ROUTE_LOGS.prepare(
-        'SELECT * FROM route_logs ORDER BY timestamp DESC LIMIT ?'
-      ).bind(limit).all()
-      return Response.json(result.results)
-    }
-
     // ── All other paths: serve static assets via [assets] binding ─────
     return env.ASSETS.fetch(request)
   },
@@ -426,28 +340,3 @@ export default Sentry.withSentry(
   handler,
 )
 
-/**
- * Handle segment feedback submitted during navigation.
- * For now, logs to console. In production this would persist to D1/KV.
- */
-async function handleSegmentFeedback(request: Request): Promise<Response> {
-  let body: Record<string, unknown>
-  try {
-    body = await request.json()
-  } catch {
-    return Response.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
-
-  const { lat, lng, feedbackType, detail, travelMode, routeLogId } = body
-
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
-    return Response.json({ error: 'lat and lng are required numbers' }, { status: 400 })
-  }
-  if (typeof feedbackType !== 'string') {
-    return Response.json({ error: 'feedbackType is required' }, { status: 400 })
-  }
-
-  console.log('[SegmentFeedback]', { lat, lng, feedbackType, detail, travelMode, routeLogId })
-
-  return Response.json({ status: 'recorded' }, { status: 201 })
-}

@@ -1,5 +1,4 @@
 import { classifyOsmTagsToItem } from './overpass'
-import type { ClassificationRule } from './rules'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -271,17 +270,3 @@ export async function scanCity(
   }
 }
 
-/**
- * Re-evaluate group classifications against the current rules.
- * Uses the first sample's tags as representative for the group.
- */
-export function reclassifyGroups(scan: CityScan, regionRules: ClassificationRule[]): CityScan {
-  const groups = scan.groups.map((g) => {
-    const tags = g.samples[0]?.tags
-    if (!tags) return g
-    const classification = classifyOsmTagsToItem(tags, 'toddler', regionRules)
-    if (classification === g.classification) return g
-    return { ...g, classification }
-  })
-  return { ...scan, groups }
-}
