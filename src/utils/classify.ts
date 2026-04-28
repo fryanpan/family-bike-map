@@ -318,8 +318,17 @@ export function healSegmentGaps(
     const nextPreferred = next.itemName !== null && preferredItemNames.has(next.itemName) && !next.isWalking
 
     if (prevPreferred && nextPreferred) {
-      // Heal: adopt the previous segment's classification
-      result[i] = { ...seg, itemName: prev.itemName }
+      // Heal: adopt the previous segment's classification, INCLUDING
+      // pathLevel. Previously we only copied itemName, which left a
+      // healed gap with itemName='Bike path' (1a) but pathLevel='3'
+      // (yellow). The map painter colors by pathLevel-when-preferred,
+      // so the gap rendered as a yellow sliver inside what visually
+      // should have been a continuous green segment. The bar's
+      // computeRouteQuality bucketed it under byLevel['3'] but the
+      // sliver was usually <0.5%, hiding from the labels — so users
+      // saw "yellow on the route polyline that doesn't appear in the
+      // bar." (Bryan, 2026-04-28 launch-blocking bug report.)
+      result[i] = { ...seg, itemName: prev.itemName, pathLevel: prev.pathLevel }
     }
   }
 
