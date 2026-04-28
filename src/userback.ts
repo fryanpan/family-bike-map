@@ -1,7 +1,8 @@
 // Userback widget — user-initiated feedback (bug reports + screenshots).
 // Loaded async from the Userback CDN so it doesn't block app boot and
-// adds no weight to the main bundle. Gated to the prod hostname so it
-// never appears on localhost/dev.
+// adds no weight to the main bundle. Host gating happens in the
+// Userback dashboard's allowed-domains list (single source of truth);
+// no parallel hostname allowlist in the client code.
 
 import { APP_VERSION } from './version'
 
@@ -20,7 +21,6 @@ export function initUserback() {
   const token = import.meta.env.VITE_USERBACK_TOKEN
   if (!token) return
   if (typeof window === 'undefined') return
-  if (location.hostname !== 'bike-map.fryanpan.com') return
   if (window.Userback) return
 
   // custom_data attaches to every feedback submission, so every bug
