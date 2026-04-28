@@ -533,6 +533,16 @@ export default function App() {
     setSelectedProfile(key)
     // Reset preferred items to this travel mode's defaults
     setPreferredItemNames(getDefaultPreferredItems(key))
+    // Clear any existing routes BEFORE recomputing — segments classified
+    // under the previous mode are stale (their itemName depends on the
+    // mode-aware classifyOsmTagsToItem, so they paint with the wrong
+    // colors against the new mode's preferredItemNames). computeRoute
+    // also clears internally on entry, but doing it here covers the
+    // edge case where computeRoute isn't called (no start/end yet) and
+    // the brief render window between setPreferredItemNames and
+    // computeRoute's internal setRoutes([]).
+    setRoutes([])
+    setSelectedRouteIndex(0)
     if (startPoint && endPoint) computeRoute(startPoint, endPoint, key, waypoints)
   }
 
