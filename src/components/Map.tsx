@@ -625,6 +625,10 @@ function RecenterButton({ engine, currentLocation }: {
   return (
     <button
       className="recenter-btn"
+      // The parent overlay wrapper sets pointer-events: none so map
+      // gestures fall through to the engine; this button needs to opt
+      // back in or it would be unclickable.
+      style={{ pointerEvents: 'auto' }}
       disabled={!currentLocation || !engine}
       title={currentLocation ? 'Center on current location' : 'Location not available'}
       aria-label="Center on current location"
@@ -649,6 +653,7 @@ function FitRouteButton({ engine, route }: { engine: MapEngine | null; route: Ro
   return (
     <button
       className="fit-route-btn"
+      style={{ pointerEvents: 'auto' }}
       title="Re-fit map to your route"
       aria-label="Re-fit map to your route"
       onClick={() => {
@@ -766,33 +771,46 @@ export default function Map(props: Props) {
 
   return (
     <MapEngineContext.Provider value={engine}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
-        {/* Bike-infra overlay reads the engine via context. */}
-        {engine && (
-          <BikeMapOverlay
-            enabled={overlayEnabled}
-            profileKey={profileKey}
-            preferredItemNames={preferredItemNames}
-            showOtherPaths={showOtherPaths}
-            hasRoute={!!route}
-            onStatusChange={onOverlayStatusChange}
-            regionRules={regionRules}
-          />
-        )}
+      {/* Outer wrapper hosts BOTH the engine's container and the React-
+          owned overlays as siblings. Don't render the React overlays
+          AS CHILDREN of the engine's container — Leaflet / Google
+          mutate that container's DOM and React's reconciliation can
+          fight with them. */}
+      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+        <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
-        {selectedSegment && engine && (
-          <SegmentPopupOverlay
-            selected={selectedSegment}
-            engine={engine}
-            profileKey={profileKey}
-            onClose={() => setSelectedSegment(null)}
-            onReroute={onRerouteAround}
-            onFlag={onFlagSegment}
-          />
-        )}
+        {/* React overlays (siblings, absolutely positioned over the
+            engine's container). pointer-events: none on the wrapper so
+            the engine still receives pan/zoom/click on empty regions;
+            individual overlays opt back in when they need clicks. */}
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+          {/* Bike-infra overlay reads the engine via context. */}
+          {engine && (
+            <BikeMapOverlay
+              enabled={overlayEnabled}
+              profileKey={profileKey}
+              preferredItemNames={preferredItemNames}
+              showOtherPaths={showOtherPaths}
+              hasRoute={!!route}
+              onStatusChange={onOverlayStatusChange}
+              regionRules={regionRules}
+            />
+          )}
 
-        <RecenterButton engine={engine} currentLocation={currentLocation} />
-        <FitRouteButton engine={engine} route={route} />
+          {selectedSegment && engine && (
+            <SegmentPopupOverlay
+              selected={selectedSegment}
+              engine={engine}
+              profileKey={profileKey}
+              onClose={() => setSelectedSegment(null)}
+              onReroute={onRerouteAround}
+              onFlag={onFlagSegment}
+            />
+          )}
+
+          <RecenterButton engine={engine} currentLocation={currentLocation} />
+          <FitRouteButton engine={engine} route={route} />
+        </div>
       </div>
     </MapEngineContext.Provider>
   )
