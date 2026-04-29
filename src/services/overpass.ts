@@ -2,7 +2,15 @@ import type { OsmWay } from '../utils/types'
 import { BAD_SURFACES, BAD_SMOOTHNESS, UNRIDEABLE_SURFACES } from '../utils/classify'
 import { classifyEdge } from '../utils/lts'
 import type { ClassificationRule } from './rules'
-import type { LatLngBounds } from 'leaflet'
+// Structural bounds — anything that exposes the four directions works
+// (Leaflet's L.LatLngBounds, our engine bounds, or a small literal in
+// tests). Keeps overpass.ts engine-agnostic.
+export interface BoundsLike {
+  getSouth(): number
+  getNorth(): number
+  getEast(): number
+  getWest(): number
+}
 import * as Sentry from '@sentry/react'
 import { loadTile as loadTileFromIdb, storeTile as storeTileToIdb } from './tileStore'
 
@@ -37,7 +45,7 @@ export function latLngToTile(lat: number, lng: number): { row: number; col: numb
 }
 
 /** All tile row/col pairs that intersect the given bounds. */
-export function getVisibleTiles(bounds: LatLngBounds): Array<{ row: number; col: number }> {
+export function getVisibleTiles(bounds: BoundsLike): Array<{ row: number; col: number }> {
   const minRow = Math.floor(bounds.getSouth() / TILE_DEGREES)
   const maxRow = Math.floor(bounds.getNorth() / TILE_DEGREES)
   const minCol = Math.floor(bounds.getWest() / TILE_DEGREES)
@@ -395,7 +403,7 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
  * Legacy single-viewport fetch kept for reference. Tiles are more efficient
  * because they are cached individually across pans.
  */
-export async function fetchBikeInfra(bounds: LatLngBounds): Promise<OsmWay[] | null> {
+export async function fetchBikeInfra(bounds: BoundsLike): Promise<OsmWay[] | null> {
   const bbox = {
     south: bounds.getSouth(),
     west: bounds.getWest(),

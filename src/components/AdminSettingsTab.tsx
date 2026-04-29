@@ -5,6 +5,8 @@ import { MODE_RULES } from '../data/modes'
 import type { RideMode } from '../data/modes'
 import { PATH_LEVELS } from '../utils/lts'
 import type { PathLevel } from '../utils/lts'
+import { readEnvKeys, resolveEngine } from '../services/mapEngine'
+import type { MapEngineKind } from '../services/mapEngine'
 
 // ── Path-type → category mapping (hardcoded from classifyOsmTagsToItem) ─────
 
@@ -91,8 +93,53 @@ export default function AdminSettingsTab() {
 
   const modes: RideMode[] = ['kid-starting-out', 'kid-confident', 'kid-traffic-savvy', 'carrying-kid', 'training']
 
+  // Engine availability is read from build-time env vars. If a key is
+  // missing the dropdown still lets the user pick the engine — the
+  // resolver falls back to leaflet-osm at mount time and warns in the
+  // console. We surface that here so Bryan sees whether the active
+  // build can actually render Google Maps without scrolling devtools.
+  const envKeys = readEnvKeys()
+  const resolvedEngine = resolveEngine(settings.mapEngine, envKeys)
+
+  function setMapEngine(kind: MapEngineKind): void {
+    setSettings({ ...settings, mapEngine: kind })
+  }
+
   return (
     <div className="admin-settings">
+      {/* ── Map rendering engine ───────────────────────────────────── */}
+      <section className="admin-section">
+        <h3>Map rendering engine</h3>
+        <label className="admin-num-field">
+          Engine
+          <select
+            className="admin-input"
+            value={settings.mapEngine}
+            onChange={(e) => setMapEngine(e.target.value as MapEngineKind)}
+            style={{ width: 280 }}
+          >
+            <option value="leaflet-osm">Leaflet + OpenStreetMap Carto (default)</option>
+            <option value="leaflet-maptiler">Leaflet + MapTiler Streets v2 light</option>
+            <option value="google-maps">Google Maps (JavaScript SDK)</option>
+          </select>
+        </label>
+        <div className="admin-hint">
+          Applies to both base tiles AND route / bike-infra polyline rendering.
+          Reload the page after changing the engine — hot-swap is not supported.
+        </div>
+        {resolvedEngine.fellBack && (
+          <div className="admin-hint" style={{ color: '#b91c1c' }}>
+            ⚠ {resolvedEngine.fallbackReason}. Falling back to leaflet-osm. Add the key to
+            <code> .env.local</code> (and to GitHub Actions Deploy secrets for prod).
+          </div>
+        )}
+        <div className="admin-hint">
+          Build-time keys detected:
+          {envKeys.maptilerKey   ? ' VITE_MAPTILER_KEY ✓' : ' VITE_MAPTILER_KEY ✗'}
+          {envKeys.googleMapsKey ? ' · VITE_GOOGLE_MAPS_KEY ✓' : ' · VITE_GOOGLE_MAPS_KEY ✗'}
+        </div>
+      </section>
+
       {/* ── Visibility toggles ─────────────────────────────────────── */}
       <section className="admin-section">
         <h3>Visibility</h3>
