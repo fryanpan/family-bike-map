@@ -1,6 +1,7 @@
 import L from 'leaflet'
 import { useEffect, useRef, useMemo, useState } from 'react'
-import { Marker, MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
+import { Marker, MapContainer, Polyline, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet'
+import { CachedTileLayer } from '../services/cachedTileLayer'
 import { PREFERRED_COLOR, OTHER_COLOR, getLegendItem } from '../utils/classify'
 import { classifyEdge, PATH_LEVEL_LABELS } from '../utils/lts'
 import { colorForLevel } from './SimpleLegend'
@@ -61,6 +62,27 @@ function makeTextLabel(text: string): L.DivIcon {
     iconSize: [0, 0],
     iconAnchor: [0, 10],
   })
+}
+
+/**
+ * React wrapper around our `CachedTileLayer` (Leaflet TileLayer subclass with
+ * IndexedDB stale-while-revalidate). Mounted imperatively because react-leaflet
+ * doesn't expose a stable factory for TileLayer subclasses; a useEffect has the
+ * same lifecycle as react-leaflet's `<TileLayer/>`.
+ *
+ * Drives the sub-second-second-load goal: tiles paint from IDB on a return
+ * visit before any network fetch starts. Background refresh keeps the cache
+ * fresh for the next visit without blocking the current paint.
+ */
+function CachedBaseTileLayer({ url, attribution }: { url: string; attribution: string }) {
+  const map = useMap()
+  useEffect(() => {
+    const layer = new CachedTileLayer(url, { attribution }).addTo(map)
+    return () => {
+      layer.remove()
+    }
+  }, [map, url, attribution])
+  return null
 }
 
 function MapCenterController({ currentLocation }: { currentLocation: { lat: number; lng: number } | null }) {
@@ -782,7 +804,7 @@ export default function Map({
       <MapMoveController point={startPoint} zoom={14} />
       <MapMoveController point={flyToPlace ?? null} zoom={16} animate />
       <FitBoundsController route={route} />
-      <TileLayer
+      <CachedBaseTileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
