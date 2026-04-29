@@ -424,7 +424,18 @@ export function buildRoutingGraph(
       // Per-direction unsignalized-major-road penalty (Joanna #4): the
       // penalty fires on the *entering* side of a junction. Forward edge
       // enters id2, reverse edge enters id1 — query each separately.
-      const fwdPenalty = entryPenalty(id2)
+      //
+      // Walking edges skip the penalty: bridge-walks cross arterials at
+      // the crosswalk on foot, where the unsignalized stress is much
+      // lower than riding through (Furth's framework is about cycling
+      // stress, not pedestrian stress). Without this carve-out, kid-modes
+      // that bridge-walk through every primary intersection see the
+      // penalty stack up on every node — kid-starting-out's preferred-%
+      // collapsed from 56% → 17% in the first benchmark run because the
+      // router avoided bridge-walks entirely and detoured onto walking
+      // routes through quiet residential, leaving less preferred infra
+      // available within the cost budget.
+      const fwdPenalty = isWalking ? { addS: 0, mul: 1 } : entryPenalty(id2)
       const fwdCost = baseCost * fwdPenalty.mul + fwdPenalty.addS
 
       // Forward edge (always)
@@ -432,7 +443,7 @@ export function buildRoutingGraph(
 
       // Reverse edge (unless one-way)
       if (!isOneway) {
-        const revPenalty = entryPenalty(id1)
+        const revPenalty = isWalking ? { addS: 0, mul: 1 } : entryPenalty(id1)
         const revCost = baseCost * revPenalty.mul + revPenalty.addS
         graph.addLink(id2, id1, { ...edgeData, cost: revCost })
       }
