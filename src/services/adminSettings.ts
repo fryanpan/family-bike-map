@@ -10,6 +10,7 @@
 import { useSyncExternalStore } from 'react'
 import type { RideMode } from '../data/modes'
 import { PATH_LEVELS, PATH_LEVEL_LABELS, type PathLevel } from '../utils/lts'
+import type { GeocoderEngineKind } from './geocoder/types'
 import type { MapEngineKind } from './mapEngine/types'
 
 const STORAGE_KEY = 'family-bike-map:admin-settings:v1'
@@ -63,6 +64,11 @@ export interface AdminSettings {
   /** Per-mode routing parameters. Merge with compiled defaults from
    *  MODE_RULES — user-edited values win. */
   modeRouting: Partial<Record<RideMode, Partial<ModeRoutingParams>>>
+  /** Active location-search engine. 'nominatim' (default, no key
+   *  required) or 'google' (requires VITE_GOOGLE_MAPS_KEY at build
+   *  time — falls back to nominatim if absent). See
+   *  src/services/geocoder/. */
+  geocoderEngine: GeocoderEngineKind
   /** Which map rendering engine to use. Falls back to leaflet-osm if
    *  the chosen engine's API key is missing at build time (see
    *  src/services/mapEngine/resolve.ts). Change requires page reload —
@@ -94,6 +100,7 @@ export const DEFAULT_SETTINGS: AdminSettings = {
   showExternalRouterLinks: false,
   showStartNavigation: false,
   modeRouting: {},
+  geocoderEngine: 'nominatim',
   mapEngine: 'leaflet-osm',
 }
 

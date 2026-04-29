@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { searchPlaces } from '../services/geocoding'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useActiveGeocoder } from '../services/geocoder/resolve'
+import type { AutocompleteResult } from '../services/geocoder/types'
+import { matchSavedPlaces, dedupAgainst } from '../services/geocoder/savedPlaces'
 import { getPlaceDetail } from '../utils/types'
 import type { Place } from '../utils/types'
 
@@ -22,13 +24,31 @@ interface Props {
   biasPoint?: { lat: number; lng: number }
 }
 
+// Saved-place priority — Home/School read straight from localStorage
+// on every keystroke and prepended above engine results. See
+// services/geocoder/savedPlaces.ts. Independent of engine choice; this
+// is the fix for "Dresdener Str 112 shows my home as the third
+// autocomplete" — saved-place hits ALWAYS rank above engine hits.
+
 export default function SearchBar({ label, value, onSelect, onClear, placeholder, quickOptions, biasPoint }: Props) {
   const [query, setQuery] = useState('')
-  const [suggestions, setSuggestions] = useState<Place[]>([])
+  const [suggestions, setSuggestions] = useState<AutocompleteResult[]>([])
   const [open, setOpen] = useState(false)
   const [focused, setFocused] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Bumped on each keystroke; async returns from older queries are
+   *  ignored so a slow network can't overwrite a fresh result list. */
+  const queryGenRef = useRef(0)
+
+  const resolved = useActiveGeocoder()
+  const engine = resolved.engine
+
+  // Memoize so the placeholder string changes when the engine flips.
+  const enginePlaceholder = useMemo(
+    () => placeholder + (resolved.kind === 'google' ? '' : ''),
+    [placeholder, resolved.kind],
+  )
 
   // Sync display when parent updates the selected value
   useEffect(() => {
@@ -38,32 +58,60 @@ export default function SearchBar({ label, value, onSelect, onClear, placeholder
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const q = e.target.value
     setQuery(q)
+    queryGenRef.current += 1
+    const myGen = queryGenRef.current
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (q.length >= 2) {
-      debounceRef.current = setTimeout(async () => {
-        try {
-          const results = await searchPlaces(q, biasPoint)
-          setSuggestions(results)
-          setOpen(results.length > 0)
-        } catch {
-          setSuggestions([])
-        }
-      }, 300)
-    } else {
+
+    if (q.length < 2) {
       setSuggestions([])
       setOpen(false)
+      return
     }
-  }, [biasPoint])
+
+    // Saved-place hits are computed synchronously and shown before the
+    // network call resolves — instant feedback for the most common
+    // queries. The engine call is debounced to avoid spamming
+    // Nominatim / Google on every keystroke.
+    const savedHits = matchSavedPlaces(q)
+    if (savedHits.length > 0) {
+      setSuggestions(savedHits)
+      setOpen(true)
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const engineHits = await engine.autocomplete(q, biasPoint)
+        // Drop stale results.
+        if (myGen !== queryGenRef.current) return
+        // Re-read saved-place hits — the user may have typed more
+        // characters between the savedHits snapshot and now. Keeps
+        // them at the top with engine results below, deduped.
+        const fresh = matchSavedPlaces(q)
+        const combined = [...fresh, ...dedupAgainst(fresh, engineHits)]
+        setSuggestions(combined)
+        setOpen(combined.length > 0)
+      } catch {
+        if (myGen !== queryGenRef.current) return
+        // Engine errored — keep saved hits visible if any.
+        setSuggestions(matchSavedPlaces(q))
+      }
+    }, 300)
+  }, [engine, biasPoint])
 
   const handleSelect = useCallback(
-    (place: Place) => {
+    async (suggestion: AutocompleteResult) => {
+      // Resolve to a full Place. Engines that already have lat/lng
+      // (Nominatim, saved places) return immediately; Google calls
+      // Place Details here.
+      const place = await engine.placeDetails(suggestion)
+      if (!place) return
       setQuery(place.shortLabel)
       setSuggestions([])
       setOpen(false)
       onSelect(place)
     },
-    [onSelect],
+    [engine, onSelect],
   )
 
   // Close suggestions on outside click
@@ -88,7 +136,7 @@ export default function SearchBar({ label, value, onSelect, onClear, placeholder
           className={`search-input${value && onClear ? ' search-input-clearable' : ''}`}
           value={query}
           onChange={handleChange}
-          placeholder={placeholder}
+          placeholder={enginePlaceholder}
           onFocus={() => {
             setFocused(true)
             if (suggestions.length > 0) setOpen(true)
@@ -136,8 +184,8 @@ export default function SearchBar({ label, value, onSelect, onClear, placeholder
       )}
       {open && (
         <ul className="suggestions">
-          {suggestions.map((s, i) => (
-            <li key={i} className="suggestion-item" onMouseDown={() => handleSelect(s)}>
+          {suggestions.map((s) => (
+            <li key={s.id} className="suggestion-item" onMouseDown={() => handleSelect(s)}>
               <span className="suggestion-name">{s.shortLabel}</span>
               <span className="suggestion-detail">
                 {getPlaceDetail(s.label)}
