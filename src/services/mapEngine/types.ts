@@ -140,6 +140,10 @@ export interface MapEngine {
   /** Force the engine to recompute container size — call after CSS
    *  layout changes that resize the map's parent. */
   invalidateSize(): void
+  /** Convert a lat/lng to a pixel offset relative to the map container's
+   *  top-left corner. Used for positioning React overlays (segment
+   *  popups) at click points. */
+  latLngToContainerPoint(latLng: LatLng): [number, number]
 
   // ── Events ────────────────────────────────────────────────────────────
   on(event: MapEventName, handler: (ev: MapEvent) => void): () => void
@@ -155,15 +159,15 @@ export interface MapEngine {
 
   // ── Popups ────────────────────────────────────────────────────────────
   /** Open a popup anchored to a polyline (midpoint), marker (its
-   *  position), or fixed lat/lng. The HTML may include any inline
-   *  styles; engines should sanitize on read if they need to. */
+   *  position), or fixed lat/lng. Content may be either an HTML string
+   *  (most uses) or a DOM Node (when React needs to portal into it). */
   openPopup(
     anchor: PolylineHandle | MarkerHandle | LatLng,
-    html: string,
+    content: string | HTMLElement,
     options?: PopupOptions,
   ): PopupHandle
   /** Update the HTML of an open popup (used for lazy-loaded content
    *  like Street View images). */
-  updatePopup(handle: PopupHandle, html: string): void
+  updatePopup(handle: PopupHandle, content: string | HTMLElement): void
   closePopup(handle: PopupHandle): void
 }

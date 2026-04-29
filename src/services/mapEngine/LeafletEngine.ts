@@ -121,6 +121,10 @@ export class LeafletEngine implements MapEngine {
     )
   }
   invalidateSize(): void { this.requireMap().invalidateSize() }
+  latLngToContainerPoint(latLng: LatLng): [number, number] {
+    const p = this.requireMap().latLngToContainerPoint(L.latLng(latLng[0], latLng[1]))
+    return [p.x, p.y]
+  }
 
   // ── Events ──────────────────────────────────────────────────────────
   on(event: MapEventName, handler: (ev: MapEvent) => void): () => void {
@@ -240,14 +244,14 @@ export class LeafletEngine implements MapEngine {
   // ── Popups ──────────────────────────────────────────────────────────
   openPopup(
     anchor: PolylineHandle | MarkerHandle | LatLng,
-    html: string,
+    content: string | HTMLElement,
     options: PopupOptions = {},
   ): PopupHandle {
     const map = this.requireMap()
     const popup = L.popup({
       maxWidth: options.maxWidth,
       className: options.className,
-    }).setContent(html)
+    }).setContent(content as L.Content)
     let coord: L.LatLngExpression
     if (Array.isArray(anchor) && typeof anchor[0] === 'number' && typeof anchor[1] === 'number') {
       coord = anchor as LatLng
@@ -276,10 +280,10 @@ export class LeafletEngine implements MapEngine {
     return { __brand: 'popup', id }
   }
 
-  updatePopup(handle: PopupHandle, html: string): void {
+  updatePopup(handle: PopupHandle, content: string | HTMLElement): void {
     const popup = this.popups.get(handle.id)
     if (!popup) return
-    popup.setContent(html)
+    popup.setContent(content as L.Content)
     popup.update()
   }
 
