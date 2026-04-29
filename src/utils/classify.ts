@@ -115,6 +115,15 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
 
   // Legend-preferred: 1a/1b/2a. Router accepts 2b at 1.2× cost; LTS 3
   // rejected entirely. 2b stays off the legend unless opted in.
+  //
+  // Note (2026-04-29, Joanna research #5a): "Elevated sidewalk path" is
+  // intentionally non-preferred for carrying-kid. Trailers and cargo bikes
+  // amplify two real downsides: tree-root heaves bounce a passenger more
+  // than a single rider, and the narrowness forces uncomfortably close
+  // pedestrian passes. Even though the path-level is 1a (car-free), it
+  // belongs in the "acceptable but not preferred" pile for this rider.
+  // Re-checked vs. the joanna.md "Solutions" table — this placement
+  // already matches the ask, so no movement needed.
   'carrying-kid': [
     { defaultPreferred: true, items: [
       { icon: '🚴', name: 'Bike path',                   defaultPreferred: true, level: '1a' },
@@ -130,6 +139,9 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🚌', name: 'Shared bus lane on quiet street',    defaultPreferred: true, level: '2a' },
     ]},
     { defaultPreferred: false, items: [
+      // Elevated sidewalk path: trailer/cargo amplifies tree-root +
+      // pedestrian-conflict downsides — kept non-preferred for this mode
+      // (Joanna 2026-04-29).
       { icon: '🛡️', name: 'Elevated sidewalk path',      defaultPreferred: false, level: '1a' },
       { icon: '🏠', name: 'Quiet street',                defaultPreferred: false, level: '2b' },
       { icon: '🛣️', name: 'Painted bike lane on major road',   defaultPreferred: false, level: '3' },

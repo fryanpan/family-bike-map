@@ -114,6 +114,109 @@ describe('buildRoutingGraph', () => {
     const expectedCost = link!.data.distance / walkingSpeed
     expect(link!.data.cost).toBeCloseTo(expectedCost, 0)
   })
+
+  // ── Joanna #4: unsignalized-major-road intersection penalty ───────────────
+  describe('unsignalized-major-road penalty', () => {
+    // Geometry for a 4-way junction at (52.500, 13.400):
+    //   - East-west primary road (cars, no signal) crosses
+    //   - North-south cycleway
+    // The cycleway segment that ENTERS the junction (52.499→52.500) should
+    // get +50s penalty + ×2 cost when no signal is provided. With a signal
+    // node at the junction it should NOT.
+    const junctionWays = (): OsmWay[] => [
+      // Primary E-W road (only present so the junction has primary tier).
+      {
+        osmId: 100, itemName: null,
+        tags: { highway: 'primary', cycleway: 'track', maxspeed: '50' },
+        coordinates: [[52.500, 13.399], [52.500, 13.400], [52.500, 13.401]],
+      },
+      // Cycleway N-S running through the junction.
+      {
+        osmId: 101, itemName: null,
+        tags: { highway: 'cycleway' },
+        coordinates: [[52.499, 13.400], [52.500, 13.400], [52.501, 13.400]],
+      },
+    ]
+
+    test('no signal → penalty fires on edges entering the junction', () => {
+      const graph = buildRoutingGraph(junctionWays(), 'kid-traffic-savvy', new Set(['Bike path']))
+      // Edge 52.499 → 52.500 (entering junction) should be penalized.
+      const enter = graph.getLink('52.49900,13.40000', '52.50000,13.40000')
+      // Edge 52.500 → 52.501 (LEAVING the junction toward a non-junction node)
+      // should NOT be penalized.
+      const leave = graph.getLink('52.50000,13.40000', '52.50100,13.40000')
+      expect(enter).toBeTruthy()
+      expect(leave).toBeTruthy()
+      // The penalty adds at least 50s and multiplies cost by ×2 — a short
+      // segment without penalty is way under that. Use cost > 50 as proof
+      // the +50s additive landed on the entering edge.
+      expect(enter!.data.cost).toBeGreaterThan(50)
+      // The leaving edge should have a baseline (small) cost.
+      expect(leave!.data.cost).toBeLessThan(50)
+    })
+
+    test('with traffic signal at junction → penalty does NOT fire', () => {
+      const graph = buildRoutingGraph(
+        junctionWays(), 'kid-traffic-savvy', new Set(['Bike path']),
+        undefined, undefined, undefined, undefined, undefined,
+        [[52.500, 13.400]],
+      )
+      const enter = graph.getLink('52.49900,13.40000', '52.50000,13.40000')
+      expect(enter!.data.cost).toBeLessThan(50)
+    })
+
+    test('all-bike-only neighbors → penalty does NOT fire (cycleway-cycleway crossing)', () => {
+      // Two cycleways crossing — degree=4 but no major road, so no
+      // worstClass=primary, penalty cannot fire.
+      const bikeOnly: OsmWay[] = [
+        { osmId: 200, itemName: null, tags: { highway: 'cycleway' },
+          coordinates: [[52.500, 13.399], [52.500, 13.400], [52.500, 13.401]] },
+        { osmId: 201, itemName: null, tags: { highway: 'cycleway' },
+          coordinates: [[52.499, 13.400], [52.500, 13.400], [52.501, 13.400]] },
+      ]
+      const graph = buildRoutingGraph(bikeOnly, 'kid-traffic-savvy', new Set(['Bike path']))
+      const enter = graph.getLink('52.49900,13.40000', '52.50000,13.40000')
+      expect(enter!.data.cost).toBeLessThan(50)
+    })
+
+    test('low-tier crossing (residential at the junction) → penalty does NOT fire', () => {
+      const lowTier: OsmWay[] = [
+        { osmId: 300, itemName: null, tags: { highway: 'residential', maxspeed: '30' },
+          coordinates: [[52.500, 13.399], [52.500, 13.400], [52.500, 13.401]] },
+        { osmId: 301, itemName: null, tags: { highway: 'cycleway' },
+          coordinates: [[52.499, 13.400], [52.500, 13.400], [52.501, 13.400]] },
+      ]
+      const graph = buildRoutingGraph(lowTier, 'kid-traffic-savvy', new Set(['Bike path']))
+      const enter = graph.getLink('52.49900,13.40000', '52.50000,13.40000')
+      expect(enter!.data.cost).toBeLessThan(50)
+    })
+
+    test('primary @ <50 km/h crossing → penalty does NOT fire', () => {
+      // School zones / city center primary at 30. Spec keys ≥50 km/h.
+      const slow: OsmWay[] = [
+        { osmId: 400, itemName: null, tags: { highway: 'primary', cycleway: 'track', maxspeed: '30' },
+          coordinates: [[52.500, 13.399], [52.500, 13.400], [52.500, 13.401]] },
+        { osmId: 401, itemName: null, tags: { highway: 'cycleway' },
+          coordinates: [[52.499, 13.400], [52.500, 13.400], [52.501, 13.400]] },
+      ]
+      const graph = buildRoutingGraph(slow, 'kid-traffic-savvy', new Set(['Bike path']))
+      const enter = graph.getLink('52.49900,13.40000', '52.50000,13.40000')
+      expect(enter!.data.cost).toBeLessThan(50)
+    })
+
+    test('degree ≤ 2 (mid-segment) → penalty does NOT fire', () => {
+      // A single primary road (no junction with anything) — every interior
+      // node has degree 2, end nodes degree 1. Penalty must skip them.
+      const linear: OsmWay[] = [
+        { osmId: 500, itemName: null, tags: { highway: 'primary', cycleway: 'track', maxspeed: '50' },
+          coordinates: [[52.500, 13.399], [52.500, 13.400], [52.500, 13.401]] },
+      ]
+      const graph = buildRoutingGraph(linear, 'kid-traffic-savvy', new Set(['Bike path']))
+      // 52.500,13.399 → 52.500,13.400 enters a degree-2 node — no penalty.
+      const enter = graph.getLink('52.50000,13.39900', '52.50000,13.40000')
+      expect(enter!.data.cost).toBeLessThan(50)
+    })
+  })
 })
 
 describe('routeOnGraph', () => {

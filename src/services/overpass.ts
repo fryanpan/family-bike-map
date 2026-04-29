@@ -23,6 +23,13 @@ const TILE_DEGREES = 0.1
 // Tiles are never evicted — memory stays small for typical usage.
 const _tileCache = new Map<string, OsmWay[]>()
 
+// Parallel cache for traffic-signal node coordinates — same key as
+// _tileCache. Empty array (NOT undefined) indicates "tile fetched, no
+// signals in this tile" — distinct from undefined which means "tile not
+// yet fetched." Consumed by buildRoutingGraph to apply the
+// unsignalized-intersection penalty (Joanna 2026-04-29, #4).
+const _signalCache = new Map<string, [number, number][]>()
+
 /** Canonical key for a tile (profile-independent). */
 export function tileKey(row: number, col: number): string {
   return `${row}:${col}`
@@ -62,12 +69,27 @@ export function getCachedTile(row: number, col: number): OsmWay[] | undefined {
 }
 
 /**
+ * Return cached traffic-signal coordinates for a tile, or undefined when
+ * the tile hasn't been fetched. An empty array means "fetched, no signals"
+ * — different from undefined.
+ */
+export function getCachedSignals(row: number, col: number): [number, number][] | undefined {
+  return _signalCache.get(tileKey(row, col))
+}
+
+/**
  * Inject pre-loaded tile data into the in-memory cache.
  * Used by the IndexedDB tile cache to populate tiles on app load
  * without fetching from Overpass.
+ *
+ * Optional `signals` parameter populates the parallel signal cache —
+ * legacy callers that only have ways can omit it. When omitted, the
+ * signal cache is set to an empty array so consumers can distinguish
+ * "tile fetched without signal data (legacy)" from "tile not fetched".
  */
-export function injectCachedTile(row: number, col: number, ways: OsmWay[]): void {
+export function injectCachedTile(row: number, col: number, ways: OsmWay[], signals?: [number, number][]): void {
   _tileCache.set(tileKey(row, col), ways)
+  _signalCache.set(tileKey(row, col), signals ?? [])
 }
 
 // Client-side fetch timeout (ms). Must exceed the server-side Overpass timeout so
@@ -111,11 +133,16 @@ const _fetchSemaphore = new Semaphore(MAX_CONCURRENT_FETCHES)
 export function buildQuery(bbox: { south: number; west: number; north: number; east: number }): string {
   const { south, west, north, east } = bbox
   const b = `${south},${west},${north},${east}`
-  // 6 sub-queries instead of 18 — semantically equivalent but much less load on Overpass:
+  // 6 way sub-queries + 1 signal-node sub-query.
   //   - Combine residential/path/track (all need bicycle!=no) into one regex highway filter.
   //   - Combine all cycleway/cycleway:right/cycleway:left/cycleway:both value variants into
   //     one regex key+value filter. The key regex ^cycleway(:right|:left|:both)?$ matches
   //     the plain "cycleway" key and all three directional variants.
+  //   - Traffic-signal nodes feed buildRoutingGraph's unsignalized-major-road
+  //     intersection penalty (Joanna 2026-04-29, #4).
+  // We emit two separate `out` statements so ways come back with geometry
+  // (`out geom`) and signal nodes with their lat/lng coords (`out` is
+  // implicit-skel for nodes which already carry lat/lon in the response).
   return `
 [out:json][timeout:25];
 (
@@ -127,6 +154,8 @@ export function buildQuery(bbox: { south: number; west: number; north: number; e
   way[~"^cycleway(:right|:left|:both)?$"~"^(track|lane|opposite_track|opposite_lane|share_busway)$"](${b});
 );
 out geom;
+node["highway"="traffic_signals"](${b});
+out;
 `
 }
 
@@ -266,6 +295,9 @@ interface OverpassElement {
   id: number
   tags?: Record<string, string>
   geometry?: Array<{ lat: number; lon: number }>
+  // Present on `node` elements; ways carry per-coord lat/lon under `geometry`.
+  lat?: number
+  lon?: number
 }
 
 const MAX_RETRIES = 2
@@ -300,17 +332,25 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = MAX_RETR
 
 // Stored OsmWay objects have itemName: null — classification is deferred to render
 // time via classifyOsmTagsToItem() so the cache is profile-independent.
-function parseOverpassResponse(data: { elements: OverpassElement[] }): OsmWay[] {
-  return data.elements
-    .filter((el): el is OverpassElement & { geometry: NonNullable<OverpassElement['geometry']> } =>
-      el.type === 'way' && el.geometry != null,
-    )
-    .map((el) => ({
-      itemName: null,
-      coordinates: el.geometry.map((pt): [number, number] => [pt.lat, pt.lon]),
-      osmId: el.id,
-      tags: el.tags ?? {},
-    }))
+function parseOverpassResponse(data: { elements: OverpassElement[] }): {
+  ways: OsmWay[]
+  signals: [number, number][]
+} {
+  const ways: OsmWay[] = []
+  const signals: [number, number][] = []
+  for (const el of data.elements) {
+    if (el.type === 'way' && el.geometry) {
+      ways.push({
+        itemName: null,
+        coordinates: el.geometry.map((pt): [number, number] => [pt.lat, pt.lon]),
+        osmId: el.id,
+        tags: el.tags ?? {},
+      })
+    } else if (el.type === 'node' && el.lat != null && el.lon != null && el.tags?.highway === 'traffic_signals') {
+      signals.push([el.lat, el.lon])
+    }
+  }
+  return { ways, signals }
 }
 
 /**
@@ -329,8 +369,10 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
   // Tiles silently persist for 30 days; repeat visits return instantly.
   const idbCached = await loadTileFromIdb(row, col)
   if (idbCached) {
-    _tileCache.set(key, idbCached)
-    return idbCached
+    _tileCache.set(key, idbCached.ways)
+    // Old IDB rows may not have signals — default to empty (no penalty fires).
+    _signalCache.set(key, idbCached.signals ?? [])
+    return idbCached.ways
   }
 
   const bbox = {
@@ -381,12 +423,13 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
   }
   const cacheStatus = response.headers.get('X-Cache') ?? 'N/A'
   console.debug(`[Overpass] Tile ${row}:${col} → ${data.elements.length} elements (server cache: ${cacheStatus})`)
-  const result = parseOverpassResponse(data)
-  _tileCache.set(key, result)
+  const { ways, signals } = parseOverpassResponse(data)
+  _tileCache.set(key, ways)
+  _signalCache.set(key, signals)
   // Fire-and-forget write to IndexedDB for future sessions. Failures are
   // non-critical — the in-memory cache still has the data for this session.
-  void storeTileToIdb(row, col, result)
-  return result
+  void storeTileToIdb(row, col, ways, signals)
+  return ways
 }
 
 /**

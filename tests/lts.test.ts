@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { computeLts, computeLtsBreakdown, familySafetyScore } from '../src/utils/lts'
+import { classifyEdge, computeLts, computeLtsBreakdown, familySafetyScore } from '../src/utils/lts'
 import type { LtsBreakdown } from '../src/utils/lts'
 
 // ── computeLts ──────────────────────────────────────────────────────────────
@@ -149,6 +149,78 @@ describe('computeLts', () => {
 
   it('unknown highway defaults to LTS 3', () => {
     expect(computeLts({ highway: 'motorway_link' })).toBe(3)
+  })
+})
+
+// ── High-stress PBL demote (Joanna 2026-04-29, #3) ──────────────────────────
+//
+// Separated cycleways alongside busy arterials get classified 1a "car-free"
+// at the segment level — but Joanna's family mental model treats the
+// frequent intersection conflicts (turn mixing, right hooks) as
+// equivalent to a painted lane on a quiet street. Test the demote rule
+// fires for the targeted Berlin (Kotbusser Damm, Hasenheide) and SF
+// (Valencia) shapes and stays off when it shouldn't.
+
+describe('classifyEdge — high-stress PBL demote', () => {
+  it('cycleway:right=track on secondary @50 km/h → 2a (Kotbusser Damm)', () => {
+    const c = classifyEdge({ highway: 'secondary', 'cycleway:right': 'track', maxspeed: '50' })
+    expect(c.lts).toBe(1)        // segment-level Furth still 1
+    expect(c.pathLevel).toBe('2a') // but display-tier demoted
+  })
+
+  it('cycleway:left=track on tertiary, no maxspeed → 2a (defaults to >30)', () => {
+    const c = classifyEdge({ highway: 'tertiary', 'cycleway:left': 'track' })
+    expect(c.pathLevel).toBe('2a')
+  })
+
+  it('cycleway:both=track on primary @60 → 2a', () => {
+    const c = classifyEdge({ highway: 'primary', 'cycleway:both': 'track', maxspeed: '60' })
+    expect(c.pathLevel).toBe('2a')
+  })
+
+  it('inline cycleway=track on secondary @50 → 2a', () => {
+    const c = classifyEdge({ highway: 'secondary', cycleway: 'track', maxspeed: '50' })
+    expect(c.pathLevel).toBe('2a')
+  })
+
+  it('is_sidepath=yes on a standalone cycleway → 2a', () => {
+    // SF Valencia mid-block PBL is a separate highway=cycleway way with
+    // is_sidepath=yes referencing Valencia (highway=secondary).
+    const c = classifyEdge({ highway: 'cycleway', is_sidepath: 'yes' })
+    expect(c.pathLevel).toBe('2a')
+  })
+
+  it('is_sidepath:of=valencia on a standalone cycleway → 2a', () => {
+    const c = classifyEdge({ highway: 'cycleway', 'is_sidepath:of': 'Valencia Street' })
+    expect(c.pathLevel).toBe('2a')
+  })
+
+  it('does NOT demote a standalone canal-side cycleway (no parent road)', () => {
+    const c = classifyEdge({ highway: 'cycleway' })
+    expect(c.pathLevel).toBe('1a')
+  })
+
+  it('does NOT demote a cycleway=track on a 30 km/h residential street', () => {
+    // Quiet residential with a separated track stays 1a — no high-stress
+    // intersections on the parent road.
+    const c = classifyEdge({ highway: 'residential', cycleway: 'track', maxspeed: '30' })
+    expect(c.pathLevel).toBe('1a')
+  })
+
+  it('does NOT demote a separated track on a low-speed secondary (≤30 km/h)', () => {
+    // Tagging `secondary maxspeed=30` is rare but possible (school zones).
+    // The intersection-stress argument doesn't apply at low speed.
+    const c = classifyEdge({ highway: 'secondary', cycleway: 'track', maxspeed: '30' })
+    expect(c.pathLevel).toBe('1a')
+  })
+
+  it('does NOT demote a painted lane (only separated tracks)', () => {
+    // A painted lane on a busy road is already 2a/3 via the segment rules.
+    // The demote rule shouldn't double-fire on it.
+    const c = classifyEdge({ highway: 'secondary', cycleway: 'lane', maxspeed: '50' })
+    // painted-lane-on-50 demotes to 3 via derivePathLevel; we don't want
+    // the new rule reclassifying that to 2a.
+    expect(c.pathLevel).not.toBe('2a')
   })
 })
 
