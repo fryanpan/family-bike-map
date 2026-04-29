@@ -42,6 +42,12 @@ jobs:
           VITE_USERBACK_TOKEN: ${{ secrets.VITE_USERBACK_TOKEN }}
           VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
           VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
+          # Map rendering engines (selectable from Admin Tools → Settings).
+          # Both keys are bundled into the client and must be referrer-
+          # restricted in their respective dashboards. Either can be empty —
+          # the resolver falls back to OSM Carto with a console warning.
+          VITE_MAPTILER_KEY: ${{ secrets.VITE_MAPTILER_KEY }}
+          VITE_GOOGLE_MAPS_KEY: ${{ secrets.VITE_GOOGLE_MAPS_KEY }}
           # VITE_MAPILLARY_TOKEN removed 2026-04-21. Mapillary tokens can't
           # be referrer-locked so they no longer ship in the client bundle —
           # the Worker proxies the API with a server-side MAPILLARY_TOKEN
