@@ -225,7 +225,15 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
       'elevated sidewalk paths — they\'re narrow and pedestrian-heavy, which kills the ' +
       '30 km/h flow.',
     acceptedLevels: new Set<PathLevel>(['1a', '1b', '2a', '2b', '3']),
-    levelMultipliers: {},
+    // Nudge the router toward the bike-infra tiers (1a/1b/2a) and away
+    // from busy painted-lane / no-infra streets (3) and unmarked
+    // residentials (2b). Without these multipliers the cost function is
+    // pure distance/speed and A* picks the SHORTEST path — which on a
+    // 20km training ride means major roads with painted lanes beat a
+    // 1.5km bike-path detour even when the detour is much nicer to
+    // ride. (Joanna 2026-04-29, Rudower investigation; mirrors the
+    // 1.5× nudge kid-traffic-savvy already uses for 2a/2b.)
+    levelMultipliers: { '3': 1.5, '2b': 1.2 },
     roughSurfaceMultiplier: 5.0,
     rejectPathTypes: new Set(['Elevated sidewalk path']),
     surfaceOk: SMOOTH_ONLY,
