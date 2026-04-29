@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useActiveGeocoder } from '../services/geocoder/resolve'
 import type { AutocompleteResult } from '../services/geocoder/types'
+import { matchSavedPlaces, dedupAgainst } from '../services/geocoder/savedPlaces'
 import { getPlaceDetail } from '../utils/types'
 import type { Place } from '../utils/types'
 
@@ -23,96 +24,11 @@ interface Props {
   biasPoint?: { lat: number; lng: number }
 }
 
-// ── Saved-place priority ─────────────────────────────────────────────────────
-// Read Home/School straight out of localStorage so any keystroke can match
-// them without waiting for a network round-trip. Independent of the active
-// geocoder engine — the same matches show up whether we use Nominatim or
-// Google. This is the fix for "Dresdener Str 112 shows my home as the third
+// Saved-place priority — Home/School read straight from localStorage
+// on every keystroke and prepended above engine results. See
+// services/geocoder/savedPlaces.ts. Independent of engine choice; this
+// is the fix for "Dresdener Str 112 shows my home as the third
 // autocomplete" — saved-place hits ALWAYS rank above engine hits.
-
-interface SavedPlace {
-  storageKey: string
-  emoji: string
-  /** Pretty name shown in the suggestion list. */
-  name: string
-}
-
-const SAVED_PLACES: readonly SavedPlace[] = [
-  { storageKey: 'bike-route-home',   emoji: '🏠', name: 'Home' },
-  { storageKey: 'bike-route-school', emoji: '🏫', name: 'School' },
-] as const
-
-function loadSavedPlace(key: string): Place | null {
-  try {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Place
-    if (
-      typeof parsed?.lat === 'number' &&
-      typeof parsed?.lng === 'number' &&
-      typeof parsed?.label === 'string'
-    ) {
-      return parsed
-    }
-  } catch { /* ignore */ }
-  return null
-}
-
-/**
- * Substring-match saved places against the query. A saved place
- * matches if the query (lowercased) appears inside the place's
- * label, shortLabel, OR pretty-name (so "home" matches "🏠 Home"
- * even when the user's home address has nothing called "home" in it).
- *
- * Returns AutocompleteResult-shaped entries so the suggestion list
- * can render them uniformly with engine results. The lat/lng are
- * inlined so taps short-circuit the placeDetails call.
- */
-export function matchSavedPlaces(query: string): AutocompleteResult[] {
-  const q = query.trim().toLowerCase()
-  if (q.length === 0) return []
-  const out: AutocompleteResult[] = []
-  for (const saved of SAVED_PLACES) {
-    const place = loadSavedPlace(saved.storageKey)
-    if (!place) continue
-    const haystack = `${saved.name} ${place.shortLabel} ${place.label}`.toLowerCase()
-    if (!haystack.includes(q)) continue
-    out.push({
-      id: `saved:${saved.storageKey}`,
-      label: place.label,
-      shortLabel: `${saved.emoji} ${saved.name} — ${place.shortLabel}`,
-      lat: place.lat,
-      lng: place.lng,
-      iconPrefix: saved.emoji,
-    })
-  }
-  return out
-}
-
-/**
- * Drop engine-side hits whose coords are within ~50 m of an
- * already-prepended saved-place hit, so we don't show "Home" twice.
- * 50 m is small enough that nothing legitimately separate gets
- * collapsed but large enough to absorb minor rounding between
- * Nominatim and Google.
- */
-function dedupAgainst(
-  primary: AutocompleteResult[],
-  rest: AutocompleteResult[],
-): AutocompleteResult[] {
-  const EPS = 0.0005 // ~55 m at the equator, decent everywhere
-  return rest.filter((r) => {
-    const rLat = r.lat
-    const rLng = r.lng
-    if (typeof rLat !== 'number' || typeof rLng !== 'number') return true
-    return !primary.some((p) => {
-      const pLat = p.lat
-      const pLng = p.lng
-      if (typeof pLat !== 'number' || typeof pLng !== 'number') return false
-      return Math.abs(pLat - rLat) < EPS && Math.abs(pLng - rLng) < EPS
-    })
-  })
-}
 
 export default function SearchBar({ label, value, onSelect, onClear, placeholder, quickOptions, biasPoint }: Props) {
   const [query, setQuery] = useState('')
