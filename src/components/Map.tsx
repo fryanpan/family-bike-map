@@ -411,16 +411,24 @@ function RouteDisplay({
           opacity={1}
           interactive={false}
         />
-        {/* Colored layer on top — per-segment so tier colors render. */}
+        {/* Colored layer on top — per-segment so tier colors render.
+            IMPORTANT: pass styling via `pathOptions` rather than top-level
+            `color`/`weight` props. react-leaflet 4.x's Polyline only flows
+            updates from `pathOptions` to Leaflet's `setStyle()`; inline
+            color/weight props are read at creation time and IGNORED on
+            re-render. Without this, switching travel modes left old
+            polyline colors on screen — the bar updated to show new tier
+            percentages but the painted polylines kept their old strokes.
+            (Bryan's launch-blocking 2026-04-28 colors-don't-match-after-
+            mode-switch report; root-cause found 2026-04-29.) */}
         {visible.map((seg: RouteSegment, i: number) => {
           if (seg.isWalking) {
+            const walkWeight = selected?.index === i ? ROUTE_WEIGHT_SELECTED : ROUTE_WEIGHT_DEFAULT
             return (
               <Polyline
                 key={i}
                 positions={seg.coordinates}
-                color={WALKING_COLOR}
-                weight={selected?.index === i ? ROUTE_WEIGHT_SELECTED : ROUTE_WEIGHT_DEFAULT}
-                opacity={1}
+                pathOptions={{ color: WALKING_COLOR, weight: walkWeight, opacity: 1 }}
                 eventHandlers={{
                   click: (e) => {
                     setSelected({ seg, index: i, latlng: [e.latlng.lat, e.latlng.lng] })
@@ -436,11 +444,6 @@ function RouteDisplay({
           const isPreferred = seg.itemName !== null && preferredItemNames.has(seg.itemName)
           const legendItem = getLegendItem(seg.itemName, profileKey)
           const isSelected = selected?.index === i
-          // Color from seg.pathLevel (populated in clientRouter from the
-          // same classifyEdge() the overlay uses) so a way can't render
-          // one color here and a different color in the overlay. Fall
-          // back to the legend-item-derived level only if pathLevel is
-          // missing (shouldn't happen for routes built post-2026-04-24).
           const tierLevel = seg.pathLevel ?? legendItem?.level
           const color = tierLevel && isPreferred
             ? colorForLevel(tierLevel, settings.tiers)
@@ -450,9 +453,7 @@ function RouteDisplay({
             <Polyline
               key={i}
               positions={seg.coordinates}
-              color={color}
-              weight={weight}
-              opacity={1}
+              pathOptions={{ color, weight, opacity: 1 }}
               eventHandlers={{
                 click: (e) => {
                   setSelected({ seg, index: i, latlng: [e.latlng.lat, e.latlng.lng] })
