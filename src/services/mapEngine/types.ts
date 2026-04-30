@@ -32,6 +32,11 @@ export interface PolylineStyle {
   opacity: number
   /** When true, dashes the line. Engines pick a sensible default dash. */
   dashed?: boolean
+  /** Optional explicit dash pattern (SVG dash-array syntax, e.g. "1 3"
+   *  for fine stipple). Wins over the `dashed` default when set. Used
+   *  for the rough-surface stipple overlay. Ignored by Google Maps
+   *  (their Polyline doesn't have a dashArray analogue). */
+  dashArray?: string
   /** When false the polyline is non-interactive (no click events, no
    *  hover cursor). Default true. */
   interactive?: boolean

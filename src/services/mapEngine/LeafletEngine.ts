@@ -169,7 +169,8 @@ export class LeafletEngine implements MapEngine {
       opacity: style.opacity,
       interactive: style.interactive ?? true,
     }
-    if (style.dashed) opts.dashArray = '10 6'
+    if (style.dashArray) opts.dashArray = style.dashArray
+    else if (style.dashed) opts.dashArray = '10 6'
     if (style.useCanvasRenderer && this.canvasRenderer) opts.renderer = this.canvasRenderer
     const ply = L.polyline(coords, opts).addTo(map)
     if (handlers?.onClick) {
@@ -193,7 +194,8 @@ export class LeafletEngine implements MapEngine {
     if (partial.color !== undefined)       next.color = partial.color
     if (partial.weight !== undefined)      next.weight = partial.weight
     if (partial.opacity !== undefined)     next.opacity = partial.opacity
-    if (partial.dashed !== undefined)      next.dashArray = partial.dashed ? '10 6' : ''
+    if (partial.dashArray !== undefined)   next.dashArray = partial.dashArray
+    else if (partial.dashed !== undefined) next.dashArray = partial.dashed ? '10 6' : ''
     ply.setStyle(next)
   }
 

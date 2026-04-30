@@ -10,7 +10,7 @@ import { colorForLevel, weightMultiplierForLevel } from './SimpleLegend'
 import { useAdminSettings } from '../services/adminSettings'
 import { getStreetViewUrl } from '../services/streetview'
 import { useMapEngine } from '../services/mapEngine/context'
-import type { MapEngine, PolylineHandle, MarkerHandle, PopupHandle } from '../services/mapEngine'
+import type { MapEngine, PolylineHandle, PopupHandle } from '../services/mapEngine'
 import type { ClassificationRule } from '../services/rules'
 import type { OsmWay } from '../utils/types'
 
@@ -117,7 +117,6 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, showOth
 
   useEffect(() => {
     const polylineHandles: PolylineHandle[] = []
-    const markerHandles: MarkerHandle[] = []
     let openPopup: PopupHandle | null = null
 
     const BROWSING_WEIGHT = 4
@@ -231,45 +230,53 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, showOth
       ))
     }
 
-    // Pass 3 — cobble markers for rough-surface ways. Gated on zoom so
-    // the city-overview map stays clean.
+    // Pass 3 — rough-surface stipple overlay. A fine grey dashed
+    // polyline drawn along the way's geometry signals "rough / bumpy"
+    // without the visual noise of an emoji marker. The stipple texture
+    // reads at-a-glance as a different surface; it's quiet at city
+    // overview zooms, distinct at street-detail zooms. Gated on zoom
+    // so the overview map stays clean. (Replaced the prior 🪨 emoji
+    // marker per Joanna's UX feedback 2026-04-30 — the icons read as
+    // arbitrary visual noise; a textured overlay matches the
+    // navigational meaning much better.)
     if (zoom >= COBBLE_MARKER_MIN_ZOOM) {
       for (const way of roughWays) {
-        if (way.coordinates.length === 0) continue
-        const mid = way.coordinates[Math.floor(way.coordinates.length / 2)]
-        const handle = engine.addMarker(
-          mid,
-          {
-            kind: 'html',
-            html: '<div class="cobble-marker" title="Rough / cobbled">🪨</div>',
-            size: [18, 18],
-            anchor: [9, 9],
-          },
-          {
-            onClick: () => {
-              if (openPopup) engine.closePopup(openPopup)
-              const popupHandle = engine.openPopup(
-                mid,
-                buildTooltipHtml('Rough surface', way.tags, false, null),
-                {
-                  maxWidth: 260,
-                  className: 'bike-segment-popup',
-                  onClose: () => { if (openPopup === popupHandle) openPopup = null },
-                },
-              )
-              openPopup = popupHandle
-              const imgUrl = getStreetViewUrl(mid[0], mid[1], { size: '400x240' })
-              engine.updatePopup(popupHandle, buildTooltipHtml('Rough surface', way.tags, false, imgUrl))
+        if (way.coordinates.length < 2) continue
+        const onClick = () => {
+          if (openPopup) engine.closePopup(openPopup)
+          const mid = way.coordinates[Math.floor(way.coordinates.length / 2)]
+          const popupHandle = engine.openPopup(
+            mid,
+            buildTooltipHtml('Rough surface', way.tags, false, null),
+            {
+              maxWidth: 260,
+              className: 'bike-segment-popup',
+              onClose: () => { if (openPopup === popupHandle) openPopup = null },
             },
+          )
+          openPopup = popupHandle
+          const imgUrl = getStreetViewUrl(mid[0], mid[1], { size: '400x240' })
+          engine.updatePopup(popupHandle, buildTooltipHtml('Rough surface', way.tags, false, imgUrl))
+        }
+        polylineHandles.push(engine.addPolyline(
+          way.coordinates,
+          {
+            color: '#6b7280',          // grey-500
+            weight: 5,
+            opacity: 0.85,
+            // Fine stipple — short dash + short gap reads as "wavy /
+            // textured surface", distinct from the longer dash we use
+            // for alternate routes (10 6).
+            dashArray: '1 4',
+            useCanvasRenderer: true,
           },
-        )
-        markerHandles.push(handle)
+          { onClick },
+        ))
       }
     }
 
     return () => {
       for (const h of polylineHandles) engine.removePolyline(h)
-      for (const h of markerHandles)   engine.removeMarker(h)
       if (openPopup) engine.closePopup(openPopup)
     }
   }, [engine, ways, profileKey, preferredItemNames, showOtherPaths, hasRoute, regionRules, settings, zoom])
