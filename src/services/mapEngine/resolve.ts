@@ -24,13 +24,13 @@ export interface ResolvedEngine {
 }
 
 export function readEnvKeys(): EngineEnv {
-  // Vite puts VITE_ vars on `import.meta.env` at build time. In Node/
-  // tests `import.meta.env` is undefined; guard against it.
-  const meta = import.meta as ImportMeta & { env?: Record<string, string | undefined> }
-  const env = meta.env ?? {}
+  // Vite only injects `import.meta.env` into modules that reference it
+  // *directly* — assigning `const meta = import.meta` first defeats the
+  // static-analysis pass and leaves env undefined at runtime, so we have
+  // to read each var on its own line.
   return {
-    maptilerKey: env.VITE_MAPTILER_KEY || undefined,
-    googleMapsKey: env.VITE_GOOGLE_MAPS_KEY || undefined,
+    maptilerKey: import.meta.env?.VITE_MAPTILER_KEY || undefined,
+    googleMapsKey: import.meta.env?.VITE_GOOGLE_MAPS_KEY || undefined,
   }
 }
 

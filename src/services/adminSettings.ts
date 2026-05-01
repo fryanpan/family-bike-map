@@ -100,7 +100,7 @@ export const DEFAULT_SETTINGS: AdminSettings = {
   showExternalRouterLinks: false,
   showStartNavigation: false,
   modeRouting: {},
-  geocoderEngine: 'nominatim',
+  geocoderEngine: 'google',
   mapEngine: 'leaflet-osm',
 }
 

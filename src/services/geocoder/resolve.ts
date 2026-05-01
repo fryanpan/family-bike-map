@@ -24,10 +24,12 @@ export interface ResolvedGeocoder {
 }
 
 export function readEnvKeys(): GeocoderEnv {
-  const meta = import.meta as ImportMeta & { env?: Record<string, string | undefined> }
-  const env = meta.env ?? {}
+  // Vite only injects `import.meta.env` into modules that reference it
+  // *directly* — going through a `meta` variable defeats detection and
+  // leaves the keys empty at runtime. Read each VITE_* var on its own
+  // line so Vite's static analysis catches it.
   return {
-    googleMapsKey: env.VITE_GOOGLE_MAPS_KEY || undefined,
+    googleMapsKey: import.meta.env?.VITE_GOOGLE_MAPS_KEY || undefined,
   }
 }
 
