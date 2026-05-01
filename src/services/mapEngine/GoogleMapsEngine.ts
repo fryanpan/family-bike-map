@@ -227,6 +227,7 @@ export class GoogleMapsEngine implements MapEngine {
   // ── Polylines ───────────────────────────────────────────────────────
   addPolyline(coords: LatLng[], style: PolylineStyle, handlers?: PolylineHandlers): PolylineHandle {
     const map = this.requireMap()
+    const id = makeId()
     const path = coords.map(([lat, lng]) => ({ lat, lng }))
     const opts: google.maps.PolylineOptions = {
       path,
@@ -235,6 +236,12 @@ export class GoogleMapsEngine implements MapEngine {
       strokeWeight: style.weight,
       strokeOpacity: style.opacity,
       clickable: style.interactive ?? true,
+      // Pin z-order to creation order. Without an explicit zIndex,
+      // Google Maps reorders polylines as the viewport changes — visible
+      // as the bike-infra white halo flickering on top of the colored
+      // line in some pans. Leaflet stacks by add order natively; this
+      // preserves that contract on Google.
+      zIndex: id,
       // useCanvasRenderer is Leaflet-only; Google uses its own renderer.
     }
     if (style.dashArray) {
@@ -271,7 +278,6 @@ export class GoogleMapsEngine implements MapEngine {
     // Google has no built-in tooltip; we approximate via a transient
     // InfoWindow on mouseover. Skipped here for parity simplicity —
     // hovering on Google Maps Polylines isn't a primary mobile flow.
-    const id = makeId()
     this.polylines.set(id, ply)
     if (opts.icons) this.polylineDashIcons.set(id, opts.icons)
     return { __brand: 'polyline', id }
