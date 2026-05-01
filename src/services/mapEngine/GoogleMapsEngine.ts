@@ -122,12 +122,36 @@ export class GoogleMapsEngine implements MapEngine {
       throw new Error('GoogleMapsEngine requires googleMapsKey in MapInitOptions')
     }
     await loadGoogleMapsApi(options.googleMapsKey)
+    // Map BaseStyle → Google's MapTypeId. roadmap is the default vector
+    // streets view; satellite/hybrid/terrain use Google's imagery tiles.
+    const mapTypeId =
+      options.baseStyle === 'google-satellite' ? google.maps.MapTypeId.SATELLITE :
+      options.baseStyle === 'google-hybrid'    ? google.maps.MapTypeId.HYBRID :
+      options.baseStyle === 'google-terrain'   ? google.maps.MapTypeId.TERRAIN :
+      google.maps.MapTypeId.ROADMAP
+    // Landmark POI strategy:
+    //   showLandmarks=true (default) — keep helpful navigational POIs
+    //     (parks, schools, transit, places of worship, government,
+    //     attractions) but hide the noisy commercial layer (restaurants,
+    //     shops, business). This is the bike-with-kids-friendly mode:
+    //     parents look for parks and transit landmarks; not for the
+    //     nearest cafe.
+    //   showLandmarks=false — hide ALL POIs. Useful when the bike-infra
+    //     overlay is dense and any extra clutter hurts.
+    // Only applied to roadmap; satellite/hybrid/terrain tiles paint POIs
+    // into the imagery so styles array doesn't reach them.
+    const showLandmarks = options.googleShowLandmarks ?? true
+    const styles: google.maps.MapTypeStyle[] = showLandmarks
+      ? [
+          { featureType: 'poi.business',       stylers: [{ visibility: 'off' }] },
+          { featureType: 'poi.sports_complex', stylers: [{ visibility: 'simplified' }] },
+        ]
+      : [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }]
     this.map = new google.maps.Map(container, {
       center: { lat: options.center[0], lng: options.center[1] },
       zoom: options.zoom,
-      // Disable Google's POIs to reduce visual competition with our
-      // bike-infra overlay. Leaflet tiles don't add POIs by default.
-      styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }],
+      mapTypeId,
+      styles,
       mapTypeControl: false,
       streetViewControl: false,
       fullscreenControl: false,

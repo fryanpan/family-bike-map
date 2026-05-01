@@ -8,7 +8,8 @@ import type { PathLevel } from '../utils/lts'
 import { readEnvKeys as readGeocoderEnvKeys, resolveGeocoder } from '../services/geocoder/resolve'
 import type { GeocoderEngineKind } from '../services/geocoder/types'
 import { readEnvKeys as readMapEngineEnvKeys, resolveEngine } from '../services/mapEngine'
-import type { MapEngineKind } from '../services/mapEngine'
+import { ENGINE_STYLES, STYLE_LABELS } from '../services/mapEngine/resolve'
+import type { MapEngineKind, BaseStyle } from '../services/mapEngine'
 
 // ── Path-type → category mapping (hardcoded from classifyOsmTagsToItem) ─────
 
@@ -101,7 +102,11 @@ export default function AdminSettingsTab() {
   const geocoderEnvKeys = readGeocoderEnvKeys()
   const mapEngineEnvKeys = readMapEngineEnvKeys()
   const resolvedGeocoder = resolveGeocoder(settings.geocoderEngine, geocoderEnvKeys)
-  const resolvedEngine = resolveEngine(settings.mapEngine, mapEngineEnvKeys)
+  const resolvedEngine = resolveEngine(
+    settings.mapEngine,
+    mapEngineEnvKeys,
+    settings.mapStyle === '' ? undefined : settings.mapStyle,
+  )
   const geocoderOptions: Array<{ value: GeocoderEngineKind; label: string; needsKey: boolean }> = [
     { value: 'nominatim', label: 'Nominatim (OpenStreetMap, default)', needsKey: false },
     { value: 'google',    label: 'Google Places (typo-tolerant)',      needsKey: true },
@@ -125,10 +130,42 @@ export default function AdminSettingsTab() {
             style={{ width: 280 }}
           >
             <option value="leaflet-osm">Leaflet + OpenStreetMap Carto (default)</option>
-            <option value="leaflet-maptiler">Leaflet + MapTiler Streets v2 light</option>
+            <option value="leaflet-maptiler">Leaflet + MapTiler</option>
             <option value="google-maps">Google Maps (JavaScript SDK)</option>
           </select>
         </label>
+
+        {/* Style sub-picker — list of cartographic variants the chosen
+            engine supports. Empty value = "engine default". */}
+        <label className="admin-num-field">
+          Style
+          <select
+            className="admin-input"
+            value={settings.mapStyle}
+            onChange={(e) => update('mapStyle', e.target.value as BaseStyle | '')}
+            style={{ width: 280 }}
+          >
+            <option value="">(Engine default)</option>
+            {ENGINE_STYLES[settings.mapEngine].map((s) => (
+              <option key={s} value={s}>{STYLE_LABELS[s]}</option>
+            ))}
+          </select>
+        </label>
+
+        {settings.mapEngine === 'google-maps' && (
+          <label className="admin-toggle-row">
+            <input
+              type="checkbox"
+              checked={settings.googleShowLandmarks}
+              onChange={(e) => update('googleShowLandmarks', e.target.checked)}
+            />
+            <span>
+              Show navigational landmarks (parks, schools, transit, attractions).
+              Hides commercial POIs (restaurants, shops) regardless.
+            </span>
+          </label>
+        )}
+
         <div className="admin-hint">
           Applies to both base tiles AND route / bike-infra polyline rendering.
           Reload the page after changing the engine — hot-swap is not supported.

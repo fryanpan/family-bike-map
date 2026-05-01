@@ -726,7 +726,11 @@ export default function Map(props: Props) {
   useEffect(() => {
     if (!containerRef.current) return
     const env = readEnvKeys()
-    const resolved = resolveEngine(settings.mapEngine, env)
+    const resolved = resolveEngine(
+      settings.mapEngine,
+      env,
+      settings.mapStyle === '' ? undefined : settings.mapStyle,
+    )
     const eng = createEngine(resolved.kind)
     let mounted = true
     eng.mount(containerRef.current, {
@@ -735,6 +739,7 @@ export default function Map(props: Props) {
       baseStyle: resolved.baseStyle,
       maptilerKey: env.maptilerKey,
       googleMapsKey: env.googleMapsKey,
+      googleShowLandmarks: settings.googleShowLandmarks,
     }).then(() => {
       if (mounted) setEngine(eng)
     }).catch((err) => {
@@ -745,8 +750,11 @@ export default function Map(props: Props) {
       eng.unmount()
       setEngine(null)
     }
+  // Re-mount only when engine, style, or POI toggle change — these all
+  // require Google Maps / Leaflet to fully reinitialize. Other settings
+  // mutate live via existing effects.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [settings.mapEngine, settings.mapStyle, settings.googleShowLandmarks])
 
   // The previously-selected segment for the popup. Lives in React state
   // because the popup is a React component portaling onto the map div.

@@ -14,7 +14,33 @@ export type LatLngBounds = [LatLng, LatLng] // [southWest, northEast]
 
 export type MapEngineKind = 'leaflet-osm' | 'leaflet-maptiler' | 'google-maps'
 
-export type BaseStyle = 'osm-carto' | 'maptiler-streets-light' | 'google-default'
+/**
+ * Concrete cartographic style. Each engine accepts a subset:
+ *   - leaflet-osm:      'osm-carto' | 'cartocdn-voyager' | 'cartocdn-positron'
+ *   - leaflet-maptiler: 'maptiler-streets-light' | 'maptiler-streets' |
+ *                       'maptiler-streets-dark' | 'maptiler-outdoor' |
+ *                       'maptiler-satellite'
+ *   - google-maps:      'google-roadmap' | 'google-satellite' |
+ *                       'google-hybrid'  | 'google-terrain'
+ * `resolveEngine` clamps an out-of-engine choice back to that engine's
+ * default, so callers can store user preference unconditionally.
+ */
+export type BaseStyle =
+  // Leaflet OSM raster
+  | 'osm-carto'
+  | 'cartocdn-voyager'
+  | 'cartocdn-positron'
+  // MapTiler
+  | 'maptiler-streets-light'
+  | 'maptiler-streets'
+  | 'maptiler-streets-dark'
+  | 'maptiler-outdoor'
+  | 'maptiler-satellite'
+  // Google Maps
+  | 'google-roadmap'
+  | 'google-satellite'
+  | 'google-hybrid'
+  | 'google-terrain'
 
 export interface MapInitOptions {
   center: LatLng
@@ -24,6 +50,11 @@ export interface MapInitOptions {
    *  don't need them ignore the field. */
   maptilerKey?: string
   googleMapsKey?: string
+  /** Google-only: when true (default), the basemap shows navigational
+   *  POIs (parks, schools, transit, landmarks) but hides noisy commercial
+   *  POIs (restaurants, shops). When false, all POIs are hidden — the
+   *  pre-2026-05 behaviour. Ignored by Leaflet engines. */
+  googleShowLandmarks?: boolean
 }
 
 export interface PolylineStyle {

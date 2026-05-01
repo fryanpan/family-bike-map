@@ -34,7 +34,53 @@ export function readEnvKeys(): EngineEnv {
   }
 }
 
-export function resolveEngine(requested: MapEngineKind, env: EngineEnv): ResolvedEngine {
+/**
+ * Concrete styles each engine accepts. The admin settings store a
+ * single `mapStyle` string that's free to be any BaseStyle; resolveEngine
+ * clamps it to a style the chosen engine actually supports (and to the
+ * fallback engine's default when a key is missing).
+ */
+export const ENGINE_STYLES: Record<MapEngineKind, BaseStyle[]> = {
+  'leaflet-osm':      ['osm-carto', 'cartocdn-voyager', 'cartocdn-positron'],
+  'leaflet-maptiler': [
+    'maptiler-streets-light', 'maptiler-streets', 'maptiler-streets-dark',
+    'maptiler-outdoor', 'maptiler-satellite',
+  ],
+  'google-maps':      ['google-roadmap', 'google-satellite', 'google-hybrid', 'google-terrain'],
+}
+
+const DEFAULT_STYLE: Record<MapEngineKind, BaseStyle> = {
+  'leaflet-osm':      'osm-carto',
+  'leaflet-maptiler': 'maptiler-streets-light',
+  'google-maps':      'google-roadmap',
+}
+
+/** Human-friendly labels for the admin dropdown. */
+export const STYLE_LABELS: Record<BaseStyle, string> = {
+  'osm-carto':                'OSM Carto (default)',
+  'cartocdn-voyager':         'CARTO Voyager',
+  'cartocdn-positron':        'CARTO Positron',
+  'maptiler-streets-light':   'MapTiler Streets light',
+  'maptiler-streets':         'MapTiler Streets',
+  'maptiler-streets-dark':    'MapTiler Streets dark',
+  'maptiler-outdoor':         'MapTiler Outdoor',
+  'maptiler-satellite':       'MapTiler Satellite',
+  'google-roadmap':           'Google Roadmap',
+  'google-satellite':         'Google Satellite',
+  'google-hybrid':            'Google Hybrid',
+  'google-terrain':           'Google Terrain',
+}
+
+function clampStyle(engine: MapEngineKind, requested: BaseStyle | undefined): BaseStyle {
+  if (requested && ENGINE_STYLES[engine].includes(requested)) return requested
+  return DEFAULT_STYLE[engine]
+}
+
+export function resolveEngine(
+  requested: MapEngineKind,
+  env: EngineEnv,
+  requestedStyle?: BaseStyle,
+): ResolvedEngine {
   if (requested === 'leaflet-maptiler') {
     if (!env.maptilerKey) {
       console.warn(
@@ -43,12 +89,16 @@ export function resolveEngine(requested: MapEngineKind, env: EngineEnv): Resolve
       )
       return {
         kind: 'leaflet-osm',
-        baseStyle: 'osm-carto',
+        baseStyle: clampStyle('leaflet-osm', requestedStyle),
         fellBack: true,
         fallbackReason: 'VITE_MAPTILER_KEY missing',
       }
     }
-    return { kind: 'leaflet-maptiler', baseStyle: 'maptiler-streets-light', fellBack: false }
+    return {
+      kind: 'leaflet-maptiler',
+      baseStyle: clampStyle('leaflet-maptiler', requestedStyle),
+      fellBack: false,
+    }
   }
 
   if (requested === 'google-maps') {
@@ -59,13 +109,21 @@ export function resolveEngine(requested: MapEngineKind, env: EngineEnv): Resolve
       )
       return {
         kind: 'leaflet-osm',
-        baseStyle: 'osm-carto',
+        baseStyle: clampStyle('leaflet-osm', requestedStyle),
         fellBack: true,
         fallbackReason: 'VITE_GOOGLE_MAPS_KEY missing',
       }
     }
-    return { kind: 'google-maps', baseStyle: 'google-default', fellBack: false }
+    return {
+      kind: 'google-maps',
+      baseStyle: clampStyle('google-maps', requestedStyle),
+      fellBack: false,
+    }
   }
 
-  return { kind: 'leaflet-osm', baseStyle: 'osm-carto', fellBack: false }
+  return {
+    kind: 'leaflet-osm',
+    baseStyle: clampStyle('leaflet-osm', requestedStyle),
+    fellBack: false,
+  }
 }

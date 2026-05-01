@@ -36,17 +36,43 @@ L.Icon.Default.mergeOptions({
 let nextHandleId = 1
 function makeId(): number { return nextHandleId++ }
 
-const TILE_OSM = {
-  url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+// Raster tile providers — each entry is a URL template + attribution.
+// Picked by `BaseStyle` in mount(). Anything not matched falls through
+// to the OSM Carto default.
+const ATTR_OSM      = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+const ATTR_CARTO    = '&copy; <a href="https://carto.com/attributions">CARTO</a> ' + ATTR_OSM
+const ATTR_MAPTILER = '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> ' + ATTR_OSM
+
+const OSM_TILES: Record<string, { url: string; attribution: string }> = {
+  'osm-carto': {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: ATTR_OSM,
+  },
+  'cartocdn-voyager': {
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+    attribution: ATTR_CARTO,
+  },
+  'cartocdn-positron': {
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+    attribution: ATTR_CARTO,
+  },
 }
 
-function maptilerTile(key: string) {
+// MapTiler style → tileset path. Each style is hosted at
+// /maps/<id>/256/{z}/{x}/{y}.<ext>?key=…
+const MAPTILER_STYLES: Record<string, { path: string; ext: string }> = {
+  'maptiler-streets-light': { path: 'streets-v2-light', ext: 'png' },
+  'maptiler-streets':       { path: 'streets-v2',       ext: 'png' },
+  'maptiler-streets-dark':  { path: 'streets-v2-dark',  ext: 'png' },
+  'maptiler-outdoor':       { path: 'outdoor-v2',       ext: 'png' },
+  'maptiler-satellite':     { path: 'satellite-v2',     ext: 'jpg' },
+}
+
+function maptilerTile(style: string, key: string) {
+  const entry = MAPTILER_STYLES[style] ?? MAPTILER_STYLES['maptiler-streets-light']
   return {
-    url: `https://api.maptiler.com/maps/streets-v2-light/256/{z}/{x}/{y}.png?key=${key}`,
-    attribution:
-      '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> ' +
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    url: `https://api.maptiler.com/maps/${entry.path}/256/{z}/{x}/{y}.${entry.ext}?key=${key}`,
+    attribution: ATTR_MAPTILER,
   }
 }
 
@@ -72,10 +98,10 @@ export class LeafletEngine implements MapEngine {
     })
     this.canvasRenderer = L.canvas({ padding: 0.5 })
 
-    const tile =
-      options.baseStyle === 'maptiler-streets-light' && options.maptilerKey
-        ? maptilerTile(options.maptilerKey)
-        : TILE_OSM
+    const isMaptiler = options.baseStyle.startsWith('maptiler-')
+    const tile = isMaptiler && options.maptilerKey
+      ? maptilerTile(options.baseStyle, options.maptilerKey)
+      : OSM_TILES[options.baseStyle] ?? OSM_TILES['osm-carto']
     // Use CachedTileLayer so base tiles paint from IndexedDB on a return
     // visit before any network fetch starts (sub-second second-load goal).
     // Drop-in replacement for L.TileLayer — same constructor signature.

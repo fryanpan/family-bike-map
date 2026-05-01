@@ -11,7 +11,7 @@ import { useSyncExternalStore } from 'react'
 import type { RideMode } from '../data/modes'
 import { PATH_LEVELS, PATH_LEVEL_LABELS, type PathLevel } from '../utils/lts'
 import type { GeocoderEngineKind } from './geocoder/types'
-import type { MapEngineKind } from './mapEngine/types'
+import type { MapEngineKind, BaseStyle } from './mapEngine/types'
 
 const STORAGE_KEY = 'family-bike-map:admin-settings:v1'
 
@@ -74,6 +74,15 @@ export interface AdminSettings {
    *  src/services/mapEngine/resolve.ts). Change requires page reload —
    *  hot-swap of the underlying map library is too fragile to support. */
   mapEngine: MapEngineKind
+  /** Cartographic style within the chosen engine (Roadmap vs Satellite
+   *  for Google, Streets-light vs Outdoor for MapTiler, etc.). Stored
+   *  as a flat string; resolveEngine clamps it to a value the chosen
+   *  engine actually supports. Empty string = "use the engine default". */
+  mapStyle: BaseStyle | ''
+  /** Google Maps only: show navigational POIs (parks, schools, transit,
+   *  landmarks) on the basemap. Set false to hide all POIs — same
+   *  behaviour as before May 2026. Ignored by other engines. */
+  googleShowLandmarks: boolean
 }
 
 // Tier defaults are derived from PATH_LEVEL_LABELS so the legend table
@@ -102,6 +111,8 @@ export const DEFAULT_SETTINGS: AdminSettings = {
   modeRouting: {},
   geocoderEngine: 'nominatim',
   mapEngine: 'leaflet-osm',
+  mapStyle: '',
+  googleShowLandmarks: true,
 }
 
 // ── Load/save ──────────────────────────────────────────────────────────────

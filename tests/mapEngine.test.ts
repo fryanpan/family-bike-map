@@ -27,7 +27,7 @@ describe('resolveEngine', () => {
   it('returns google-maps when google key present', () => {
     const r = resolveEngine('google-maps', { googleMapsKey: 'xyz' })
     expect(r.kind).toBe('google-maps')
-    expect(r.baseStyle).toBe('google-default')
+    expect(r.baseStyle).toBe('google-roadmap')
     expect(r.fellBack).toBe(false)
   })
 
@@ -36,5 +36,24 @@ describe('resolveEngine', () => {
     expect(r.kind).toBe('leaflet-osm')
     expect(r.fellBack).toBe(true)
     expect(r.fallbackReason).toContain('VITE_GOOGLE_MAPS_KEY')
+  })
+
+  it('honours requested style when supported by the engine', () => {
+    const r = resolveEngine('google-maps', { googleMapsKey: 'xyz' }, 'google-satellite')
+    expect(r.kind).toBe('google-maps')
+    expect(r.baseStyle).toBe('google-satellite')
+  })
+
+  it('clamps incompatible style to engine default', () => {
+    // 'google-satellite' isn't valid on leaflet-osm — falls back to osm-carto
+    const r = resolveEngine('leaflet-osm', {}, 'google-satellite')
+    expect(r.kind).toBe('leaflet-osm')
+    expect(r.baseStyle).toBe('osm-carto')
+  })
+
+  it('clamps style when key missing forces engine fallback', () => {
+    const r = resolveEngine('google-maps', {}, 'osm-carto')
+    expect(r.kind).toBe('leaflet-osm')
+    expect(r.baseStyle).toBe('osm-carto')
   })
 })
