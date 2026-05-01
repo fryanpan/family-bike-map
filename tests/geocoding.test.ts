@@ -1,6 +1,24 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test'
+import { NominatimGeocoder } from '../src/services/geocoder/NominatimGeocoder'
+import type { Place } from '../src/utils/types'
 
-// We test the internal helpers and the fetch-branching logic by mocking globalThis.fetch.
+// These tests exercise the Nominatim engine specifically (mocked fetch
+// + Nominatim response shapes). The previous version called through
+// `searchPlaces()` which routes via the active geocoder; that broke
+// when the default flipped to Google because Bun's test env has no
+// `window`. Calling NominatimGeocoder directly is closer to what
+// we're actually testing anyway.
+
+// `searchPlaces` is a one-liner over `autocomplete + placeDetails`.
+// We replicate it here so the test still asserts end-to-end Place
+// shape. Nominatim's `placeDetails` is a passthrough so this is the
+// same logic the production facade runs.
+async function searchPlacesNominatim(query: string): Promise<Place[]> {
+  const engine = new NominatimGeocoder()
+  const hits = await engine.autocomplete(query)
+  const places = await Promise.all(hits.map((h) => engine.placeDetails(h)))
+  return places.filter((p): p is Place => p !== null)
+}
 
 // Helper to build a Nominatim-style result
 function makeResult(overrides: {
@@ -20,8 +38,8 @@ function makeResult(overrides: {
 }
 
 // ── shortLabel formatting ─────────────────────────────────────────────────────
-// We test the label mapping logic in isolation by importing the module and
-// observing the Place objects returned from mocked fetch calls.
+// We test the label mapping logic in isolation by mocking globalThis.fetch
+// and observing the Place objects returned.
 
 describe('searchPlaces — shortLabel formatting', () => {
   let originalFetch: typeof fetch
@@ -36,15 +54,13 @@ describe('searchPlaces — shortLabel formatting', () => {
 
   it('uses road + house_number as shortLabel when address details are present', async () => {
     stubFetch([makeResult({ address: { road: 'Dresdener Straße', house_number: '112' } })])
-    const { searchPlaces } = await import('../src/services/geocoding')
-    const [place] = await searchPlaces('Dresdener Str 112')
+    const [place] = await searchPlacesNominatim('Dresdener Str 112')
     expect(place.shortLabel).toBe('Dresdener Straße 112')
   })
 
   it('uses road alone when no house_number', async () => {
     stubFetch([makeResult({ address: { road: 'Dresdener Straße' } })])
-    const { searchPlaces } = await import('../src/services/geocoding')
-    const [place] = await searchPlaces('Dresdener Str')
+    const [place] = await searchPlacesNominatim('Dresdener Str')
     expect(place.shortLabel).toBe('Dresdener Straße')
   })
 
@@ -52,22 +68,19 @@ describe('searchPlaces — shortLabel formatting', () => {
     // Regression: POI results (e.g. "Humboldt Forum") have both name and address.road.
     // shortLabel must be the POI name, not the road it sits on.
     stubFetch([makeResult({ name: 'Humboldt Forum', address: { road: 'Schloßplatz' } })])
-    const { searchPlaces } = await import('../src/services/geocoding')
-    const [place] = await searchPlaces('Humboldt Forum')
+    const [place] = await searchPlacesNominatim('Humboldt Forum')
     expect(place.shortLabel).toBe('Humboldt Forum')
   })
 
   it('uses name when no address', async () => {
     stubFetch([makeResult({ name: 'Tiergarten', address: undefined })])
-    const { searchPlaces } = await import('../src/services/geocoding')
-    const [place] = await searchPlaces('Tiergarten')
+    const [place] = await searchPlacesNominatim('Tiergarten')
     expect(place.shortLabel).toBe('Tiergarten')
   })
 
   it('falls back to first display_name segment when no name or address', async () => {
     stubFetch([makeResult({ name: undefined, address: undefined, display_name: 'Alexanderplatz, Mitte, Berlin' })])
-    const { searchPlaces } = await import('../src/services/geocoding')
-    const [place] = await searchPlaces('Alexanderplatz')
+    const [place] = await searchPlacesNominatim('Alexanderplatz')
     expect(place.shortLabel).toBe('Alexanderplatz')
   })
 })
@@ -90,8 +103,7 @@ describe('searchPlaces — structured address search', () => {
       })
     }) as unknown as typeof fetch
 
-    const { searchPlaces } = await import('../src/services/geocoding')
-    const results = await searchPlaces('Dresdener Str 112')
+    const results = await searchPlacesNominatim('Dresdener Str 112')
 
     // First call should be structured (contains street= param)
     expect(calls[0]).toContain('street=')
@@ -115,8 +127,7 @@ describe('searchPlaces — structured address search', () => {
       })
     }) as unknown as typeof fetch
 
-    const { searchPlaces } = await import('../src/services/geocoding')
-    const results = await searchPlaces('Dresdener Str 112')
+    const results = await searchPlacesNominatim('Dresdener Str 112')
 
     expect(callCount).toBe(2)
     expect(results).toHaveLength(1)
@@ -132,8 +143,7 @@ describe('searchPlaces — structured address search', () => {
       })
     }) as unknown as typeof fetch
 
-    const { searchPlaces } = await import('../src/services/geocoding')
-    await searchPlaces('Tiergarten')
+    await searchPlacesNominatim('Tiergarten')
 
     expect(calls).toHaveLength(1)
     expect(calls[0]).toContain('q=Tiergarten')
@@ -152,16 +162,14 @@ describe('searchPlaces — structured address search', () => {
       })
     }) as unknown as typeof fetch
 
-    const { searchPlaces } = await import('../src/services/geocoding')
-    await searchPlaces('Unter den Linden 1')
+    await searchPlacesNominatim('Unter den Linden 1')
 
     const freeTextCall = calls.find((c) => c.includes('q='))
     expect(freeTextCall).toBeDefined()
   })
 
   it('returns empty array for queries shorter than 2 chars', async () => {
-    const { searchPlaces } = await import('../src/services/geocoding')
-    expect(await searchPlaces('')).toEqual([])
-    expect(await searchPlaces('A')).toEqual([])
+    expect(await searchPlacesNominatim('')).toEqual([])
+    expect(await searchPlacesNominatim('A')).toEqual([])
   })
 })
