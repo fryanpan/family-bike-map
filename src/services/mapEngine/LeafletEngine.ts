@@ -17,6 +17,7 @@ import type {
   PolylineStyle, PolylineHandlers, PolylineHandle,
   MarkerIcon, MarkerHandlers, MarkerOptions, MarkerHandle,
   PopupOptions, PopupHandle,
+  PathLayerFeature, PathLayerHandlers, PathLayerHandle,
 } from './types'
 
 // Fix Leaflet default icons broken by Vite's asset bundling. Same fix
@@ -57,9 +58,10 @@ export class LeafletEngine implements MapEngine {
   /** Shared canvas renderer — assigned to polylines that opt in via
    *  PolylineStyle.useCanvasRenderer. Created on mount. */
   private canvasRenderer: L.Renderer | null = null
-  private polylines = new Map<number, L.Polyline>()
-  private markers   = new Map<number, L.Marker>()
-  private popups    = new Map<number, L.Popup>()
+  private polylines  = new Map<number, L.Polyline>()
+  private pathLayers = new Map<number, number[]>()  // layer id → polyline ids
+  private markers    = new Map<number, L.Marker>()
+  private popups     = new Map<number, L.Popup>()
 
   async mount(container: HTMLElement, options: MapInitOptions): Promise<void> {
     if (this.map) throw new Error('LeafletEngine already mounted')
@@ -87,6 +89,7 @@ export class LeafletEngine implements MapEngine {
     this.tileLayer = null
     this.canvasRenderer = null
     this.polylines.clear()
+    this.pathLayers.clear()
     this.markers.clear()
     this.popups.clear()
   }
@@ -204,6 +207,48 @@ export class LeafletEngine implements MapEngine {
     if (!ply) return
     ply.remove()
     this.polylines.delete(handle.id)
+  }
+
+  // ── Path layers (bulk) ──────────────────────────────────────────────
+  // Leaflet's canvas renderer already batches many polylines into one
+  // paint, so the "bulk" path is just a loop over addPolyline. We track
+  // the resulting polyline ids in a single layer handle so the consumer
+  // can drop the whole batch at once.
+  addPathLayer(features: PathLayerFeature[], handlers?: PathLayerHandlers): PathLayerHandle {
+    const layerId = makeId()
+    const polyIds: number[] = []
+    for (const f of features) {
+      const onClick = handlers?.onClick
+        ? (latLng: LatLng) => handlers.onClick!(f.id, latLng, f.meta)
+        : undefined
+      const ph = this.addPolyline(
+        f.coordinates,
+        {
+          color: f.color,
+          weight: f.width,
+          opacity: f.opacity,
+          dashArray: f.dashArray,
+          useCanvasRenderer: true,
+        },
+        onClick ? { onClick } : undefined,
+      )
+      polyIds.push(ph.id)
+    }
+    this.pathLayers.set(layerId, polyIds)
+    return { __brand: 'pathLayer', id: layerId }
+  }
+
+  removePathLayer(handle: PathLayerHandle): void {
+    const ids = this.pathLayers.get(handle.id)
+    if (!ids) return
+    for (const id of ids) {
+      const ply = this.polylines.get(id)
+      if (ply) {
+        ply.remove()
+        this.polylines.delete(id)
+      }
+    }
+    this.pathLayers.delete(handle.id)
   }
 
   // ── Markers ─────────────────────────────────────────────────────────

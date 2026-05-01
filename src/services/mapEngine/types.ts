@@ -126,6 +126,38 @@ export type MapEvent = MapClickEvent | MapZoomEvent | MapMoveEvent | MapResizeEv
 export interface PolylineHandle { readonly __brand: 'polyline'; readonly id: number }
 export interface MarkerHandle    { readonly __brand: 'marker';   readonly id: number }
 export interface PopupHandle     { readonly __brand: 'popup';    readonly id: number }
+export interface PathLayerHandle { readonly __brand: 'pathLayer'; readonly id: number }
+
+/**
+ * Bulk path features for `addPathLayer`. Each feature has its own
+ * geometry + style (color/width/opacity). Used for the bike-infra
+ * overlay where thousands of segments at city-overview zooms are too
+ * many for one-Polyline-per-segment rendering.
+ *
+ * On Google Maps this is rendered via deck.gl's PathLayer (one WebGL
+ * draw call regardless of feature count). On Leaflet the engine falls
+ * back to per-polyline addPolyline since Leaflet's canvas renderer
+ * already batches efficiently.
+ */
+export interface PathLayerFeature {
+  /** Stable id for click-back identification. Must be unique within the layer. */
+  readonly id: string | number
+  readonly coordinates: LatLng[]
+  readonly color: string
+  readonly width: number
+  readonly opacity: number
+  /** Optional dash pattern for stipple effects (e.g. rough surfaces). */
+  readonly dashArray?: string
+  /** Arbitrary payload echoed back to onClick handlers. */
+  readonly meta?: unknown
+}
+
+export interface PathLayerHandlers {
+  /** Fired when a path is clicked. The feature's id and meta are echoed
+   *  back so the consumer can dispatch on it without holding a closure
+   *  per feature. */
+  onClick?: (featureId: string | number, latLng: LatLng, meta: unknown) => void
+}
 
 export interface MapEngine {
   readonly kind: 'leaflet' | 'google'
@@ -157,6 +189,14 @@ export interface MapEngine {
   addPolyline(coords: LatLng[], style: PolylineStyle, handlers?: PolylineHandlers): PolylineHandle
   updatePolyline(handle: PolylineHandle, partial: Partial<PolylineStyle>): void
   removePolyline(handle: PolylineHandle): void
+
+  // ── Path layers (bulk) ────────────────────────────────────────────────
+  /** Render many paths as a single batched layer. Use for hundreds-to-
+   *  thousands of small lines (bike-infra overlay) where one Polyline
+   *  per feature is too expensive. Returns one handle for the whole
+   *  batch; replace by calling removePathLayer + addPathLayer. */
+  addPathLayer(features: PathLayerFeature[], handlers?: PathLayerHandlers): PathLayerHandle
+  removePathLayer(handle: PathLayerHandle): void
 
   // ── Markers ───────────────────────────────────────────────────────────
   addMarker(latLng: LatLng, icon: MarkerIcon, handlers?: MarkerHandlers, options?: MarkerOptions): MarkerHandle

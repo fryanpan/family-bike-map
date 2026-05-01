@@ -22,6 +22,7 @@ import type {
   PolylineStyle, PolylineHandlers, PolylineHandle,
   MarkerIcon, MarkerHandlers, MarkerOptions, MarkerHandle,
   PopupOptions, PopupHandle,
+  PathLayerFeature, PathLayerHandlers, PathLayerHandle,
 } from './types'
 
 let nextHandleId = 1
@@ -63,6 +64,21 @@ function dashArrayToIconSequence(
   }
 }
 
+/**
+ * Convert "#rrggbb" or "#rgb" + opacity (0..1) into deck.gl's
+ * [r, g, b, a] 0-255 array format. deck.gl PathLayer's getColor returns
+ * this shape; we keep one helper per engine instead of per layer so the
+ * conversion code lives in one place.
+ */
+function hexToRgba(hex: string, opacity: number): [number, number, number, number] {
+  let h = hex.replace('#', '')
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
+  const r = parseInt(h.slice(0, 2), 16) || 0
+  const g = parseInt(h.slice(2, 4), 16) || 0
+  const b = parseInt(h.slice(4, 6), 16) || 0
+  return [r, g, b, Math.round(Math.max(0, Math.min(1, opacity)) * 255)]
+}
+
 // Cached Google API promise — multiple LeafletEngine→GoogleEngine swaps
 // would otherwise re-load the SDK on each remount.
 let googleApiPromise: Promise<typeof google.maps> | null = null
@@ -91,6 +107,14 @@ export class GoogleMapsEngine implements MapEngine {
   private polylineDashIcons = new Map<number, google.maps.IconSequence[]>() // for dashed
   private markers   = new Map<number, google.maps.Marker | google.maps.OverlayView>()
   private popups    = new Map<number, google.maps.InfoWindow>()
+  // deck.gl GoogleMapsOverlay — lazily created on first addPathLayer.
+  // We keep one overlay and feed it an array of PathLayers; each call
+  // to addPathLayer adds a layer, removePathLayer drops it. Lazy init
+  // keeps deck.gl out of the bundle's critical path until needed.
+  private deckOverlay: import('@deck.gl/google-maps').GoogleMapsOverlay | null = null
+  private deckLayers = new Map<number, import('@deck.gl/layers').PathLayer>()
+  private pathLayerHandlers = new Map<number, PathLayerHandlers>()
+  private pathLayerFeatures = new Map<number, PathLayerFeature[]>()
 
   async mount(container: HTMLElement, options: MapInitOptions): Promise<void> {
     if (this.map) throw new Error('GoogleMapsEngine already mounted')
@@ -119,6 +143,14 @@ export class GoogleMapsEngine implements MapEngine {
       anyMarker.setMap?.(null)
     }
     for (const p of this.popups.values()) p.close()
+    if (this.deckOverlay) {
+      this.deckOverlay.setMap(null)
+      this.deckOverlay.finalize?.()
+      this.deckOverlay = null
+    }
+    this.deckLayers.clear()
+    this.pathLayerHandlers.clear()
+    this.pathLayerFeatures.clear()
     this.polylines.clear()
     this.polylineDashIcons.clear()
     this.markers.clear()
@@ -331,6 +363,88 @@ export class GoogleMapsEngine implements MapEngine {
     ply.setMap(null)
     this.polylines.delete(handle.id)
     this.polylineDashIcons.delete(handle.id)
+  }
+
+  // ── Path layers (deck.gl bulk renderer) ─────────────────────────────
+  // Renders all features in one WebGL draw call via deck.gl's
+  // GoogleMapsOverlay + PathLayer. Critical for the bike-infra overlay
+  // which can be thousands of segments at city-overview zooms — one
+  // google.maps.Polyline per segment dies on mobile, but a single
+  // batched layer holds 60fps. The overlay is created lazily on the
+  // first call and shared across all PathLayers.
+  addPathLayer(features: PathLayerFeature[], handlers?: PathLayerHandlers): PathLayerHandle {
+    const map = this.requireMap()
+    const layerId = makeId()
+    void this.ensureDeckOverlay(map).then(({ GoogleMapsOverlay, PathLayer }) => {
+      if (!this.map) return // unmounted while loading
+      if (!this.deckOverlay) {
+        this.deckOverlay = new GoogleMapsOverlay({ layers: [] })
+        this.deckOverlay.setMap(this.map)
+      }
+      this.pathLayerFeatures.set(layerId, features)
+      if (handlers) this.pathLayerHandlers.set(layerId, handlers)
+      const layer = this.buildDeckPathLayer(PathLayer, layerId, features, handlers)
+      this.deckLayers.set(layerId, layer)
+      this.deckOverlay.setProps({ layers: Array.from(this.deckLayers.values()) })
+    })
+    return { __brand: 'pathLayer', id: layerId }
+  }
+
+  removePathLayer(handle: PathLayerHandle): void {
+    if (!this.deckLayers.has(handle.id)) return
+    this.deckLayers.delete(handle.id)
+    this.pathLayerHandlers.delete(handle.id)
+    this.pathLayerFeatures.delete(handle.id)
+    if (this.deckOverlay) {
+      this.deckOverlay.setProps({ layers: Array.from(this.deckLayers.values()) })
+    }
+  }
+
+  // Lazy-load deck.gl modules. Both packages are dynamically imported on
+  // first use so the deck.gl bundle (~150 KB gzip) doesn't ship with the
+  // initial app shell. Cached by the import system after the first call.
+  private async ensureDeckOverlay(_map: google.maps.Map): Promise<{
+    GoogleMapsOverlay: typeof import('@deck.gl/google-maps').GoogleMapsOverlay
+    PathLayer: typeof import('@deck.gl/layers').PathLayer
+  }> {
+    const [{ GoogleMapsOverlay }, { PathLayer }] = await Promise.all([
+      import('@deck.gl/google-maps'),
+      import('@deck.gl/layers'),
+    ])
+    return { GoogleMapsOverlay, PathLayer }
+  }
+
+  private buildDeckPathLayer(
+    PathLayerCtor: typeof import('@deck.gl/layers').PathLayer,
+    layerId: number,
+    features: PathLayerFeature[],
+    handlers?: PathLayerHandlers,
+  ): import('@deck.gl/layers').PathLayer {
+    // deck.gl's PathLayer accessor types are loose; cast at the seam.
+    return new PathLayerCtor({
+      id: 'family-bike-path-' + layerId,
+      data: features as unknown as object[],
+      // deck.gl expects [lng, lat] coordinate order; our LatLng is
+      // [lat, lng], so we flip per vertex.
+      getPath: ((f: PathLayerFeature) => f.coordinates.map(([lat, lng]) => [lng, lat])) as never,
+      getColor: ((f: PathLayerFeature) => hexToRgba(f.color, f.opacity)) as never,
+      getWidth: ((f: PathLayerFeature) => f.width) as never,
+      widthUnits: 'pixels',
+      widthMinPixels: 1,
+      pickable: !!handlers?.onClick,
+      // Smoother visual when paths cross — round joints/caps match
+      // Leaflet's default polyline rendering.
+      jointRounded: true,
+      capRounded: true,
+      onClick: handlers?.onClick
+        ? (info: { object?: PathLayerFeature; coordinate?: number[] }) => {
+            if (!info.object) return
+            const c = info.coordinate
+            const latLng: LatLng = c ? [c[1], c[0]] : info.object.coordinates[0]
+            handlers.onClick!(info.object.id, latLng, info.object.meta)
+          }
+        : undefined,
+    })
   }
 
   // ── Markers ─────────────────────────────────────────────────────────

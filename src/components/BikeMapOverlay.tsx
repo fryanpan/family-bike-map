@@ -10,7 +10,7 @@ import { colorForLevel, weightMultiplierForLevel } from './SimpleLegend'
 import { useAdminSettings } from '../services/adminSettings'
 import { getStreetViewUrl } from '../services/streetview'
 import { useMapEngine } from '../services/mapEngine/context'
-import type { MapEngine, PolylineHandle, PopupHandle } from '../services/mapEngine'
+import type { MapEngine, PolylineHandle, PopupHandle, PathLayerHandle, PathLayerFeature } from '../services/mapEngine'
 import type { ClassificationRule } from '../services/rules'
 import type { OsmWay } from '../utils/types'
 
@@ -117,6 +117,7 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, showOth
 
   useEffect(() => {
     const polylineHandles: PolylineHandle[] = []
+    const pathLayerHandles: PathLayerHandle[] = []
     let openPopup: PopupHandle | null = null
 
     const BROWSING_WEIGHT = 4
@@ -167,67 +168,77 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, showOth
       void isPreferred
     }
 
-    // Pass 1 — halos. Done first so a later coloured polyline isn't
-    // overpainted by a neighbour's halo at shared junction nodes.
-    for (const r of toRender) {
-      if (!r.drawHalo) continue
-      polylineHandles.push(engine.addPolyline(
-        r.way.coordinates,
+    // Index toRender by way.id so the click handler can dispatch from
+    // the deck.gl PathLayer's onClick — feature.id is echoed back to us.
+    const wayIndex = new Map<string | number, RenderedWay>()
+    for (const r of toRender) wayIndex.set(r.way.osmId, r)
+
+    const openSegmentPopup = (r: RenderedWay) => {
+      if (openPopup) engine.closePopup(openPopup)
+      const mid = r.way.coordinates[Math.floor(r.way.coordinates.length / 2)]
+      const handle = engine.openPopup(
+        mid,
+        buildTooltipHtml(r.itemName, r.way.tags, r.isPreferred, null),
         {
-          color: '#ffffff',
-          weight: r.weight + settings.overlayHaloExtra,
-          opacity: r.opacity,
-          interactive: false,
-          useCanvasRenderer: true,
+          maxWidth: 260,
+          className: 'bike-segment-popup',
+          onClose: () => { if (openPopup === handle) openPopup = null },
         },
-      ))
+      )
+      openPopup = handle
+      const imgUrl = getStreetViewUrl(mid[0], mid[1], { size: '400x240' })
+      engine.updatePopup(handle, buildTooltipHtml(r.itemName, r.way.tags, r.isPreferred, imgUrl))
     }
 
-    // Pass 2 — coloured polylines + transparent wider hit polyline for
-    // mobile taps. Hit polyline added FIRST so the visible line still
-    // paints on top.
+    // Pass 1 — halos. Done first (lowest z-order) so a later coloured
+    // polyline isn't overpainted by a neighbour's halo at shared
+    // junction nodes. Drawn in a single bulk PathLayer for perf.
+    const haloFeatures: PathLayerFeature[] = []
     for (const r of toRender) {
-      const { way, color, weight, opacity, itemName, isPreferred } = r
+      if (!r.drawHalo) continue
+      haloFeatures.push({
+        id: 'halo:' + r.way.osmId,
+        coordinates: r.way.coordinates,
+        color: '#ffffff',
+        width: r.weight + settings.overlayHaloExtra,
+        opacity: r.opacity,
+      })
+    }
+    if (haloFeatures.length > 0) {
+      pathLayerHandles.push(engine.addPathLayer(haloFeatures))
+    }
 
-      const onClick = () => {
-        if (openPopup) engine.closePopup(openPopup)
-        // Open the popup with placeholder content; lazy-load Street View
-        // image once and update it in.
-        const handle = engine.openPopup(
-          way.coordinates[Math.floor(way.coordinates.length / 2)],
-          buildTooltipHtml(itemName, way.tags, isPreferred, null),
-          {
-            maxWidth: 260,
-            className: 'bike-segment-popup',
-            onClose: () => { if (openPopup === handle) openPopup = null },
-          },
-        )
-        openPopup = handle
-        const mid = way.coordinates[Math.floor(way.coordinates.length / 2)]
-        const imgUrl = getStreetViewUrl(mid[0], mid[1], { size: '400x240' })
-        // The proxied URL just needs to be set into the popup HTML —
-        // the browser fetches the image directly via <img src>.
-        engine.updatePopup(handle, buildTooltipHtml(itemName, way.tags, isPreferred, imgUrl))
-      }
-
-      // Transparent hit-area polyline (added first → bottom z-order).
-      polylineHandles.push(engine.addPolyline(
-        way.coordinates,
-        {
-          color: '#000',
-          weight: HIT_POLYLINE_WEIGHT,
-          opacity: 0,
-          useCanvasRenderer: true,
+    // Pass 2a — invisible wide hit-area layer for finger taps. Sits
+    // above halos but below the visible colour, with full hit width
+    // (HIT_POLYLINE_WEIGHT). deck.gl picks at rendered geometry, so
+    // we need this dedicated layer for forgiving mobile taps.
+    const hitFeatures: PathLayerFeature[] = toRender.map((r) => ({
+      id: r.way.osmId,
+      coordinates: r.way.coordinates,
+      color: '#000000',
+      width: HIT_POLYLINE_WEIGHT,
+      opacity: 0,
+      meta: r,
+    }))
+    if (hitFeatures.length > 0) {
+      pathLayerHandles.push(engine.addPathLayer(hitFeatures, {
+        onClick: (id) => {
+          const r = wayIndex.get(id)
+          if (r) openSegmentPopup(r)
         },
-        { onClick },
-      ))
+      }))
+    }
 
-      // Visible coloured polyline (added second → top z-order).
-      polylineHandles.push(engine.addPolyline(
-        way.coordinates,
-        { color, weight, opacity, useCanvasRenderer: true },
-        { onClick },
-      ))
+    // Pass 2b — visible coloured polylines (top z-order of pass 2).
+    const colorFeatures: PathLayerFeature[] = toRender.map((r) => ({
+      id: 'color:' + r.way.osmId,
+      coordinates: r.way.coordinates,
+      color: r.color,
+      width: r.weight,
+      opacity: r.opacity,
+    }))
+    if (colorFeatures.length > 0) {
+      pathLayerHandles.push(engine.addPathLayer(colorFeatures))
     }
 
     // Pass 3 — rough-surface stipple overlay. A fine grey dashed
@@ -277,6 +288,7 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, showOth
 
     return () => {
       for (const h of polylineHandles) engine.removePolyline(h)
+      for (const h of pathLayerHandles) engine.removePathLayer(h)
       if (openPopup) engine.closePopup(openPopup)
     }
   }, [engine, ways, profileKey, preferredItemNames, showOtherPaths, hasRoute, regionRules, settings, zoom])
