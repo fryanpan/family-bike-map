@@ -124,7 +124,13 @@ export interface PopupOptions {
 }
 
 export interface FitBoundsOptions {
-  /** Padding in pixels: [top, left] / [bottom, right]. */
+  /**
+   * Padding in pixels expressed as `[x, y]` (Leaflet `Point` convention):
+   *   - `paddingTopLeft  = [left, top]`
+   *   - `paddingBottomRight = [right, bottom]`
+   * So mobile values like `[40, 100]` = 40 px horizontal, 100 px
+   * vertical reserved for chrome at the top-left corner.
+   */
   paddingTopLeft?: [number, number]
   paddingBottomRight?: [number, number]
   animate?: boolean

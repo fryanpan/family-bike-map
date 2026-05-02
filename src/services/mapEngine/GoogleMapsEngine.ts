@@ -65,6 +65,26 @@ function dashArrayToIconSequence(
 }
 
 /**
+ * Map our `FitBoundsOptions` padding (Leaflet Point convention,
+ * `paddingTopLeft = [x, y] = [left, top]`) onto Google's `Padding`
+ * shape `{ top, left, bottom, right }`. Exported for unit testing —
+ * the original inline mapping had x/y swapped, which collapsed mobile
+ * route fits down to "zoomed all the way out" because the adapter ate
+ * ~500 px of horizontal padding on a 400 px screen.
+ */
+export function paddingArrayToGoogle(
+  paddingTopLeft: [number, number] | undefined,
+  paddingBottomRight: [number, number] | undefined,
+): { top: number; left: number; bottom: number; right: number } {
+  return {
+    left:   paddingTopLeft?.[0]     ?? 0,
+    top:    paddingTopLeft?.[1]     ?? 0,
+    right:  paddingBottomRight?.[0] ?? 0,
+    bottom: paddingBottomRight?.[1] ?? 0,
+  }
+}
+
+/**
  * Convert "#rrggbb" or "#rgb" + opacity (0..1) into deck.gl's
  * [r, g, b, a] 0-255 array format. deck.gl PathLayer's getColor returns
  * this shape; we keep one helper per engine instead of per layer so the
@@ -216,15 +236,10 @@ export class GoogleMapsEngine implements MapEngine {
       { lat: bounds[0][0], lng: bounds[0][1] },
       { lat: bounds[1][0], lng: bounds[1][1] },
     )
-    // Google's fitBounds takes a Padding object — { top, left, bottom,
-    // right } — which is similar to our paddingTopLeft/BottomRight.
-    const padding: google.maps.Padding = {
-      top:    options.paddingTopLeft?.[0]     ?? 0,
-      left:   options.paddingTopLeft?.[1]     ?? 0,
-      bottom: options.paddingBottomRight?.[0] ?? 0,
-      right:  options.paddingBottomRight?.[1] ?? 0,
-    }
-    map.fitBounds(llb, padding)
+    // Map FitBoundsOptions ([x, y] Leaflet Point convention) to Google's
+    // `{ top, left, bottom, right }` shape. Extracted so it's
+    // unit-testable without touching google.maps globals.
+    map.fitBounds(llb, paddingArrayToGoogle(options.paddingTopLeft, options.paddingBottomRight))
   }
   invalidateSize(): void {
     if (!this.map) return
