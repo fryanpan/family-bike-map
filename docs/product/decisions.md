@@ -1,5 +1,21 @@
 # Architecture & Product Decisions
 
+## 2026-05-05: Plausible for analytics; Sentry stays for errors; PostHog removed
+
+**Context**: Bryan greenlit a fleet-wide standardization on personal sites: Plausible (cookieless aggregate analytics, EU-hosted, no consent banner) for usage stats, Sentry for error tracking. Bike-map already had Sentry but was also running PostHog with autocapture. PostHog overlapped with Plausible's scope (pageviews) and added ~60 KB plus an ad-blocker target, with no custom `posthog.capture()` calls anywhere in the codebase to justify keeping it.
+
+**Decision**:
+- Remove PostHog entirely (`src/posthog.ts`, `posthog-js` dep, GitHub secret env vars). No event-level or session-replay use case currently exists.
+- Add Plausible script to `index.html`, gated to `bike-map.fryanpan.com` so localhost / Tailscale dev doesn't pollute the property. Standard `plausible.io` script for now; the ad-blocker-resistant CF Worker proxy variant (per <https://plausible.io/docs/proxy/introduction>) is a follow-up if data quality drops.
+- Sentry config tightened to fleet defaults: `sendDefaultPii: false`, `tracesSampleRate: 0.1` (Core Web Vitals coverage), `replaysOnErrorSampleRate: 0`, `replaysSessionSampleRate: 0`.
+- Bryan adds `bike-map.fryanpan.com` as a site at <https://plausible.io/sites> separately — script is a no-op until then.
+
+**Result**: Lighter prod bundle, single privacy-preserving analytics surface, error tracking unchanged. No build-time secrets needed for Plausible (script loaded statically); only `VITE_SENTRY_DSN` remains in deploy env.
+
+**Status**: Implemented. Tests pass.
+
+---
+
 ## 2026-04-05: Classification audit tool with per-region rules
 
 **Context**: OSM cycling tags vary in meaning across cities — the same `cycleway=track` tag represents world-class infrastructure in Copenhagen but often a narrow bumpy sidewalk in Berlin. Our hardcoded classifier can't handle regional variations.

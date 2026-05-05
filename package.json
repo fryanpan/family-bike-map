@@ -19,7 +19,6 @@
     "leaflet": "^1.9.4",
     "ngraph.graph": "^20.1.2",
     "ngraph.path": "^1.6.1",
-    "posthog-js": "^1.370.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-leaflet": "^4.2.1",
