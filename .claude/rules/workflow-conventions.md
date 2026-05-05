@@ -9,6 +9,15 @@ alwaysApply: true
 - Plans MUST be written to `docs/product/plans/<prefix>-plan.md`
   - `<prefix>` is the ticket number (e.g., `BIK-12`) or sprint number (e.g., `sprint-3`)
 
+## LLM Turn Efficiency
+
+Every turn re-reads the full context and costs money + latency. Minimize turns:
+
+- **Batch tool calls.** Call multiple independent tools in a single turn. Read several files at once. Run independent Bash commands in parallel.
+- **Combine communication with work.** Never spend a turn just sending a progress message — bundle it with the next implementation action.
+- **Chain bash with `&&`** when sequential. Run `git add -A && git commit -m "..." && git push origin <branch>` in one call, not three.
+- **Use dedicated tools.** `Read` over `cat`, `Grep` over `grep`, `Glob` over `find`/`ls`.
+
 ## Implementation
 
 - Read relevant existing files before writing anything
