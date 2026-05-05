@@ -32,7 +32,7 @@ jobs:
         run: bun run build
         env:
           # Release version — vite.config.ts injects this into the bundle
-          # via `define: __APP_VERSION__`, and src/{sentry,posthog,userback}.ts
+          # via `define: __APP_VERSION__`, and src/{sentry,userback}.ts
           # tag every event with it. Patch = GitHub Actions run number so
           # every deploy gets a monotonic identifier traceable back to a
           # workflow run (and from there, the commit).
@@ -40,8 +40,8 @@ jobs:
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           VITE_USERBACK_TOKEN: ${{ secrets.VITE_USERBACK_TOKEN }}
-          VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
-          VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
+          # PostHog removed 2026-05-05 — Plausible loaded statically from
+          # index.html, no build-time secret needed.
           # Map rendering engines (selectable from Admin Tools → Settings).
           # Both keys are bundled into the client and must be referrer-
           # restricted in their respective dashboards. Either can be empty —

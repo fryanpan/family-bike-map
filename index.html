@@ -35,6 +35,21 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <!-- Plausible analytics — production only. Cookieless, EU-hosted, no
+         consent banner needed (per privacy-preserving-web-analytics fleet
+         decision 2026-05-05; see docs/product/decisions.md). Standard
+         plausible.io script; if ad-blocker hit-rate ever matters, swap to
+         the CF Worker proxy pattern. -->
+    <script>
+      (function () {
+        if (location.hostname !== 'bike-map.fryanpan.com') return
+        var s = document.createElement('script')
+        s.defer = true
+        s.setAttribute('data-domain', 'bike-map.fryanpan.com')
+        s.src = 'https://plausible.io/js/script.js'
+        document.head.appendChild(s)
+      })()
+    </script>
     <!-- Live-feedback widget — dev only. Loaded from the local feedback
          server (default :8788) and gated on localhost / Tailscale / .local
          hostnames so it never ships in production. -->
