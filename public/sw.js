@@ -33,7 +33,12 @@
  * old ones in `activate`.
  */
 
-const APP_SHELL_CACHE = 'family-bike-map-shell-v1'
+// Bumped to v2 (2026-05-05) along with the network-first switch for HTML
+// — the v1 cache holds shells with dead chunk-hash references that fire
+// "Strict MIME type", "X is not defined", and "Failed to fetch
+// dynamically imported module" errors in Sentry. Activate cleanup
+// drops v1 entirely on first install of v2.
+const APP_SHELL_CACHE = 'family-bike-map-shell-v2'
 const TILE_CACHE = 'family-bike-map-tiles-v1'
 
 const ALL_CACHES = [APP_SHELL_CACHE, TILE_CACHE]
@@ -74,26 +79,51 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // App shell — same-origin GETs that look like static assets
-  // (HTML, JS, CSS, images, fonts).
-  if (url.origin === self.location.origin && isAppShell(url)) {
-    event.respondWith(cacheFirst(request, APP_SHELL_CACHE))
-    return
+  // App shell — same-origin GETs that look like static assets.
+  // The HTML document goes network-first: a deploy ships a fresh
+  // index.html that references new content-hashed chunk URLs, and
+  // serving the stale cached shell produces the now-classic "Strict
+  // MIME type checking is enforced for module scripts" + "X is not
+  // defined" errors when the old HTML tries to load chunks that no
+  // longer exist on the CDN. Network-first keeps offline working
+  // (falls back to cache when offline) and guarantees deploys are
+  // picked up on the next pageload.
+  //
+  // /assets/* and other content-hashed files keep cache-first since
+  // their URLs are unique per build and never collide.
+  if (url.origin === self.location.origin) {
+    if (isHtmlDocument(url)) {
+      event.respondWith(networkFirst(request, APP_SHELL_CACHE))
+      return
+    }
+    if (isAppShell(url)) {
+      event.respondWith(cacheFirst(request, APP_SHELL_CACHE))
+      return
+    }
   }
 
   // Everything else: bypass the SW entirely.
 })
 
 /**
- * Decide whether a same-origin GET should be cached as part of the app shell.
- * Static assets only — never API responses, never anything that varies per
- * request (route logs, etc.).
+ * The HTML document — handled network-first so deploys are picked up
+ * immediately. Cached as a fallback for offline.
+ */
+function isHtmlDocument(url) {
+  const path = url.pathname
+  if (path === '/' || path === '/index.html') return true
+  return false
+}
+
+/**
+ * Decide whether a same-origin GET should be cached as part of the app
+ * shell with a cache-first strategy. Content-hashed assets only —
+ * the HTML document is handled separately via isHtmlDocument +
+ * networkFirst.
  */
 function isAppShell(url) {
   const path = url.pathname
   if (path.startsWith('/api/')) return false
-  // Root document
-  if (path === '/' || path === '/index.html') return true
   // Vite-emitted bundles live under /assets/ with a content hash —
   // safe to cache aggressively.
   if (path.startsWith('/assets/')) return true
@@ -132,6 +162,23 @@ async function cacheFirst(request, cacheName) {
   } catch (err) {
     // Offline + nothing in cache. Best we can do is rethrow so the
     // browser shows its standard offline error.
+    throw err
+  }
+}
+
+async function networkFirst(request, cacheName) {
+  const cache = await caches.open(cacheName)
+  try {
+    const fresh = await fetch(request)
+    if (fresh.ok) {
+      cache.put(request, fresh.clone()).catch(() => {})
+    }
+    return fresh
+  } catch (err) {
+    // Offline: fall back to cache. If we have nothing, rethrow so the
+    // browser shows its own offline error rather than a 504.
+    const cached = await cache.match(request)
+    if (cached) return cached
     throw err
   }
 }
