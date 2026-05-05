@@ -366,8 +366,13 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
   } catch (err) {
+    // Network / timeout errors after all retries are almost always
+    // upstream Overpass flakiness (the public API is community-run and
+    // flaps). Don't ship those to Sentry — they're not actionable, no
+    // user is impacted (background fetch retries on the next pan), and
+    // they drown out signal. The console.warn from fetchWithRetry still
+    // surfaces them in browser dev tools when debugging.
     console.error(`[Overpass] Tile ${row}:${col} failed after all retries:`, err)
-    Sentry.captureException(err, { extra: { ...tileCtx, stage: 'fetch' } })
     throw err
   } finally {
     _fetchSemaphore.release()
@@ -377,7 +382,14 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
     const body = await response.text().catch(() => '')
     console.error(`[Overpass] Tile ${row}:${col} HTTP ${response.status}:`, body.slice(0, 200))
     const err = new Error(`Overpass HTTP ${response.status}`)
-    Sentry.captureException(err, { extra: { ...tileCtx, status: response.status, body: body.slice(0, 500) } })
+    // Suppress 5xx (upstream Overpass flake) and 429 (rate limit) from
+    // Sentry — same reasoning as the network-error branch above. 4xx
+    // bodies (other than 429) typically indicate a malformed query or
+    // auth issue on our side, which IS actionable, so those still ship.
+    const isTransient = response.status >= 500 || response.status === 429
+    if (!isTransient) {
+      Sentry.captureException(err, { extra: { ...tileCtx, status: response.status, body: body.slice(0, 500) } })
+    }
     throw err
   }
 
