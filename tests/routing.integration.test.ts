@@ -173,8 +173,14 @@ async function fetchRouteQuality(
 let valhallaReachable = false
 
 beforeAll(async () => {
+  // Skip the connectivity check entirely in CI — `RUN_INTEGRATION=1`
+  // is the explicit opt-in for this whole suite. Without it the
+  // network call itself can hang long enough to trip Bun's default
+  // beforeAll timeout, which surfaces as a (fail) instead of a skip
+  // and blocks unrelated PRs.
+  if (process.env.RUN_INTEGRATION !== '1') return
   try {
-    const resp = await fetch(`${VALHALLA_BASE}/status`, { signal: AbortSignal.timeout(5000) })
+    const resp = await fetch(`${VALHALLA_BASE}/status`, { signal: AbortSignal.timeout(3000) })
     valhallaReachable = resp.ok
   } catch {
     valhallaReachable = false
