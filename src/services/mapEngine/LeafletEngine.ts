@@ -120,6 +120,17 @@ export class LeafletEngine implements MapEngine {
     this.popups.clear()
   }
 
+  /**
+   * View / event accessors no-op when the engine isn't mounted, instead
+   * of throwing. React useEffects and debounced async handlers naturally
+   * race the unmount cycle (engine swap, page navigation, suspense
+   * teardown) — throwing produces noisy Sentry exceptions for what is
+   * benign expected behaviour. The next remount picks back up.
+   *
+   * Mutating methods that return a handle (addPolyline, addMarker, etc.)
+   * still throw because callers store the handle and would otherwise
+   * silently leak a tracking row.
+   */
   private requireMap(): L.Map {
     if (!this.map) throw new Error('LeafletEngine not mounted')
     return this.map
@@ -127,24 +138,29 @@ export class LeafletEngine implements MapEngine {
 
   // ── View ────────────────────────────────────────────────────────────
   getCenter(): LatLng {
-    const c = this.requireMap().getCenter()
+    if (!this.map) return [0, 0]
+    const c = this.map.getCenter()
     return [c.lat, c.lng]
   }
-  getZoom(): number { return this.requireMap().getZoom() }
+  getZoom(): number { return this.map?.getZoom() ?? 0 }
   setView(center: LatLng, zoom?: number): void {
-    this.requireMap().setView(center, zoom ?? this.getZoom())
+    if (!this.map) return
+    this.map.setView(center, zoom ?? this.getZoom())
   }
   flyTo(center: LatLng, zoom?: number): void {
-    this.requireMap().flyTo(center, zoom ?? this.getZoom(), { duration: 0.8 })
+    if (!this.map) return
+    this.map.flyTo(center, zoom ?? this.getZoom(), { duration: 0.8 })
   }
   getBounds(): LatLngBounds {
-    const b = this.requireMap().getBounds()
+    if (!this.map) return [[0, 0], [0, 0]]
+    const b = this.map.getBounds()
     const sw = b.getSouthWest()
     const ne = b.getNorthEast()
     return [[sw.lat, sw.lng], [ne.lat, ne.lng]]
   }
   fitBounds(bounds: LatLngBounds, options: FitBoundsOptions = {}): void {
-    this.requireMap().fitBounds(
+    if (!this.map) return
+    this.map.fitBounds(
       L.latLngBounds(bounds[0], bounds[1]),
       {
         paddingTopLeft: options.paddingTopLeft,
@@ -153,15 +169,17 @@ export class LeafletEngine implements MapEngine {
       },
     )
   }
-  invalidateSize(): void { this.requireMap().invalidateSize() }
+  invalidateSize(): void { this.map?.invalidateSize() }
   latLngToContainerPoint(latLng: LatLng): [number, number] {
-    const p = this.requireMap().latLngToContainerPoint(L.latLng(latLng[0], latLng[1]))
+    if (!this.map) return [0, 0]
+    const p = this.map.latLngToContainerPoint(L.latLng(latLng[0], latLng[1]))
     return [p.x, p.y]
   }
 
   // ── Events ──────────────────────────────────────────────────────────
   on(event: MapEventName, handler: (ev: MapEvent) => void): () => void {
-    const map = this.requireMap()
+    if (!this.map) return () => { /* not mounted — noop unsubscribe */ }
+    const map = this.map
     let listener: (...args: unknown[]) => void
     if (event === 'click') {
       listener = (e: unknown) => {

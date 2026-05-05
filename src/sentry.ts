@@ -2,6 +2,11 @@ import * as Sentry from '@sentry/react'
 import { APP_VERSION } from './version'
 
 export function initSentry() {
+  // Production-only. Without this gate, dev sessions ship `@vite/client`
+  // HMR errors, hot-reload oddities, and stale-state bugs into the live
+  // Sentry project. Sentry is a prod-observability tool — local
+  // diagnostics belong in the browser console.
+  if (!import.meta.env.PROD) return
   const dsn = import.meta.env.VITE_SENTRY_DSN
   if (!dsn) return
 
