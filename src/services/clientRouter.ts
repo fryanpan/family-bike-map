@@ -11,6 +11,7 @@ import { aStar } from 'ngraph.path'
 import type { Graph, Node } from 'ngraph.graph'
 import {
   getCachedTile,
+  getCachedSignals,
   fetchBikeInfraForTile,
   latLngToTile,
   tileKey,
@@ -63,6 +64,30 @@ interface EdgeData {
   wayTags: Record<string, string>
   wayId: number     // OSM way id — used by tap-to-avoid to identify the source way
   isWalking: boolean
+}
+
+// Highway tier ranking — higher number = bigger road, used by the
+// unsignalized-major-road penalty (Joanna 2026-04-29, #4) to detect
+// junctions where a bike must cross a primary/trunk artery.
+const HIGHWAY_TIER: Record<string, number> = {
+  motorway: 7, trunk: 6, primary: 5, secondary: 4, tertiary: 3,
+  unclassified: 2, residential: 1,
+}
+function highwayTier(highway: string): number {
+  return HIGHWAY_TIER[highway] ?? 0
+}
+// Speed default by class (mirrors the inline fallback in classifyEdge).
+function speedDefaultForHighway(highway: string): number | null {
+  switch (highway) {
+    case 'living_street': return 15
+    case 'residential': return 30
+    case 'unclassified': return 30
+    case 'tertiary': return 50
+    case 'secondary': return 50
+    case 'primary': return 60
+    case 'trunk': return 80
+    default: return null
+  }
 }
 
 /** Canonical node ID from a coordinate pair.
@@ -197,9 +222,110 @@ export function buildRoutingGraph(
   avoidedWayIds?: Set<number> | null,
   riderPreference?: RiderPreference | null,
   settings?: AdminSettings,
+  signalCoords?: [number, number][] | null,
 ): Graph<NodeData, EdgeData> {
   const graph = createGraph<NodeData, EdgeData>()
   const rule = resolveRule(profileKey, settings)
+
+  // ── Pre-pass: per-node info for unsignalized-major-road penalty (Joanna #4)
+  //
+  // For each node (keyed by coordId so it matches what the main pass will
+  // create), compute:
+  //   - degree: number of incident way-segments (coords that share this id
+  //     across any way). Counts every adjacent way-coord, not unique ways,
+  //     because what matters for "is this an intersection?" is the count
+  //     of incoming/outgoing edges in the routing graph.
+  //   - hasTrafficSignals: true if a signal node lies at the same coordId.
+  //   - worstIncidentClass: the heaviest highway tier among incident ways.
+  //   - worstIncidentSpeed: max speed (read or class-default) at incident
+  //     ways of that worst class.
+  //   - allBikeOnly: true if every incident way is cycleway/path/footway.
+  //
+  // The penalty fires only on edges that ENTER a node where:
+  //   degree > 2 AND hasTrafficSignals === false AND
+  //   worstIncidentClass ∈ {primary, trunk} AND worstIncidentSpeed ≥ 50
+  //   AND not allBikeOnly.
+  interface NodeInfo {
+    degree: number
+    hasTrafficSignals: boolean
+    worstClass: string  // highway tier name
+    worstTier: number   // numeric tier rank
+    worstSpeed: number  // km/h
+    allBikeOnly: boolean
+  }
+  const BIKE_ONLY = new Set(['cycleway', 'path', 'footway', 'pedestrian'])
+  const nodeInfo = new Map<string, NodeInfo>()
+
+  function getOrInit(id: string): NodeInfo {
+    let info = nodeInfo.get(id)
+    if (!info) {
+      info = { degree: 0, hasTrafficSignals: false, worstClass: '', worstTier: -1, worstSpeed: 0, allBikeOnly: true }
+      nodeInfo.set(id, info)
+    }
+    return info
+  }
+
+  // Mark signal-bearing coord keys.
+  if (signalCoords && signalCoords.length) {
+    for (const [lat, lng] of signalCoords) {
+      const id = coordId(lat, lng)
+      const info = getOrInit(id)
+      info.hasTrafficSignals = true
+    }
+  }
+
+  // Walk all ways to populate per-node degree + worstIncidentClass.
+  // Skipped ways (avoidedWayIds, < 2 coords) match the main-pass skip list
+  // so the pre-pass and main pass agree on what's in the graph.
+  for (const way of ways) {
+    const coords = way.coordinates
+    if (coords.length < 2) continue
+    if (avoidedWayIds && avoidedWayIds.has(way.osmId)) continue
+
+    const hw = way.tags.highway ?? ''
+    const tier = highwayTier(hw)
+    const isBikeOnly = BIKE_ONLY.has(hw) || (hw === 'footway' && (way.tags.bicycle === 'yes' || way.tags.bicycle === 'designated'))
+    const maxspeed = parseInt(way.tags.maxspeed ?? '0', 10)
+    const speed = maxspeed > 0 ? maxspeed : (speedDefaultForHighway(hw) ?? 0)
+
+    for (let i = 0; i < coords.length; i++) {
+      const [lat, lng] = coords[i]
+      const id = coordId(lat, lng)
+      const info = getOrInit(id)
+      // Degree increment: each coord that's part of a segment edge counts
+      // once per side it touches. End-of-way coords get +1, middle coords
+      // sit on two adjacent segments so they get +2.
+      if (i === 0 || i === coords.length - 1) info.degree += 1
+      else info.degree += 2
+
+      if (!isBikeOnly) info.allBikeOnly = false
+      if (tier > info.worstTier) {
+        info.worstTier = tier
+        info.worstClass = hw
+        info.worstSpeed = speed
+      } else if (tier === info.worstTier && speed > info.worstSpeed) {
+        info.worstSpeed = speed
+      }
+    }
+  }
+
+  // Decision helper: should an edge ENTERING `j` carry the unsignalized
+  // penalty? Used by the main pass.
+  const PRIMARY_TIER = highwayTier('primary')
+  const TRUNK_TIER = highwayTier('trunk')
+  function entryPenalty(jId: string): { addS: number; mul: number } {
+    const info = nodeInfo.get(jId)
+    if (!info) return { addS: 0, mul: 1 }
+    if (info.degree <= 2) return { addS: 0, mul: 1 }
+    if (info.allBikeOnly) return { addS: 0, mul: 1 }
+    if (info.hasTrafficSignals) return { addS: 0, mul: 1 }
+    // Only the headline case: crossed road is primary or trunk at ≥ 50 km/h.
+    // Other tiers (signalized +8s, unsignalized-tertiary +25s) are deferred
+    // per the joanna.md spec.
+    if (info.worstTier !== PRIMARY_TIER && info.worstTier !== TRUNK_TIER) return { addS: 0, mul: 1 }
+    if (info.worstSpeed < 50) return { addS: 0, mul: 1 }
+    return { addS: 50, mul: 2 }
+  }
 
   for (const way of ways) {
     const coords = way.coordinates
@@ -292,15 +418,34 @@ export function buildRoutingGraph(
       // Multiplier biases the router away from accepted-but-worse infra
       // (e.g. LTS 2b for traffic-savvy at 1.5×, LTS 3 for carrying-kid at
       // 2×, rough surfaces at 5×) even when the base speed is unchanged.
-      const cost = (dist / speed) * costMultiplier
-      const edgeData: EdgeData = { distance: dist, cost, wayTags: tags, wayId: way.osmId, isWalking }
+      const baseCost = (dist / speed) * costMultiplier
+      const edgeData: EdgeData = { distance: dist, cost: baseCost, wayTags: tags, wayId: way.osmId, isWalking }
+
+      // Per-direction unsignalized-major-road penalty (Joanna #4): the
+      // penalty fires on the *entering* side of a junction. Forward edge
+      // enters id2, reverse edge enters id1 — query each separately.
+      //
+      // Walking edges skip the penalty: bridge-walks cross arterials at
+      // the crosswalk on foot, where the unsignalized stress is much
+      // lower than riding through (Furth's framework is about cycling
+      // stress, not pedestrian stress). Without this carve-out, kid-modes
+      // that bridge-walk through every primary intersection see the
+      // penalty stack up on every node — kid-starting-out's preferred-%
+      // collapsed from 56% → 17% in the first benchmark run because the
+      // router avoided bridge-walks entirely and detoured onto walking
+      // routes through quiet residential, leaving less preferred infra
+      // available within the cost budget.
+      const fwdPenalty = isWalking ? { addS: 0, mul: 1 } : entryPenalty(id2)
+      const fwdCost = baseCost * fwdPenalty.mul + fwdPenalty.addS
 
       // Forward edge (always)
-      graph.addLink(id1, id2, edgeData)
+      graph.addLink(id1, id2, { ...edgeData, cost: fwdCost })
 
       // Reverse edge (unless one-way)
       if (!isOneway) {
-        graph.addLink(id2, id1, { ...edgeData })
+        const revPenalty = isWalking ? { addS: 0, mul: 1 } : entryPenalty(id1)
+        const revCost = baseCost * revPenalty.mul + revPenalty.addS
+        graph.addLink(id2, id1, { ...edgeData, cost: revCost })
       }
     }
   }
@@ -667,6 +812,7 @@ export async function clientRoute(
   // Collect ways from cached tiles covering the corridor
   const tiles = getTilesForCorridor(startLat, startLng, endLat, endLng)
   const allWays: OsmWay[] = []
+  const allSignals: [number, number][] = []
 
   for (const t of tiles) {
     // Try cache first, then fetch
@@ -679,11 +825,16 @@ export async function clientRoute(
       }
     }
     allWays.push(...ways)
+    // Signals are populated alongside ways (same tile cache contract).
+    // Tiles fetched before this code shipped will report undefined →
+    // treat as no signals (penalty silently doesn't fire for that tile).
+    const sigs = getCachedSignals(t.row, t.col)
+    if (sigs) allSignals.push(...sigs)
   }
 
   if (allWays.length === 0) return null
 
-  const graph = buildRoutingGraph(allWays, profileKey, preferredItemNames, regionRules, regionProfile, avoidedWayIds, riderPreference, settings)
+  const graph = buildRoutingGraph(allWays, profileKey, preferredItemNames, regionRules, regionProfile, avoidedWayIds, riderPreference, settings, allSignals)
   const result = routeOnGraph(
     graph, startLat, startLng, endLat, endLng,
     profileKey, preferredItemNames, regionRules,

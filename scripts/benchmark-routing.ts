@@ -89,9 +89,10 @@ const BROUTER_PROFILES: Record<ModeKey, string> = {
 
 // ── Tile fetching (via Cloudflare Worker proxy with 30-day cache) ────────
 
-const tileCache = new Map<string, OsmWay[]>()
+interface TileData { ways: OsmWay[]; signals: [number, number][] }
+const tileCache = new Map<string, TileData>()
 
-async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
+async function fetchTile(row: number, col: number): Promise<TileData> {
   const key = `${row}:${col}`
   if (tileCache.has(key)) return tileCache.get(key)!
 
@@ -118,27 +119,35 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
 
   if (!resp || !resp.ok) {
     console.warn(`[Overpass] Tile ${row}:${col} FAILED after retries`)
-    tileCache.set(key, [])
-    return []
+    const empty: TileData = { ways: [], signals: [] }
+    tileCache.set(key, empty)
+    return empty
   }
 
-  const data = await resp.json() as { elements: Array<{ type: string; id: number; tags?: Record<string, string>; geometry?: Array<{ lat: number; lon: number }> }> }
-  const ways: OsmWay[] = data.elements
-    .filter((el) => el.type === 'way' && el.geometry != null)
-    .map((el) => ({
-      osmId: el.id,
-      coordinates: el.geometry!.map((pt): [number, number] => [pt.lat, pt.lon]),
-      tags: el.tags ?? {},
-      itemName: null,
-    }))
+  const data = await resp.json() as { elements: Array<{ type: string; id: number; tags?: Record<string, string>; geometry?: Array<{ lat: number; lon: number }>; lat?: number; lon?: number }> }
+  const ways: OsmWay[] = []
+  const signals: [number, number][] = []
+  for (const el of data.elements) {
+    if (el.type === 'way' && el.geometry) {
+      ways.push({
+        osmId: el.id,
+        coordinates: el.geometry.map((pt): [number, number] => [pt.lat, pt.lon]),
+        tags: el.tags ?? {},
+        itemName: null,
+      })
+    } else if (el.type === 'node' && el.lat != null && el.lon != null && el.tags?.highway === 'traffic_signals') {
+      signals.push([el.lat, el.lon])
+    }
+  }
 
-  tileCache.set(key, ways)
-  return ways
+  const td: TileData = { ways, signals }
+  tileCache.set(key, td)
+  return td
 }
 
 interface CityBbox { south: number; west: number; north: number; east: number }
 
-async function fetchTilesForCity(cityName: string, bbox: CityBbox): Promise<OsmWay[]> {
+async function fetchTilesForCity(cityName: string, bbox: CityBbox): Promise<TileData> {
   const minRow = Math.floor(bbox.south / TILE_DEGREES)
   const maxRow = Math.floor(bbox.north / TILE_DEGREES)
   const minCol = Math.floor(bbox.west / TILE_DEGREES)
@@ -151,16 +160,17 @@ async function fetchTilesForCity(cityName: string, bbox: CityBbox): Promise<OsmW
 
   console.log(`Fetching ${tiles.length} tiles for ${cityName}...`)
   const allWays: OsmWay[] = []
+  const allSignals: [number, number][] = []
 
   for (let i = 0; i < tiles.length; i += 2) {
     const batch = tiles.slice(i, i + 2)
     const results = await Promise.all(batch.map((t) => fetchTile(t.row, t.col)))
-    for (const ways of results) allWays.push(...ways)
+    for (const td of results) { allWays.push(...td.ways); allSignals.push(...td.signals) }
     process.stdout.write(`\r  ${Math.min(i + 2, tiles.length)}/${tiles.length} tiles`)
     if (i + 2 < tiles.length) await new Promise((r) => setTimeout(r, 500))
   }
-  console.log(`\n  Total: ${allWays.length} ways`)
-  return allWays
+  console.log(`\n  Total: ${allWays.length} ways, ${allSignals.length} traffic signals`)
+  return { ways: allWays, signals: allSignals }
 }
 
 // ── Score external routes using Overpass data ────────────────────────────
@@ -417,7 +427,9 @@ async function main() {
 
   console.log(`\n=== Routing Benchmark: ${city.displayName} · Client (5 modes)${skipExternal ? '' : ' + Valhalla + BRouter'} ===\n`)
 
-  const allWays = await fetchTilesForCity(city.displayName, city.bbox)
+  const tileData = await fetchTilesForCity(city.displayName, city.bbox)
+  const allWays = tileData.ways
+  const allSignals = tileData.signals
 
   // Build all the pairs we want to test.
   const pairs: RoutePair[] = []
@@ -444,7 +456,7 @@ async function main() {
     const preferred = getDefaultPreferredItems(mode)
     console.log(`\n[${mode}] Building graph...`)
     const t0 = performance.now()
-    const graph = buildRoutingGraph(allWays, mode, preferred)
+    const graph = buildRoutingGraph(allWays, mode, preferred, undefined, undefined, undefined, undefined, undefined, allSignals)
     const buildMs = performance.now() - t0
     modeGraphStats[mode] = { nodes: graph.getNodeCount(), edges: graph.getLinkCount(), buildMs }
     console.log(`  Nodes: ${graph.getNodeCount()}, Edges: ${graph.getLinkCount()}, Built in ${buildMs.toFixed(0)}ms`)

@@ -246,7 +246,15 @@ export type TrafficDensity = 'low' | 'moderate' | 'high'
  */
 export function classifyEdge(tags: Record<string, string>): LtsClassification {
   const highway = tags.highway ?? ''
-  const cycleway = tags.cycleway ?? tags['cycleway:right'] ?? tags['cycleway:both'] ?? ''
+  // cycleway can appear as a directional prefix variant — fall back through
+  // the standard four. (Pre-existing read; cycleway:left was missing from
+  // the prior fallback chain — added 2026-04-29.)
+  const cycleway =
+    tags.cycleway ??
+    tags['cycleway:right'] ??
+    tags['cycleway:left'] ??
+    tags['cycleway:both'] ??
+    ''
   const maxspeed = parseInt(tags.maxspeed ?? '0', 10)
   const lanes = parseInt(tags.lanes ?? '0', 10)
   const surface = tags.surface ?? null
@@ -378,7 +386,54 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
     return 3 // default for unknown
   })()
 
-  const pathLevel = derivePathLevel({ lts, carFree, bikePriority, bikeInfra, speedKmh })
+  const initialPathLevel = derivePathLevel({ lts, carFree, bikePriority, bikeInfra, speedKmh })
+
+  // High-stress PBL demote (Joanna 2026-04-29, #3).
+  //
+  // Separated bike lanes (cycleway=track or is_sidepath alongside a parent
+  // road) get classified 1a "car-free" by the segment-level rules above
+  // because the bike isn't sharing the traffic surface. But on busy
+  // arterials (Berlin's Kotbusser Damm + Hasenheide, SF's Valencia) the
+  // long-segment safety is wiped out by frequent intersection conflicts —
+  // every turn-mixing zone, driveway crossing, and right-hook brings cars
+  // back into the bike's path. Joanna's family-mode mental model puts
+  // these in the SAME bucket as a painted lane on a quiet street, not as
+  // a car-free trail.
+  //
+  // Demote to 2a (LTS 2 with bike infra) when:
+  //   - the cycleway tag indicates a track-style separation (the four
+  //     direction variants), OR is_sidepath flags it as a sidepath of a
+  //     bigger road
+  //   - parent highway is primary/secondary/tertiary
+  //   - maxspeed (read or class-default) > 30 km/h
+  //
+  // This intentionally only fires on shared-surface vehicles (the parent
+  // road has motor traffic on the same way). A standalone highway=cycleway
+  // on the canal-side stays 1a.
+  const isCyclewayTrack =
+    tags.cycleway === 'track' ||
+    tags['cycleway:right'] === 'track' ||
+    tags['cycleway:left'] === 'track' ||
+    tags['cycleway:both'] === 'track'
+  // is_sidepath=yes (or is_sidepath:of=*) on a standalone cycleway/path
+  // marks it as the sidepath alongside a parent road. Treat the same as
+  // an inline cycleway=track when the parent road class is busy.
+  const isSidepath = tags.is_sidepath === 'yes' || tags['is_sidepath:of'] != null
+  const hasSeparation = isCyclewayTrack || isSidepath
+  const parentIsArterial =
+    highway === 'primary' || highway === 'secondary' || highway === 'tertiary'
+  // For sidepath standalone cycleways (highway=cycleway + is_sidepath=yes),
+  // we don't have the parent's class on this way — but we DO know it's
+  // running alongside a motor-traffic road that's tagged elsewhere as
+  // primary/secondary/tertiary by virtue of is_sidepath. Treat as arterial.
+  const sidepathOfArterial = isSidepath && !parentIsArterial
+  const isOver30 = maxspeed > 30 || (maxspeed === 0 && parentIsArterial)
+  const shouldDemote = hasSeparation && (parentIsArterial || sidepathOfArterial) && (isOver30 || sidepathOfArterial)
+
+  // Only demote when the initial classification was 1a (the case the
+  // research is targeting — segment-level "car-free" PBLs). Don't touch
+  // anything that already classified at 2a or worse (no over-correction).
+  const pathLevel: PathLevel = shouldDemote && initialPathLevel === '1a' ? '2a' : initialPathLevel
 
   return { lts, pathLevel, carFree, bikePriority, bikeInfra, speedKmh, trafficDensity, surface, smoothness }
 }

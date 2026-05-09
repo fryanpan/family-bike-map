@@ -49,6 +49,14 @@ let evictionCheckedThisSession = false
 export interface StoredTile {
   key: string // `row:col`
   ways: OsmWay[]
+  /**
+   * Traffic-signal node coords for this tile. Used by the routing graph to
+   * apply the unsignalized-intersection penalty. Optional for backwards
+   * compatibility — old IDB rows written before the field existed will
+   * lack it; consumers should treat absence as "no signal data" (penalty
+   * never fires, same as the empty-array case).
+   */
+  signals?: [number, number][]
   fetchedAt: number // Date.now()
   lastAccessed: number // Date.now(), updated on every read
 }
@@ -138,7 +146,10 @@ function openDB(): Promise<IDBDatabase> {
  * or on any IDB error (silently — this is a cache, not an authoritative
  * source). Updates the tile's lastAccessed timestamp on successful read.
  */
-export async function loadTile(row: number, col: number): Promise<OsmWay[] | null> {
+export async function loadTile(
+  row: number,
+  col: number,
+): Promise<{ ways: OsmWay[]; signals: [number, number][] | undefined } | null> {
   if (!idbAvailable()) return null
   const key = `${row}:${col}`
   try {
@@ -159,7 +170,7 @@ export async function loadTile(row: number, col: number): Promise<OsmWay[] | nul
     // Update lastAccessed (fire-and-forget — don't block the read on the write).
     void touchTile(key)
 
-    return result.ways
+    return { ways: result.ways, signals: result.signals }
   } catch {
     // IDB failure is non-critical
     return null
@@ -169,12 +180,21 @@ export async function loadTile(row: number, col: number): Promise<OsmWay[] | nul
 /**
  * Store a tile in IndexedDB. Fire-and-forget — errors are swallowed because
  * the in-memory cache still has the data for the current session.
+ *
+ * `signals` is optional — callers without signal data (legacy paths) can
+ * omit it. Tiles written without signals will silently miss the
+ * unsignalized-intersection penalty until the tile is refreshed.
  */
-export async function storeTile(row: number, col: number, ways: OsmWay[]): Promise<void> {
+export async function storeTile(
+  row: number,
+  col: number,
+  ways: OsmWay[],
+  signals?: [number, number][],
+): Promise<void> {
   if (!idbAvailable()) return
   const key = `${row}:${col}`
   const now = Date.now()
-  const tile: StoredTile = { key, ways, fetchedAt: now, lastAccessed: now }
+  const tile: StoredTile = { key, ways, signals, fetchedAt: now, lastAccessed: now }
   try {
     const db = await openDB()
     await new Promise<void>((resolve, reject) => {
