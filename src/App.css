@@ -1041,6 +1041,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .pin-start    { background: #22c55e; }
 .pin-end      { background: #ef4444; }
+.pin-place    { background: #2563eb; }
 .pin-waypoint {
   background: #a855f7;
   border-radius: 50%;

@@ -350,7 +350,7 @@ function useFlyToPlaceMarker(
     if (!engine || !flyToPlace) return
     const h = engine.addMarker(
       [flyToPlace.lat, flyToPlace.lng],
-      { kind: 'html', html: '<div class="pin"></div>', size: [25, 41], anchor: [12, 41] },
+      { kind: 'html', html: '<div class="pin pin-place"></div>', size: [25, 41], anchor: [12, 41] },
     )
     return () => { engine.removeMarker(h) }
   }, [engine, flyToPlace])
