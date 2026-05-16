@@ -7,3 +7,5 @@ dist/
 .DS_Store
 .wrangler/
 .claude/worktrees/
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json

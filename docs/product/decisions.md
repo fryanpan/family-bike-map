@@ -1,5 +1,25 @@
 # Architecture & Product Decisions
 
+## 2026-05-10: Gradient gate via MapTiler terrain-RGB
+
+**Context**: Family-bike routing had per-mode `gradientCapPct` field scaffolded in `ModeRule` and `RegionRule` (from the 2026-04-13 three-layer plan) but no elevation pipeline and no consumer. SF and Mexico City profiles call out gradient as load-bearing; Berlin is mostly flat so the gap had been invisible there.
+
+**Decision**:
+- Elevation source: **MapTiler terrain-RGB tiles at z=12**. We already pay MapTiler for the basemap, so no new vendor; `~9–25 tiles/request` for a typical urban corridor. Decoded once per session and cached in `src/services/elevation.ts`.
+- Thresholds keyed off AASHTO/CROW shared-use-path guidance (5% sustained, 8% short burst):
+  - kid-starting-out / kid-confident: **5%** (≈2.9°)
+  - kid-traffic-savvy / carrying-kid: **7%**
+  - training: **8%**
+- Over-cap behavior: **bridge-walk** at `walkingSpeedKmh`, not hard-reject. Mirrors the existing "rejected edges become bridge-walks" pattern from `learnings.md` — kids dismount on steep hills naturally; the graph stays connected, and A* only chooses the walk when there's no flatter alternative.
+- Per-way gradient (`end-to-end Δele / wayLength * 100`), not per-segment. Per-segment is noise-dominated at terrain-RGB pixel resolution. Ways under 30 m bypass the gate entirely (signal-to-noise too low).
+- Fails soft: if MapTiler is unreachable, tiles 404, or the key is missing, `lookupElevation` returns null and the gate is skipped. Routes still compute; gradient just isn't enforced.
+
+**Result**: A previously-fictional config field is now real. Hilly SF routes that previously chased the steepest direct path now route via shallower contours or convert the climb to a bridge-walk segment. Berlin routes are largely unchanged (mostly flat). Benchmark results: [docs/research/2026-05-10-routing-benchmark-results.md](../research/2026-05-10-routing-benchmark-results.md).
+
+**Status**: Implemented.
+
+---
+
 ## 2026-05-05: Plausible for analytics; Sentry stays for errors; PostHog removed
 
 **Context**: Bryan greenlit a fleet-wide standardization on personal sites: Plausible (cookieless aggregate analytics, EU-hosted, no consent banner) for usage stats, Sentry for error tracking. Bike-map already had Sentry but was also running PostHog with autocapture. PostHog overlapped with Plausible's scope (pageviews) and added ~60 KB plus an ad-blocker target, with no custom `posthog.capture()` calls anywhere in the codebase to justify keeping it.

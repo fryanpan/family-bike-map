@@ -28,6 +28,7 @@ import { applyRegionOverlay } from '../data/cityProfiles/overlay'
 import type { RegionProfile } from '../data/cityProfiles/overlay'
 import { applyPreferenceAdjustments } from '../data/preferences'
 import type { RiderPreference } from '../data/preferences'
+import { prefetchElevation, lookupElevation } from './elevation'
 
 // ── Haversine ──────────────────────────────────────────────────────────────
 
@@ -63,6 +64,21 @@ interface EdgeData {
   wayTags: Record<string, string>
   wayId: number     // OSM way id — used by tap-to-avoid to identify the source way
   isWalking: boolean
+}
+
+// Below this length, terrain-RGB pixel noise dominates the gradient
+// calculation — a 1 m elevation error over a 10 m way is 10% spurious
+// grade. Above ~30 m the signal-to-noise becomes useful and the worst
+// false-positives drop out.
+const MIN_GRADIENT_WAY_LEN_M = 30
+
+/** Total polyline length in metres (sum of consecutive segment distances). */
+function wayLengthM(coords: Array<[number, number]>): number {
+  let total = 0
+  for (let i = 0; i < coords.length - 1; i++) {
+    total += haversineM(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1])
+  }
+  return total
 }
 
 /** Canonical node ID from a coordinate pair.
@@ -197,6 +213,7 @@ export function buildRoutingGraph(
   avoidedWayIds?: Set<number> | null,
   riderPreference?: RiderPreference | null,
   settings?: AdminSettings,
+  elevationFn: ((lat: number, lng: number) => number | null) | null = lookupElevation,
 ): Graph<NodeData, EdgeData> {
   const graph = createGraph<NodeData, EdgeData>()
   const rule = resolveRule(profileKey, settings)
@@ -268,6 +285,38 @@ export function buildRoutingGraph(
     const itemName = classifyOsmTagsToItem(tags, profileKey, regionRules)
     if (!isWalking && itemName && !preferredItemNames.has(itemName)) {
       speedKmh = Math.min(speedKmh, rule.slowSpeedKmh)
+    }
+
+    // Gradient gate. Compute end-to-end gradient for the way; over the
+    // mode's cap, demote the whole way to bridge-walk (you'd be pushing
+    // the bike up). Per-way rather than per-segment because terrain-RGB
+    // pixel noise can produce false positives on short OSM segments.
+    // Skip very short ways — too short to give a stable gradient signal.
+    if (
+      !isWalking &&
+      rule.gradientCapPct != null &&
+      elevationFn &&
+      coords.length >= 2
+    ) {
+      const wayLen = wayLengthM(coords)
+      if (wayLen >= MIN_GRADIENT_WAY_LEN_M) {
+        const [latA, lngA] = coords[0]
+        const [latB, lngB] = coords[coords.length - 1]
+        const eleA = elevationFn(latA, lngA)
+        const eleB = elevationFn(latB, lngB)
+        if (eleA != null && eleB != null) {
+          const gradientPct = (Math.abs(eleB - eleA) / wayLen) * 100
+          if (gradientPct > rule.gradientCapPct) {
+            if (isBridgeWalkable(tags)) {
+              speedKmh = rule.walkingSpeedKmh
+              isWalking = true
+              costMultiplier = 1.0
+            } else {
+              continue
+            }
+          }
+        }
+      }
     }
 
     const speed = speedKmh / 3.6  // km/h → m/s
@@ -682,6 +731,18 @@ export async function clientRoute(
   }
 
   if (allWays.length === 0) return null
+
+  // Prefetch terrain-RGB tiles covering the corridor so the gradient
+  // gate inside buildRoutingGraph can do synchronous lookups. Fails
+  // soft — if MapTiler is unreachable or unkeyed, the lookup returns
+  // null and the gradient check is skipped.
+  const corridorPad = 0.01
+  await prefetchElevation({
+    south: Math.min(startLat, endLat) - corridorPad,
+    west:  Math.min(startLng, endLng) - corridorPad,
+    north: Math.max(startLat, endLat) + corridorPad,
+    east:  Math.max(startLng, endLng) + corridorPad,
+  })
 
   const graph = buildRoutingGraph(allWays, profileKey, preferredItemNames, regionRules, regionProfile, avoidedWayIds, riderPreference, settings)
   const result = routeOnGraph(

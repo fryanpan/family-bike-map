@@ -345,6 +345,91 @@ describe('routeOnGraph', () => {
     expect(paintLink!.data.isWalking).toBe(true)
   })
 
+  describe('gradient gate', () => {
+    // A 200 m E–W cycleway between (52.500, 13.400) and (52.500, 13.4030)
+    // — long enough to clear MIN_GRADIENT_WAY_LEN_M (30 m). Tag highway
+    // as cycleway so it's car-free and accepted in every mode.
+    const longWay: OsmWay[] = [{
+      osmId: 100,
+      itemName: null,
+      tags: { highway: 'cycleway' },
+      coordinates: [[52.500, 13.400], [52.500, 13.4030]],
+    }]
+    // A short 5 m way under the min-length threshold.
+    const shortWay: OsmWay[] = [{
+      osmId: 101,
+      itemName: null,
+      tags: { highway: 'cycleway' },
+      coordinates: [[52.500, 13.400], [52.500, 13.40007]],
+    }]
+
+    // 200 m cycleway with 30 m rise → 15% grade — over every mode's cap.
+    const steepEle = (lat: number, lng: number): number =>
+      Math.abs(lng - 13.400) > 0.0001 ? 30 : 0
+
+    // 200 m cycleway with 2 m rise → 1% grade — under every cap.
+    const gentleEle = (lat: number, lng: number): number =>
+      Math.abs(lng - 13.400) > 0.0001 ? 2 : 0
+
+    test('steep way (>cap) demotes to bridge-walk for kid modes', () => {
+      const graph = buildRoutingGraph(
+        longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
+        undefined, undefined, steepEle,
+      )
+      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40300')
+      expect(link).toBeTruthy()
+      expect(link!.data.isWalking).toBe(true)
+    })
+
+    test('gentle way stays as a riding edge', () => {
+      const graph = buildRoutingGraph(
+        longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
+        undefined, undefined, gentleEle,
+      )
+      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40300')
+      expect(link).toBeTruthy()
+      expect(link!.data.isWalking).toBe(false)
+    })
+
+    test('null elevation lookup → gate skipped, edge stays riding (fail-soft)', () => {
+      const nullEle = (): number | null => null
+      const graph = buildRoutingGraph(
+        longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
+        undefined, undefined, nullEle,
+      )
+      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40300')
+      expect(link!.data.isWalking).toBe(false)
+    })
+
+    test('way under MIN_GRADIENT_WAY_LEN_M bypasses the gate (terrain noise floor)', () => {
+      const graph = buildRoutingGraph(
+        shortWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
+        undefined, undefined, steepEle,
+      )
+      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40007')
+      expect(link).toBeTruthy()
+      // Short and steep — gate skipped, edge stays as a riding edge.
+      expect(link!.data.isWalking).toBe(false)
+    })
+
+    test('thresholds widen with mode hierarchy (8% accepted by training, rejected by kid)', () => {
+      // 200 m way × 14 m rise = 7% grade. Over kid cap (5%), under training (8%).
+      const sevenPctEle = (lat: number, lng: number): number =>
+        Math.abs(lng - 13.400) > 0.0001 ? 14 : 0
+
+      const gKid = buildRoutingGraph(
+        longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
+        undefined, undefined, sevenPctEle,
+      )
+      const gTraining = buildRoutingGraph(
+        longWay, 'training', new Set(), undefined, undefined, undefined,
+        undefined, undefined, sevenPctEle,
+      )
+      expect(gKid.getLink('52.50000,13.40000', '52.50000,13.40300')!.data.isWalking).toBe(true)
+      expect(gTraining.getLink('52.50000,13.40000', '52.50000,13.40300')!.data.isWalking).toBe(false)
+    })
+  })
+
   test('prefers lower-cost edges', () => {
     // Two parallel paths: one cycleway (preferred, cost 1x), one residential (cost 3x).
     // Use kid-confident which accepts both (cycleway car-free, residential as LTS 1).

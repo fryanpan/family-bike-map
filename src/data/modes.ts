@@ -145,6 +145,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 5,
     slowSpeedKmh: 3,
     walkingSpeedKmh: 1,
+    // 5% grade ≈ 2.9°. AASHTO sustained-grade limit for shared-use paths;
+    // also where most early riders stop pedaling and walk a hill anyway.
+    gradientCapPct: 5,
   },
 
   'kid-confident': {
@@ -167,6 +170,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 10,
     slowSpeedKmh: 5,
     walkingSpeedKmh: 2,
+    // Same 5% as kid-starting-out — surface set widens in this mode,
+    // but kid stamina on grade does not.
+    gradientCapPct: 5,
   },
 
   'kid-traffic-savvy': {
@@ -190,6 +196,10 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 16,
     slowSpeedKmh: 10,
     walkingSpeedKmh: 3,
+    // 7% — older kid with stamina and gearing, but still well short of
+    // the 8% short-burst limit in AASHTO. Pushed up from 5% because at
+    // this skill level "walk the hill" is a meaningful detour penalty.
+    gradientCapPct: 7,
   },
 
   'carrying-kid': {
@@ -213,6 +223,10 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 20,
     slowSpeedKmh: 12,
     walkingSpeedKmh: 4,
+    // 7% — trailer/bakfiets drag is real on grade; pegged to the same
+    // cap as kid-traffic-savvy. E-assist users can lift this in Layer 3
+    // once that toggle ships.
+    gradientCapPct: 7,
   },
 
   training: {
@@ -233,6 +247,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 30,
     slowSpeedKmh: 20,
     walkingSpeedKmh: 5,
+    // 8% — short-burst maximum for shared-use paths. Adult-fitness riders
+    // accept brief steep climbs; above 8% the climb destroys flow.
+    gradientCapPct: 8,
   },
 }
 
