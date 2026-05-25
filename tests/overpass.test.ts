@@ -125,13 +125,25 @@ describe('classifyOsmTagsToItem', () => {
     expect(classifyOsmTagsToItem({ highway: 'cycleway' }, 'kid-starting-out')).toBe('Bike path')
   })
 
-  it('returns Elevated sidewalk path for separated bike track (all profiles)', () => {
+  it('returns Elevated sidewalk path for separated bike track on quiet road (all profiles)', () => {
+    // Residential underlying road = trafficDensity 'low' → quiet variant.
     const tags = { highway: 'residential', cycleway: 'track' }
     expect(classifyOsmTagsToItem(tags, 'kid-starting-out')).toBe('Elevated sidewalk path')
     expect(classifyOsmTagsToItem(tags, 'carrying-kid')).toBe('Elevated sidewalk path')
     expect(classifyOsmTagsToItem(tags, 'training')).toBe('Elevated sidewalk path')
     expect(classifyOsmTagsToItem(tags, 'unknown')).toBe('Elevated sidewalk path')
   })
+
+  it('returns Protected bike lane on major road for separated track on busy road', () => {
+    // Folsom St / 17th St pattern: cycleway:right=track on secondary/tertiary.
+    // Same OSM tagging as a curb-separated cycle track in a residential
+    // neighborhood, but adjacent traffic makes it kid-stressful — the legend
+    // marks it non-preferred for kid-starting-out and kid-confident.
+    expect(classifyOsmTagsToItem({ highway: 'tertiary', 'cycleway:right': 'track' }, 'kid-confident')).toBe('Protected bike lane on major road')
+    expect(classifyOsmTagsToItem({ highway: 'secondary', cycleway: 'track' }, 'kid-traffic-savvy')).toBe('Protected bike lane on major road')
+    expect(classifyOsmTagsToItem({ highway: 'primary', 'cycleway:both': 'track' }, 'carrying-kid')).toBe('Protected bike lane on major road')
+  })
+
 
   it('returns Painted bike lane on quiet street for cycleway=lane on residential', () => {
     expect(classifyOsmTagsToItem({ highway: 'residential', cycleway: 'lane' }, 'kid-starting-out')).toBe('Painted bike lane on quiet street')

@@ -3,7 +3,7 @@ import {
   fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey,
   classifyOsmTagsToItem, isOverlayHiddenSurface, isRoughSurface,
 } from '../services/overpass'
-import { PROFILE_LEGEND, getDisplayPathLevel } from '../utils/classify'
+import { getDisplayPathLevel } from '../utils/classify'
 import { classifyEdge, PATH_LEVEL_LABELS } from '../utils/lts'
 import type { PathLevel } from '../utils/lts'
 import { colorForLevel, weightMultiplierForLevel } from './SimpleLegend'
@@ -126,12 +126,6 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
 
     const BROWSING_WEIGHT = 4
 
-    const preferredLevels = new Set<PathLevel>()
-    for (const group of PROFILE_LEGEND[profileKey] ?? []) {
-      if (!group.defaultPreferred) continue
-      for (const item of group.items) preferredLevels.add(item.level)
-    }
-
     // Pass 0 — classify + filter.
     const toRender: RenderedWay[] = []
     const roughWays: OsmWay[] = []
@@ -146,16 +140,15 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
 
       const itemName = classifyOsmTagsToItem(way.tags, profileKey, regionRules)
       const pathLevel = getDisplayPathLevel(itemName, profileKey, routingPathLevel)
-      const isLevelPreferred = preferredLevels.has(pathLevel)
-      // Overlay shows ONLY preferred-tier bike infra. Non-preferred ways
-      // (LTS 2b/3) clutter the map and tank perf in dense urban areas;
-      // when a route is active, those streets still render via the route
-      // polylines themselves (see useRoutePolylines in Map.tsx) so the
-      // user sees every segment along their actual route regardless of
-      // tier preference.
-      if (!isLevelPreferred) continue
-
       const isPreferred = itemName !== null && preferredItemNames.has(itemName)
+      // Overlay shows ONLY items the active mode prefers. Items at a
+      // preferred LEVEL but flagged non-preferred for this mode (e.g.
+      // 'Protected bike lane on major road' for kid-confident — still
+      // pathLevel '1a' but the legend opts the mode out) are hidden
+      // here too. Non-preferred ways still render on the route polyline
+      // (see useRoutePolylines in Map.tsx) so users see every segment
+      // along their actual route regardless of overlay visibility.
+      if (!isPreferred) continue
       const color = colorForLevel(pathLevel, settings.tiers)
       const isBikeInfraTier = pathLevel === '1a' || pathLevel === '1b' || pathLevel === '2a'
       const browsingWeight = BROWSING_WEIGHT * weightMultiplierForLevel(pathLevel, settings.tiers)

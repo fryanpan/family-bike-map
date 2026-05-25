@@ -72,11 +72,25 @@ describe('classifyEdgeToItem — shared use paths', () => {
 // ── Elevated sidewalk path alongside road (cycle_lane=separated) ─────────────
 
 describe('classifyEdgeToItem — separated track', () => {
-  it('classifies separated track as Elevated sidewalk path', () => {
+  it('classifies separated track as Elevated sidewalk path on residential / unknown host', () => {
     const edge: ValhallaEdge = { cycle_lane: 'separated' }
     expect(classifyEdgeToItem(edge, 'kid-starting-out')).toBe('Elevated sidewalk path')
     expect(classifyEdgeToItem(edge, 'carrying-kid')).toBe('Elevated sidewalk path')
     expect(classifyEdgeToItem(edge, 'training')).toBe('Elevated sidewalk path')
+    const residential: ValhallaEdge = { cycle_lane: 'separated', road_class: 'residential' }
+    expect(classifyEdgeToItem(residential, 'kid-starting-out')).toBe('Elevated sidewalk path')
+  })
+
+  it('classifies separated track on tertiary+ host as Protected bike lane on major road', () => {
+    // Mirrors the OSM-side trafficDensity branch — the Valhalla path
+    // must agree so the external-router benchmark exercises the same
+    // item name as the client router.
+    const tertiary: ValhallaEdge = { cycle_lane: 'separated', road_class: 'tertiary' }
+    const secondary: ValhallaEdge = { cycle_lane: 'separated', road_class: 'secondary' }
+    const primary: ValhallaEdge = { cycle_lane: 'separated', road_class: 'primary' }
+    expect(classifyEdgeToItem(tertiary, 'kid-traffic-savvy')).toBe('Protected bike lane on major road')
+    expect(classifyEdgeToItem(secondary, 'kid-traffic-savvy')).toBe('Protected bike lane on major road')
+    expect(classifyEdgeToItem(primary, 'kid-traffic-savvy')).toBe('Protected bike lane on major road')
   })
 })
 
@@ -229,6 +243,30 @@ describe('getDefaultPreferredItems', () => {
 
   it('returns empty set for unknown profile', () => {
     expect(getDefaultPreferredItems('unknown').size).toBe(0)
+  })
+
+  it('Protected bike lane on major road: non-preferred for the kid-piloted slower modes', () => {
+    // Folsom-style separated track on a busy road: physically car-free (LTS 1)
+    // but adjacent traffic is loud / stressful for younger riders. The legend
+    // mirrors Bryan's framing: not preferred for kid-starting-out / kid-
+    // confident; preferred for kid-traffic-savvy and adult-piloted modes.
+    expect(getDefaultPreferredItems('kid-starting-out').has('Protected bike lane on major road')).toBe(false)
+    expect(getDefaultPreferredItems('kid-confident').has('Protected bike lane on major road')).toBe(false)
+    expect(getDefaultPreferredItems('kid-traffic-savvy').has('Protected bike lane on major road')).toBe(true)
+    expect(getDefaultPreferredItems('carrying-kid').has('Protected bike lane on major road')).toBe(true)
+    expect(getDefaultPreferredItems('training').has('Protected bike lane on major road')).toBe(true)
+  })
+
+  it('Elevated sidewalk path: per-mode preference pinned (paired with Protected-on-major)', () => {
+    // After the 2026-05-25 split, "Elevated sidewalk path" only covers quiet
+    // residential hosts. The per-mode preferred-ness for the surviving item
+    // must NOT silently drift — a future PROFILE_LEGEND edit that changes
+    // carrying-kid's or training's stance on this item should fail loudly.
+    expect(getDefaultPreferredItems('kid-starting-out').has('Elevated sidewalk path')).toBe(true)
+    expect(getDefaultPreferredItems('kid-confident').has('Elevated sidewalk path')).toBe(true)
+    expect(getDefaultPreferredItems('kid-traffic-savvy').has('Elevated sidewalk path')).toBe(true)
+    expect(getDefaultPreferredItems('carrying-kid').has('Elevated sidewalk path')).toBe(false)
+    expect(getDefaultPreferredItems('training').has('Elevated sidewalk path')).toBe(false)
   })
 })
 

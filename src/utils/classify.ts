@@ -56,6 +56,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🛡️', name: 'Elevated sidewalk path',      defaultPreferred: true, level: '1a' },
     ]},
     { defaultPreferred: false, items: [
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: false, level: '1a' },
       { icon: '🚲', name: 'Fahrradstrasse',              defaultPreferred: false, level: '1b' },
       { icon: '🏘️', name: 'Living street',               defaultPreferred: false, level: '1b' },
       { icon: '🏡', name: 'Bike boulevard',              defaultPreferred: false, level: '1b' },
@@ -80,6 +81,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🏡', name: 'Bike boulevard',              defaultPreferred: true, level: '1b' },
     ]},
     { defaultPreferred: false, items: [
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: false, level: '1a' },
       { icon: '〰️', name: 'Painted bike lane on quiet street', defaultPreferred: false, level: '2a' },
       { icon: '🚌', name: 'Shared bus lane on quiet street',    defaultPreferred: false, level: '2a' },
       { icon: '🏠', name: 'Quiet street',                defaultPreferred: false, level: '2b' },
@@ -96,6 +98,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🚴', name: 'Bike path',                   defaultPreferred: true, level: '1a' },
       { icon: '🛤️', name: 'Shared use path',             defaultPreferred: true, level: '1a' },
       { icon: '🛡️', name: 'Elevated sidewalk path',      defaultPreferred: true, level: '1a' },
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: true, level: '1a' },
     ]},
     { defaultPreferred: true, items: [
       { icon: '🚲', name: 'Fahrradstrasse',              defaultPreferred: true, level: '1b' },
@@ -119,6 +122,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
     { defaultPreferred: true, items: [
       { icon: '🚴', name: 'Bike path',                   defaultPreferred: true, level: '1a' },
       { icon: '🛤️', name: 'Shared use path',             defaultPreferred: true, level: '1a' },
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: true, level: '1a' },
     ]},
     { defaultPreferred: true, items: [
       { icon: '🚲', name: 'Fahrradstrasse',              defaultPreferred: true, level: '1b' },
@@ -144,6 +148,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
     { defaultPreferred: true, items: [
       { icon: '🚴', name: 'Bike path',                   defaultPreferred: true, level: '1a' },
       { icon: '🛤️', name: 'Shared use path',             defaultPreferred: true, level: '1a' },
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: true, level: '1a' },
     ]},
     { defaultPreferred: true, items: [
       { icon: '🚲', name: 'Fahrradstrasse',              defaultPreferred: true, level: '1b' },
@@ -516,7 +521,19 @@ export function classifyEdgeToItem(
   if (use === 'cycleway' || use === 'path' || use === 'mountain_bike') return 'Bike path'
   if (use === 'footway' || use === 'pedestrian') return 'Shared use path'
 
-  if (cycleLane === 'separated') return 'Elevated sidewalk path'
+  if (cycleLane === 'separated') {
+    // Mirror the OSM-side trafficDensity branch in classifyOsmTagsToItem:
+    // separated lane next to a tertiary+ road → "Protected bike lane on
+    // major road"; on residential or unknown host → "Elevated sidewalk
+    // path". Without this, the Valhalla-edge benchmark would silently
+    // diverge from the OSM-side classification (per learnings.md "One
+    // classifier drives both display and routing"). ROAD_CLASS_RANK maps
+    // tertiary=4 (major), unclassified=5, residential=6 — rank ≤ 4 is the
+    // "major road" threshold matching how trafficDensity is computed below.
+    const rcRank = ROAD_CLASS_RANK[roadClass] ?? 5
+    if (rcRank <= 4) return 'Protected bike lane on major road'
+    return 'Elevated sidewalk path'
+  }
 
   if (cycleLane === 'dedicated') return 'Painted bike lane on quiet street'
   if (use === 'living_street')   return 'Living street'

@@ -221,7 +221,7 @@ export function classifyOsmTagsToItem(
   // Surface roughness is NOT part of the item name — a rough bike path still
   // classifies as "Bike path" (1a). Callers use isRoughSurface() separately
   // to gate overlay visibility and apply the routing penalty.
-  const { pathLevel } = classifyEdge(tags)
+  const { pathLevel, trafficDensity } = classifyEdge(tags)
 
   const highway     = tags.highway ?? ''
   const cycleway    = tags.cycleway ?? ''
@@ -249,7 +249,22 @@ export function classifyOsmTagsToItem(
   switch (pathLevel) {
     case '1a':
       if (highway === 'footway' || (highway === 'path' && (tags.bicycle === 'yes' || tags.bicycle === 'designated'))) return 'Shared use path'
-      if (isSeparatedTrack || isPhysicallySeparatedLane) return 'Elevated sidewalk path'
+      if (isSeparatedTrack || isPhysicallySeparatedLane) {
+        // Curb-separated track next to a busy underlying road (Folsom, 17th
+        // in SF) is car-free in the LTS sense but the adjacent traffic
+        // makes it stress-inducing for kid-confident and below. Differentiate
+        // by the host road's trafficDensity (derived from highway class):
+        // tertiary/secondary/primary/trunk → moderate or high. Pathway is
+        // still pathLevel '1a' — routing acceptance doesn't change — but
+        // the legend item is non-preferred for kid-starting-out + kid-
+        // confident, which drops the segment to slowSpeedKmh in routing
+        // (the same nudge any non-preferred item gets) and renders orange
+        // on the route.
+        if (trafficDensity === 'moderate' || trafficDensity === 'high') {
+          return 'Protected bike lane on major road'
+        }
+        return 'Elevated sidewalk path'
+      }
       return 'Bike path'
     case '1b':
       if (bicycleRoad) return 'Fahrradstrasse'
