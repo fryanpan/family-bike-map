@@ -242,6 +242,18 @@ describe('getDefaultPreferredItems', () => {
     expect(getDefaultPreferredItems('carrying-kid').has('Protected bike lane on major road')).toBe(true)
     expect(getDefaultPreferredItems('training').has('Protected bike lane on major road')).toBe(true)
   })
+
+  it('Elevated sidewalk path: per-mode preference pinned (paired with Protected-on-major)', () => {
+    // After the 2026-05-25 split, "Elevated sidewalk path" only covers quiet
+    // residential hosts. The per-mode preferred-ness for the surviving item
+    // must NOT silently drift — a future PROFILE_LEGEND edit that changes
+    // carrying-kid's or training's stance on this item should fail loudly.
+    expect(getDefaultPreferredItems('kid-starting-out').has('Elevated sidewalk path')).toBe(true)
+    expect(getDefaultPreferredItems('kid-confident').has('Elevated sidewalk path')).toBe(true)
+    expect(getDefaultPreferredItems('kid-traffic-savvy').has('Elevated sidewalk path')).toBe(true)
+    expect(getDefaultPreferredItems('carrying-kid').has('Elevated sidewalk path')).toBe(false)
+    expect(getDefaultPreferredItems('training').has('Elevated sidewalk path')).toBe(false)
+  })
 })
 
 // ── computeRouteQuality ──────────────────────────────────────────────────────
