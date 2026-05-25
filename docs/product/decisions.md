@@ -1,5 +1,25 @@
 # Architecture & Product Decisions
 
+## 2026-05-25: Split "Protected bike lane on major road" from "Elevated sidewalk path"
+
+**Context**: SF streets like 17th and Folsom (curb-separated cycle tracks on tertiary/secondary roads) were being labelled "Elevated sidewalk path" — same legend item as a separated track on a quiet residential street. In OSM both share `cycleway=track` / `cycleway:right=track` tags, so `classifyOsmTagsToItem` lumped them together. The lived experience is different: a separated track next to a 50 km/h secondary road is loud, fume-y, and stressful for younger kids, while the same tagging on a residential street is genuinely calm. Bryan's framing: *not appropriate for kid-confident, but fine for kid-traffic-savvy.*
+
+**Decision**:
+- Differentiate by `trafficDensity` of the host road (already computed in `classifyEdge` from `highway`):
+  - `low` (residential, living-street, unclassified) → keep "Elevated sidewalk path"
+  - `moderate` / `high` (tertiary/secondary/primary/trunk) → new item **"Protected bike lane on major road"**
+- Both stay at `pathLevel='1a'` — physical car-separation is real, the routing graph doesn't reject. The legend item flips between preferred and non-preferred per mode, and `clientRouter`'s existing "light user-preference nudge" drops non-preferred items to `slowSpeedKmh` so the router prefers alternatives when one exists, without bridge-walking.
+- Preferred per mode (mirrors Bryan's framing):
+  - kid-starting-out / kid-confident: **not preferred** (orange on route, ~2× cost, hidden from overlay)
+  - kid-traffic-savvy / carrying-kid / training: **preferred** (green, normal cost, visible on overlay)
+- `BikeMapOverlay` visibility check moves from level-level to item-level. Previously the overlay highlighted any way at a preferred LEVEL even when the specific item was opted-out for the mode — so e.g. `carrying-kid` saw Elevated sidewalk paths painted as preferred 1a-green despite being in the non-preferred legend group. Now the overlay respects per-item membership, which both fixes that pre-existing inconsistency and gives the new item the correct visual treatment for kid-confident.
+
+**Result**: The OSM-tag → legend-item layer now expresses "separated track + busy host road" as a distinct condition. Kid-confident routes through SF will downgrade Folsom/17th, prefer parallel quiet streets when available, and keep using protected lanes when no alternative exists. Carrying-kid and training (which previously routed via "Elevated sidewalk path" as non-preferred / rejected) now treat Protected-on-major as preferred — closer to how an adult cyclist actually rides those corridors.
+
+**Status**: Implemented. Benchmark: [docs/research/2026-05-25-routing-benchmark-results.md](../research/2026-05-25-routing-benchmark-results.md).
+
+---
+
 ## 2026-05-10: Gradient gate via MapTiler terrain-RGB
 
 **Context**: Family-bike routing had per-mode `gradientCapPct` field scaffolded in `ModeRule` and `RegionRule` (from the 2026-04-13 three-layer plan) but no elevation pipeline and no consumer. SF and Mexico City profiles call out gradient as load-bearing; Berlin is mostly flat so the gap had been invisible there.

@@ -230,6 +230,18 @@ describe('getDefaultPreferredItems', () => {
   it('returns empty set for unknown profile', () => {
     expect(getDefaultPreferredItems('unknown').size).toBe(0)
   })
+
+  it('Protected bike lane on major road: non-preferred for the kid-piloted slower modes', () => {
+    // Folsom-style separated track on a busy road: physically car-free (LTS 1)
+    // but adjacent traffic is loud / stressful for younger riders. The legend
+    // mirrors Bryan's framing: not preferred for kid-starting-out / kid-
+    // confident; preferred for kid-traffic-savvy and adult-piloted modes.
+    expect(getDefaultPreferredItems('kid-starting-out').has('Protected bike lane on major road')).toBe(false)
+    expect(getDefaultPreferredItems('kid-confident').has('Protected bike lane on major road')).toBe(false)
+    expect(getDefaultPreferredItems('kid-traffic-savvy').has('Protected bike lane on major road')).toBe(true)
+    expect(getDefaultPreferredItems('carrying-kid').has('Protected bike lane on major road')).toBe(true)
+    expect(getDefaultPreferredItems('training').has('Protected bike lane on major road')).toBe(true)
+  })
 })
 
 // ── computeRouteQuality ──────────────────────────────────────────────────────

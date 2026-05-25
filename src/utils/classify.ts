@@ -56,6 +56,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🛡️', name: 'Elevated sidewalk path',      defaultPreferred: true, level: '1a' },
     ]},
     { defaultPreferred: false, items: [
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: false, level: '1a' },
       { icon: '🚲', name: 'Fahrradstrasse',              defaultPreferred: false, level: '1b' },
       { icon: '🏘️', name: 'Living street',               defaultPreferred: false, level: '1b' },
       { icon: '🏡', name: 'Bike boulevard',              defaultPreferred: false, level: '1b' },
@@ -80,6 +81,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🏡', name: 'Bike boulevard',              defaultPreferred: true, level: '1b' },
     ]},
     { defaultPreferred: false, items: [
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: false, level: '1a' },
       { icon: '〰️', name: 'Painted bike lane on quiet street', defaultPreferred: false, level: '2a' },
       { icon: '🚌', name: 'Shared bus lane on quiet street',    defaultPreferred: false, level: '2a' },
       { icon: '🏠', name: 'Quiet street',                defaultPreferred: false, level: '2b' },
@@ -96,6 +98,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🚴', name: 'Bike path',                   defaultPreferred: true, level: '1a' },
       { icon: '🛤️', name: 'Shared use path',             defaultPreferred: true, level: '1a' },
       { icon: '🛡️', name: 'Elevated sidewalk path',      defaultPreferred: true, level: '1a' },
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: true, level: '1a' },
     ]},
     { defaultPreferred: true, items: [
       { icon: '🚲', name: 'Fahrradstrasse',              defaultPreferred: true, level: '1b' },
@@ -119,6 +122,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
     { defaultPreferred: true, items: [
       { icon: '🚴', name: 'Bike path',                   defaultPreferred: true, level: '1a' },
       { icon: '🛤️', name: 'Shared use path',             defaultPreferred: true, level: '1a' },
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: true, level: '1a' },
     ]},
     { defaultPreferred: true, items: [
       { icon: '🚲', name: 'Fahrradstrasse',              defaultPreferred: true, level: '1b' },
@@ -144,6 +148,7 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
     { defaultPreferred: true, items: [
       { icon: '🚴', name: 'Bike path',                   defaultPreferred: true, level: '1a' },
       { icon: '🛤️', name: 'Shared use path',             defaultPreferred: true, level: '1a' },
+      { icon: '🛡️', name: 'Protected bike lane on major road', defaultPreferred: true, level: '1a' },
     ]},
     { defaultPreferred: true, items: [
       { icon: '🚲', name: 'Fahrradstrasse',              defaultPreferred: true, level: '1b' },
