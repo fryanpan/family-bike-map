@@ -440,7 +440,23 @@ async function main() {
   const modeRows: ModeRow[] = []
   const modeGraphStats: Record<string, { nodes: number; edges: number; buildMs: number }> = {}
 
-  for (const mode of MODES) {
+  // Memory logging helper. Berlin's graph is ~480 MB per mode; 5 of them
+  // held simultaneously trips a 16 GB box's OOM. Print rss after each
+  // mode so we can spot regressions.
+  const logMem = (label: string) => {
+    const m = process.memoryUsage()
+    const mb = (n: number) => (n / 1024 / 1024).toFixed(0)
+    console.log(`  [mem] ${label}: rss ${mb(m.rss)} MB · heapUsed ${mb(m.heapUsed)} MB`)
+  }
+  logMem('after fetchTilesForCity')
+
+  // Per-mode work extracted into its own function so `graph` and any
+  // intermediate adjacency-list overhead go out of scope on return.
+  // The previous shape (single for-of holding `const graph` across
+  // iterations) leaked because V8/Bun delays GC on multi-hundred-MB
+  // objects; explicit scoping + Bun.gc(true) reclaims it before the
+  // next mode allocates.
+  function runMode(mode: ModeKey): void {
     const preferred = getDefaultPreferredItems(mode)
     console.log(`\n[${mode}] Building graph...`)
     const t0 = performance.now()
@@ -469,6 +485,19 @@ async function main() {
       }
     }
     console.log(`  Routes found: ${found}/${pairs.length}`)
+  }
+
+  for (const mode of MODES) {
+    runMode(mode)
+    // Force GC after each mode so the previous graph is reclaimed before
+    // the next allocation. Bun exposes a sync GC; on plain node this is
+    // a no-op (only enabled with --expose-gc). Either way, the explicit
+    // scope above ensures the graph IS unreferenced — GC just makes the
+    // collection happen now rather than under memory pressure.
+    const bunGlobal = (globalThis as unknown as { Bun?: { gc: (sync: boolean) => void } }).Bun
+    if (bunGlobal && typeof bunGlobal.gc === 'function') bunGlobal.gc(true)
+    else if (typeof globalThis.gc === 'function') (globalThis.gc as () => void)()
+    logMem(`after ${mode}`)
   }
 
   // External routers (Valhalla / BRouter) called per mode with the
