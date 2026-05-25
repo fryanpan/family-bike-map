@@ -72,11 +72,25 @@ describe('classifyEdgeToItem — shared use paths', () => {
 // ── Elevated sidewalk path alongside road (cycle_lane=separated) ─────────────
 
 describe('classifyEdgeToItem — separated track', () => {
-  it('classifies separated track as Elevated sidewalk path', () => {
+  it('classifies separated track as Elevated sidewalk path on residential / unknown host', () => {
     const edge: ValhallaEdge = { cycle_lane: 'separated' }
     expect(classifyEdgeToItem(edge, 'kid-starting-out')).toBe('Elevated sidewalk path')
     expect(classifyEdgeToItem(edge, 'carrying-kid')).toBe('Elevated sidewalk path')
     expect(classifyEdgeToItem(edge, 'training')).toBe('Elevated sidewalk path')
+    const residential: ValhallaEdge = { cycle_lane: 'separated', road_class: 'residential' }
+    expect(classifyEdgeToItem(residential, 'kid-starting-out')).toBe('Elevated sidewalk path')
+  })
+
+  it('classifies separated track on tertiary+ host as Protected bike lane on major road', () => {
+    // Mirrors the OSM-side trafficDensity branch — the Valhalla path
+    // must agree so the external-router benchmark exercises the same
+    // item name as the client router.
+    const tertiary: ValhallaEdge = { cycle_lane: 'separated', road_class: 'tertiary' }
+    const secondary: ValhallaEdge = { cycle_lane: 'separated', road_class: 'secondary' }
+    const primary: ValhallaEdge = { cycle_lane: 'separated', road_class: 'primary' }
+    expect(classifyEdgeToItem(tertiary, 'kid-traffic-savvy')).toBe('Protected bike lane on major road')
+    expect(classifyEdgeToItem(secondary, 'kid-traffic-savvy')).toBe('Protected bike lane on major road')
+    expect(classifyEdgeToItem(primary, 'kid-traffic-savvy')).toBe('Protected bike lane on major road')
   })
 })
 

@@ -521,7 +521,19 @@ export function classifyEdgeToItem(
   if (use === 'cycleway' || use === 'path' || use === 'mountain_bike') return 'Bike path'
   if (use === 'footway' || use === 'pedestrian') return 'Shared use path'
 
-  if (cycleLane === 'separated') return 'Elevated sidewalk path'
+  if (cycleLane === 'separated') {
+    // Mirror the OSM-side trafficDensity branch in classifyOsmTagsToItem:
+    // separated lane next to a tertiary+ road → "Protected bike lane on
+    // major road"; on residential or unknown host → "Elevated sidewalk
+    // path". Without this, the Valhalla-edge benchmark would silently
+    // diverge from the OSM-side classification (per learnings.md "One
+    // classifier drives both display and routing"). ROAD_CLASS_RANK maps
+    // tertiary=4 (major), unclassified=5, residential=6 — rank ≤ 4 is the
+    // "major road" threshold matching how trafficDensity is computed below.
+    const rcRank = ROAD_CLASS_RANK[roadClass] ?? 5
+    if (rcRank <= 4) return 'Protected bike lane on major road'
+    return 'Elevated sidewalk path'
+  }
 
   if (cycleLane === 'dedicated') return 'Painted bike lane on quiet street'
   if (use === 'living_street')   return 'Living street'
