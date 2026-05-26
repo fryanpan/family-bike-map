@@ -16,6 +16,44 @@ import { classifyEdge } from '../src/utils/lts'
 import type { PathLevel } from '../src/utils/lts'
 import type { OsmWay } from '../src/utils/types'
 import { CITIES as SHARED_CITIES, verifyFixtures, printVerifyReport, hasVerifyErrors } from './lib/fixtures'
+import { prefetchElevation, setElevationDecoder, setElevationReferer } from '../src/services/elevation'
+import { PNG } from 'pngjs'
+
+// ── Elevation decoder injection ─────────────────────────────────────────
+// Bun doesn't ship OffscreenCanvas / createImageBitmap, so terrain-RGB
+// PNG tiles can't decode via the browser path. Register a pngjs-based
+// decoder so the gradient gate is actually exercised in the benchmark.
+// The browser app continues to use the OffscreenCanvas path; this
+// runs only in the Bun script process.
+setElevationDecoder((bytes) => {
+  return new Promise((resolve) => {
+    const png = new PNG()
+    png.parse(Buffer.from(bytes), (err, data) => {
+      if (err || !data) { resolve(null); return }
+      // pngjs hands back a node Buffer of RGBA bytes; coerce to the
+      // Uint8ClampedArray shape that the elevation module expects.
+      resolve(new Uint8ClampedArray(data.data.buffer, data.data.byteOffset, data.data.byteLength))
+    })
+  })
+})
+
+// MapTiler key is origin-restricted to bike-map.fryanpan.com. Browser
+// requests get an automatic Referer; Bun sends none, so MapTiler 403s.
+// Forge the allowed Referer for the script-only path.
+setElevationReferer('https://bike-map.fryanpan.com/')
+
+// Bun loads `.env` automatically into `process.env`, but the elevation
+// module reads the key via `import.meta.env?.VITE_MAPTILER_KEY` (Vite
+// convention). Bridge it explicitly so the decoder path actually
+// fetches tiles.
+//
+// In Bun, import.meta.env mirrors process.env, but the optional-chain
+// guard in getMapTilerKey treats `import.meta.env?.VITE_MAPTILER_KEY`
+// as undefined if Bun's import.meta.env object hasn't been populated
+// with that key — depending on Bun version. Force-populate.
+if (process.env.VITE_MAPTILER_KEY && !(import.meta as { env?: Record<string, string> }).env?.VITE_MAPTILER_KEY) {
+  ;((import.meta as { env?: Record<string, string> }).env ??= {}).VITE_MAPTILER_KEY = process.env.VITE_MAPTILER_KEY
+}
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -449,6 +487,26 @@ async function main() {
     console.log(`  [mem] ${label}: rss ${mb(m.rss)} MB · heapUsed ${mb(m.heapUsed)} MB`)
   }
   logMem('after fetchTilesForCity')
+
+  // Prefetch terrain-RGB elevation tiles covering the entire city bbox
+  // once, up-front. The module-level tile cache in elevation.ts is
+  // reused across every mode's graph build, so this single fetch
+  // exercises the gradient gate for all 5 modes' route searches.
+  // If VITE_MAPTILER_KEY isn't set the calls soft-null and the gate is
+  // skipped (same as pre-2026-05-25 benchmark behavior).
+  const elevationEnabled = process.argv.includes('--elevation') || !!process.env.VITE_MAPTILER_KEY
+  if (elevationEnabled) {
+    console.log('\nPrefetching elevation tiles…')
+    const eT0 = performance.now()
+    await prefetchElevation({
+      south: city.bbox.south, west: city.bbox.west,
+      north: city.bbox.north, east: city.bbox.east,
+    })
+    console.log(`  Elevation prefetch done in ${((performance.now() - eT0) / 1000).toFixed(1)}s`)
+    logMem('after prefetchElevation')
+  } else {
+    console.log('\nElevation prefetch skipped (no VITE_MAPTILER_KEY). Gradient gate will not be exercised.')
+  }
 
   // Per-mode work extracted into its own function so `graph` and any
   // intermediate adjacency-list overhead go out of scope on return.
