@@ -60,7 +60,8 @@ interface NodeData {
 
 interface EdgeData {
   distance: number  // metres
-  cost: number      // weighted cost for A*
+  cost: number      // weighted cost for A* (includes synthetic ascent penalty for hill avoidance)
+  durationSec: number // real expected travel time (no ascent penalty) — what we show users
   wayTags: Record<string, string>
   wayId: number     // OSM way id — used by tap-to-avoid to identify the source way
   isWalking: boolean
@@ -287,12 +288,14 @@ export function buildRoutingGraph(
     const bicycleOverride = tags['oneway:bicycle'] === 'no'
     const isOneway = oneway && !bicycleOverride
 
-    // Pre-compute elevation for every coordinate on this way so each
-    // segment can score its own ascent. Skipped when there's no usable
-    // elevation source — the gate fails soft to "no ascent cost added."
-    // BRouter-style: ascent contributes positive cost per metre climbed
-    // (rule.uphillCostSecPerMeter), descent contributes nothing. Per-
-    // direction asymmetry: A→B may climb while B→A descends.
+    // BRouter-style ascent cost: per-segment elevation lookup, summed
+    // across the whole way, with UPHILL_CUTOFF_M applied ONCE to the
+    // total — not per-segment, which would make hill cost depend on OSM
+    // vertex density (a 10 m climb tagged as 10 × 1 m steps would clear
+    // the cutoff segment-by-segment and add zero penalty, while the same
+    // climb as a single 10 m segment would add 8 m of penalty). The
+    // effective per-segment cost is then the raw segment ascent scaled
+    // by `effective_total / raw_total`.
     const useAscentCost =
       !isWalking &&
       rule.uphillCostSecPerMeter != null &&
@@ -301,6 +304,25 @@ export function buildRoutingGraph(
     const elevations: Array<number | null> = useAscentCost
       ? coords.map(([la, ln]) => elevationFn!(la, ln))
       : []
+    // Sum positive deltas in each direction (forward = traversing the
+    // way as listed; reverse = traversing it backwards). Forward ascent
+    // is the reverse's descent and vice versa.
+    let forwardRawAscent = 0
+    let reverseRawAscent = 0
+    if (useAscentCost) {
+      for (let i = 0; i < elevations.length - 1; i++) {
+        const e1 = elevations[i]
+        const e2 = elevations[i + 1]
+        if (e1 == null || e2 == null) continue
+        if (e2 > e1) forwardRawAscent += e2 - e1
+        else if (e1 > e2) reverseRawAscent += e1 - e2
+      }
+    }
+    const forwardEffectiveAscent = Math.max(0, forwardRawAscent - UPHILL_CUTOFF_M)
+    const reverseEffectiveAscent = Math.max(0, reverseRawAscent - UPHILL_CUTOFF_M)
+    const forwardScale = forwardRawAscent > 0 ? forwardEffectiveAscent / forwardRawAscent : 0
+    const reverseScale = reverseRawAscent > 0 ? reverseEffectiveAscent / reverseRawAscent : 0
+    const ascentMul = rule.uphillCostSecPerMeter ?? 0
 
     for (let i = 0; i < coords.length - 1; i++) {
       const [lat1, lng1] = coords[i]
@@ -313,36 +335,33 @@ export function buildRoutingGraph(
       if (!graph.getNode(id2)) graph.addNode(id2, { lat: lat2, lng: lng2 })
 
       const dist = haversineM(lat1, lng1, lat2, lng2)
-      // Cost = time-at-effective-speed × level-cost-multiplier.
-      // Multiplier biases the router away from accepted-but-worse infra
-      // (e.g. LTS 2b for traffic-savvy at 1.5×, LTS 3 for carrying-kid at
-      // 2×, rough surfaces at 5×) even when the base speed is unchanged.
-      const baseCost = (dist / speed) * costMultiplier
+      // durationSec is the real expected travel time (distance / speed).
+      // routing cost adds (a) level/multiplier bias and (b) ascent
+      // penalty; both are synthetic and stay OUT of durationSec so the
+      // UI's reported ETA reflects physical ride time, not router
+      // preferences. (Reviewer caught the duration-inflation bug.)
+      const durationSec = dist / speed
+      const baseCost = durationSec * costMultiplier
 
-      // BRouter-style ascent cost. Forward edge adds cost only when going
-      // up; reverse edge adds cost only when going up (i.e. when the
-      // physical descent traversed forward becomes an ascent traversed
-      // back). Cutoff filters terrain-RGB pixel noise.
-      let forwardAscent = 0
-      let reverseAscent = 0
+      let forwardSegAscent = 0
+      let reverseSegAscent = 0
       if (useAscentCost) {
         const e1 = elevations[i]
         const e2 = elevations[i + 1]
         if (e1 != null && e2 != null) {
-          forwardAscent = Math.max(0, e2 - e1 - UPHILL_CUTOFF_M)
-          reverseAscent = Math.max(0, e1 - e2 - UPHILL_CUTOFF_M)
+          if (e2 > e1) forwardSegAscent = (e2 - e1) * forwardScale
+          else if (e1 > e2) reverseSegAscent = (e1 - e2) * reverseScale
         }
       }
-      const ascentMul = rule.uphillCostSecPerMeter ?? 0
-      const forwardCost = baseCost + forwardAscent * ascentMul
-      const reverseCost = baseCost + reverseAscent * ascentMul
+      const forwardCost = baseCost + forwardSegAscent * ascentMul
+      const reverseCost = baseCost + reverseSegAscent * ascentMul
 
-      const forwardData: EdgeData = { distance: dist, cost: forwardCost, wayTags: tags, wayId: way.osmId, isWalking }
+      const forwardData: EdgeData = { distance: dist, cost: forwardCost, durationSec, wayTags: tags, wayId: way.osmId, isWalking }
       graph.addLink(id1, id2, forwardData)
 
       // Reverse edge (unless one-way)
       if (!isOneway) {
-        const reverseData: EdgeData = { distance: dist, cost: reverseCost, wayTags: tags, wayId: way.osmId, isWalking }
+        const reverseData: EdgeData = { distance: dist, cost: reverseCost, durationSec, wayTags: tags, wayId: way.osmId, isWalking }
         graph.addLink(id2, id1, reverseData)
       }
     }
@@ -542,7 +561,10 @@ export function routeOnGraph(
     const link = graph.getLink(prevNode.id, currNode.id)
     if (link) {
       totalDistance += link.data.distance
-      totalTime += link.data.cost  // cost IS time in seconds
+      // cost includes routing-only multipliers (level bias, ascent
+      // penalty). For displayed ETA we sum durationSec — the physical
+      // distance/speed time, no synthetic biases.
+      totalTime += link.data.durationSec
       if (link.data.isWalking) walkingDistance += link.data.distance
 
       const itemName = classifyOsmTagsToItem(link.data.wayTags, profileKey, regionRules)

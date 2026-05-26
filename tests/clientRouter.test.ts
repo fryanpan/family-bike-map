@@ -453,6 +453,55 @@ describe('routeOnGraph', () => {
     })
   })
 
+  test('prefers a flat-longer path over a steep-shorter one (end-to-end ascent routing)', () => {
+    // Two paths from origin to destination (both at sea level):
+    //   steep: direct 300 m way that goes 0→30 m→0 (a hill in the middle)
+    //   flat:  1200 m detour staying at 0 m
+    // kid-starting-out (40 s/m ascent cost). Direct path penalty:
+    //   28 m effective ascent × 40 = 1120 s on top of 214 s base = 1334 s.
+    // Flat detour: 1200 m / 1.4 m/s = 857 s. Flat should win.
+    const steepWay: OsmWay = {
+      osmId: 30, itemName: null,
+      tags: { highway: 'cycleway' },
+      coordinates: [[52.500, 13.400], [52.500, 13.4015], [52.500, 13.4030]],
+    }
+    const flatLeg1: OsmWay = {
+      osmId: 31, itemName: null,
+      tags: { highway: 'cycleway' },
+      coordinates: [[52.500, 13.400], [52.5045, 13.400]],
+    }
+    const flatLeg2: OsmWay = {
+      osmId: 32, itemName: null,
+      tags: { highway: 'cycleway' },
+      coordinates: [[52.5045, 13.400], [52.5045, 13.4030]],
+    }
+    const flatLeg3: OsmWay = {
+      osmId: 33, itemName: null,
+      tags: { highway: 'cycleway' },
+      coordinates: [[52.5045, 13.4030], [52.500, 13.4030]],
+    }
+    const ways = [steepWay, flatLeg1, flatLeg2, flatLeg3]
+    // Hilltop coord is the middle vertex of the direct way only.
+    const ele = (lat: number, lng: number): number =>
+      Math.abs(lat - 52.500) < 0.0001 && Math.abs(lng - 13.4015) < 0.0001 ? 30 : 0
+
+    const graph = buildRoutingGraph(
+      ways, 'kid-starting-out', new Set(['Bike path']),
+      undefined, undefined, undefined, undefined, undefined, ele,
+    )
+    const result = routeOnGraph(
+      graph, 52.500, 13.400, 52.500, 13.4030,
+      'kid-starting-out', new Set(['Bike path']),
+    )
+    expect(result).not.toBeNull()
+    // If the router picked the flat detour, the path includes the
+    // northern node (52.5045) — confirm it routed AROUND the hill.
+    const tookFlatDetour = result!.coordinates.some(
+      ([la]) => Math.abs(la - 52.5045) < 0.0001,
+    )
+    expect(tookFlatDetour).toBe(true)
+  })
+
   test('prefers lower-cost edges', () => {
     // Two parallel paths: one cycleway (preferred, cost 1x), one residential (cost 3x).
     // Use kid-confident which accepts both (cycleway car-free, residential as LTS 1).
