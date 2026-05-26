@@ -1,31 +1,33 @@
 /**
- * Elevation lookup via MapTiler terrain-RGB tiles.
+ * Elevation lookup via Mapbox terrain-RGB tiles.
  *
  * Tiles are fetched once per session and cached in memory as decoded
  * pixel arrays. `prefetchElevation(bbox)` is awaited up-front by the
  * router before graph construction; `lookupElevation(lat, lng)` is then
  * a synchronous nearest-pixel read inside the graph builder.
  *
- * Fails soft: if the MapTiler key is missing, or a tile 404s, the
+ * Fails soft: if the Mapbox token is missing, or a tile 404s, the
  * lookup returns null for any coord it can't resolve. Callers (the
  * gradient gate in clientRouter) skip the cap when elevation is null,
  * so the absence of elevation degrades gracefully to "no gradient
  * filter" rather than blocking routes.
  *
- * Reference: https://docs.maptiler.com/cloud/api/elevation/
+ * Reference: https://docs.mapbox.com/data/tilesets/reference/mapbox-terrain-rgb-v1/
  *   height (m) = -10000 + ((R*256*256 + G*256 + B) * 0.1)
+ *
+ * History: started on MapTiler terrain-rgb at z=12, swapped to Mapbox
+ * 2026-05-26 because MapTiler caps at z=12 and the ±10 m inter-pixel
+ * noise faked 12% gradients on flat Berlin streets. Mapbox supports
+ * up to z=15 (~5 m/pixel at equator), which gives smoother interpolation
+ * between SRTM samples and less spurious-gradient noise.
  */
 
-// z=12 is the max zoom MapTiler ships for terrain-rgb (z=13+ returns 400
-// — verified 2026-05-26). At Berlin latitude that's ~24 m/pixel, at SF
-// ~38 m/pixel. The 2026-05-25 Berlin benchmark showed adjacent-pixel
-// ±10 m noise can fake 12% gradients on flat ways (Friedrichstraße
-// decoded as 41 m vs 63 m). Downstream fixes attempted on 2026-05-26
-// (bilinear interpolation, higher way-length floor) all traded SF
-// signal loss for Berlin noise reduction — neither was clearly better.
-// Real fix is multi-point sampling along the way or a higher-resolution
-// data source. Tracked as a follow-up.
-const TILE_ZOOM = 12
+// z=15 is the max zoom Mapbox ships for mapbox.terrain-rgb. At Berlin
+// latitude that's ~3 m/pixel, at SF ~5 m/pixel — both at sub-block
+// resolution. 64× more tiles per bbox than z=12, but the per-tile size
+// is unchanged (~50-100 KB) and tiles are individually cacheable in CF
+// edge + our in-memory map.
+const TILE_ZOOM = 15
 const TILE_SIZE = 256
 
 // In-memory cache. `null` means "fetched and failed" — don't retry this
@@ -41,19 +43,19 @@ function canDecodeTiles(): boolean {
   )
 }
 
-function getMapTilerKey(): string | undefined {
+function getMapboxToken(): string | undefined {
   // Skip fetches entirely in runtimes that can't decode the PNGs anyway —
   // a Bun/Node script without a registered decoder would otherwise burn
   // bandwidth pulling tiles only to discard them. Browser keeps its
   // OffscreenCanvas path; benchmark registers a decoder before this runs.
   if (!canDecodeTiles()) return undefined
-  // Browser: Vite inlines `import.meta.env.VITE_MAPTILER_KEY` at build time.
+  // Browser: Vite inlines `import.meta.env.VITE_MAPBOX_TOKEN` at build time.
   // Non-browser (Bun benchmark script, Node test runner): fall back to
   // process.env so the gradient gate can be exercised outside the browser.
-  const viteKey = import.meta.env?.VITE_MAPTILER_KEY
-  if (viteKey) return viteKey
-  if (typeof process !== 'undefined' && process.env?.VITE_MAPTILER_KEY) {
-    return process.env.VITE_MAPTILER_KEY
+  const viteToken = import.meta.env?.VITE_MAPBOX_TOKEN
+  if (viteToken) return viteToken
+  if (typeof process !== 'undefined' && process.env?.VITE_MAPBOX_TOKEN) {
+    return process.env.VITE_MAPBOX_TOKEN
   }
   return undefined
 }
@@ -123,11 +125,12 @@ export function setElevationDecoder(decoder: ElevationDecoder | null): void {
   externalDecoder = decoder
 }
 
-// MapTiler keys are origin-restricted in production; a request from a
+// Mapbox tokens can be URL-restricted in production; a request from a
 // browser tab on bike-map.fryanpan.com gets an automatic matching
-// Referer header. Bun's fetch sends no Referer, so MapTiler 403s. The
-// benchmark script registers a Referer here matching the allowed
-// origin so the same key works without us proxying through the worker.
+// Referer. Bun's fetch sends no Referer, so a restricted token would
+// 401/403. The benchmark script registers a Referer here matching the
+// allowed origin so the same token works without us proxying through
+// the worker.
 let fetchReferer: string | null = null
 
 export function setElevationReferer(url: string | null): void {
@@ -161,7 +164,7 @@ async function fetchTile(z: number, x: number, y: number): Promise<void> {
   const existing = inflight.get(key)
   if (existing) return existing
 
-  const apiKey = getMapTilerKey()
+  const apiKey = getMapboxToken()
   if (!apiKey) {
     tileCache.set(key, null)
     return
@@ -169,7 +172,11 @@ async function fetchTile(z: number, x: number, y: number): Promise<void> {
 
   const p = (async () => {
     try {
-      const url = `https://api.maptiler.com/tiles/terrain-rgb/${z}/${x}/${y}.png?key=${apiKey}`
+      // Mapbox Raster Tiles API. `pngraw` returns a non-color-managed PNG
+      // so the RGB values are the encoded elevation bytes — required for
+      // accurate decode. The standard `.png` variant goes through Mapbox's
+      // sRGB pipeline and shifts the bytes.
+      const url = `https://api.mapbox.com/v4/mapbox.terrain-rgb/${z}/${x}/${y}.pngraw?access_token=${apiKey}`
       const init: RequestInit = fetchReferer ? { headers: { Referer: fetchReferer } } : {}
       const res = await fetch(url, init)
       if (!res.ok) {
@@ -197,14 +204,15 @@ export interface BBox {
 }
 
 /**
- * Pre-fetch the terrain-RGB tiles covering `bbox` at zoom 12. Called
+ * Pre-fetch the terrain-RGB tiles covering `bbox` at zoom 15. Called
  * once per route request before graph construction. Awaiting this
  * before `buildRoutingGraph` lets the gradient check inside the graph
  * builder stay synchronous.
  *
- * z=12 (MapTiler's max zoom for terrain-rgb) is ~24 m/pixel at Berlin
- * latitude and ~38 m at SF. For a typical urban corridor that's
- * ~9–25 tiles per request, well under any rate ceiling.
+ * z=15 (Mapbox's max zoom for terrain-rgb) is ~3 m/pixel at Berlin
+ * latitude and ~5 m at SF. 64× the tile count vs z=12 but each tile is
+ * ~50-100 KB and Mapbox's free tier covers a healthy personal-project
+ * volume (200K tile reads/month before any cost).
  */
 export async function prefetchElevation(bbox: BBox): Promise<void> {
   const { x: xA, y: yA } = lngLatToTile(bbox.west, bbox.north, TILE_ZOOM)
