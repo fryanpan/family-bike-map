@@ -78,13 +78,15 @@ const MIN_GRADIENT_WAY_LEN_M = 30
 // noise as a fixed metres-of-error budget and inflate the gradient cap
 // by `noise / wayLen` so short ways need a higher decoded gradient to
 // trip the gate. A 170 m way needs > 5% + 20/170 * 100 = ~16.8% to
-// fire; a 500 m way needs > 5% + 20/500 * 100 = 9%; a 1000 m way needs
-// > 6%. This filters the Berlin-style false positives while keeping
-// real SF climbs (Bernal 25%+ / 500 m+) gated correctly. Pulled from
-// the 2026-05-26 Berlin-vs-SF benchmark — bilinear interpolation and
-// floor=300 m alternatives both lost real SF signal; adaptive cap kept
-// signal on long ways and dropped noise on short ones.
+// fire; a 500 m way needs > 9%; a 1000 m way needs > 7%.
+//
+// The bonus is capped at MAX_NOISE_BONUS_PCT so very short ways don't
+// disable the gate entirely. Without the cap, a 40 m bridge ramp would
+// get a 55% effective cap and a real 25% ramp would stay rideable. With
+// the cap at 10pp, a 40 m way still needs > 15% to demote — real
+// connectors fire, Berlin noise on 170+ m ways still under-fires.
 const ELEVATION_NOISE_M = 20
+const MAX_NOISE_BONUS_PCT = 10
 
 /** Total polyline length in metres (sum of consecutive segment distances). */
 function wayLengthM(coords: Array<[number, number]>): number {
@@ -323,7 +325,8 @@ export function buildRoutingGraph(
         const eleB = elevationFn(latB, lngB)
         if (eleA != null && eleB != null) {
           const gradientPct = (Math.abs(eleB - eleA) / wayLen) * 100
-          const adaptiveCap = rule.gradientCapPct + (ELEVATION_NOISE_M / wayLen) * 100
+          const noiseBonus = Math.min((ELEVATION_NOISE_M / wayLen) * 100, MAX_NOISE_BONUS_PCT)
+          const adaptiveCap = rule.gradientCapPct + noiseBonus
           if (gradientPct > adaptiveCap) {
             if (isBridgeWalkable(tags)) {
               speedKmh = rule.walkingSpeedKmh

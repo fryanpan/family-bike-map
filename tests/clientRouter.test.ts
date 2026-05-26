@@ -433,6 +433,29 @@ describe('routeOnGraph', () => {
       expect(gTraining.getLink('52.50000,13.40000', '52.50000,13.41500')!.data.isWalking).toBe(false)
     })
 
+    test('short real ramp still demotes (noise bonus capped at MAX_NOISE_BONUS_PCT)', () => {
+      // 40 m ramp with 10 m rise → 25% real grade. Without the noise-bonus
+      // cap the adaptive cap would explode to 55% on a 40 m way and a real
+      // 25% bridge approach would stay rideable for a toddler. The cap at
+      // +10pp keeps the effective cap at 15% so real ramps fire.
+      const shortRamp: OsmWay[] = [{
+        osmId: 103,
+        itemName: null,
+        tags: { highway: 'cycleway' },
+        coordinates: [[52.500, 13.400], [52.500, 13.40060]],
+      }]
+      // ~40 m at lat 52.5 (0.00060° lng × cos(52.5°) × 111 km).
+      const realSteepRamp = (lat: number, lng: number): number =>
+        Math.abs(lng - 13.400) > 0.0001 ? 10 : 0
+      const graph = buildRoutingGraph(
+        shortRamp, 'kid-starting-out', new Set(), undefined, undefined, undefined,
+        undefined, undefined, realSteepRamp,
+      )
+      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40060')
+      expect(link).toBeTruthy()
+      expect(link!.data.isWalking).toBe(true)
+    })
+
     test('adaptive cap absorbs noise on short ways (Berlin Friedrichstraße-style)', () => {
       // 170 m flat way with 22 m fake delta (12.8% decoded gradient) —
       // the exact noise pattern from the 2026-05-25 Berlin benchmark.
