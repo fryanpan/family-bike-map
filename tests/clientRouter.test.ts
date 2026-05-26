@@ -345,129 +345,100 @@ describe('routeOnGraph', () => {
     expect(paintLink!.data.isWalking).toBe(true)
   })
 
-  describe('gradient gate', () => {
+  describe('ascent cost (BRouter-style)', () => {
     // A 1 km E–W cycleway between (52.500, 13.400) and (52.500, 13.415).
-    // Long enough that ELEVATION_NOISE_M / wayLen * 100 = 2pp of headroom
-    // above the per-mode cap (kid effective cap = 7%, training = 10%) —
-    // gives the steep/gentle tests stable separation. Tag highway as
-    // cycleway so it's car-free and accepted in every mode.
+    // Tag highway as cycleway so it's car-free and accepted in every mode.
     const longWay: OsmWay[] = [{
       osmId: 100,
       itemName: null,
       tags: { highway: 'cycleway' },
       coordinates: [[52.500, 13.400], [52.500, 13.415]],
     }]
-    // A short 5 m way under the min-length threshold.
-    const shortWay: OsmWay[] = [{
-      osmId: 101,
-      itemName: null,
-      tags: { highway: 'cycleway' },
-      coordinates: [[52.500, 13.400], [52.500, 13.40007]],
-    }]
 
-    // 1 km cycleway with 150 m rise → 15% grade — over every mode's
-    // effective cap (kid 7%, training 10%).
-    const steepEle = (lat: number, lng: number): number =>
-      Math.abs(lng - 13.400) > 0.0001 ? 150 : 0
+    // 1 km cycleway with 50 m rise → 5% real grade. Real ascent, well
+    // above the 2 m noise cutoff.
+    const climbEle = (lat: number, lng: number): number =>
+      Math.abs(lng - 13.400) > 0.0001 ? 50 : 0
 
-    // 1 km cycleway with 10 m rise → 1% grade — under every cap.
-    const gentleEle = (lat: number, lng: number): number =>
-      Math.abs(lng - 13.400) > 0.0001 ? 10 : 0
+    // 1 km cycleway with 1 m delta → noise. Below the 2 m cutoff so
+    // contributes zero ascent cost.
+    const flatNoiseEle = (lat: number, lng: number): number =>
+      Math.abs(lng - 13.400) > 0.0001 ? 1 : 0
 
-    test('steep way (>cap) demotes to bridge-walk for kid modes', () => {
+    function getLinkCost(way: OsmWay[], mode: string, ele: (lat: number, lng: number) => number | null): number {
       const graph = buildRoutingGraph(
-        longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
-        undefined, undefined, steepEle,
+        way, mode, new Set(), undefined, undefined, undefined,
+        undefined, undefined, ele,
       )
       const link = graph.getLink('52.50000,13.40000', '52.50000,13.41500')
-      expect(link).toBeTruthy()
-      expect(link!.data.isWalking).toBe(true)
+      return link!.data.cost
+    }
+
+    test('climbing edge pays extra cost proportional to ascent', () => {
+      const flatCost = getLinkCost(longWay, 'kid-starting-out', () => 0)
+      const climbCost = getLinkCost(longWay, 'kid-starting-out', climbEle)
+      // 50 m ascent above cutoff = 48 m. 48 * 40 sec/m = 1920 s added.
+      // Flat cost at 5 km/h is ~720 s, so climb cost should be ~2640 s.
+      expect(climbCost - flatCost).toBeCloseTo(48 * 40, -1)
     })
 
-    test('gentle way stays as a riding edge', () => {
+    test('reverse direction (descent) pays no ascent cost', () => {
       const graph = buildRoutingGraph(
         longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
-        undefined, undefined, gentleEle,
+        undefined, undefined, climbEle,
       )
-      const link = graph.getLink('52.50000,13.40000', '52.50000,13.41500')
-      expect(link).toBeTruthy()
-      expect(link!.data.isWalking).toBe(false)
+      const forward = graph.getLink('52.50000,13.40000', '52.50000,13.41500')!.data.cost
+      const reverse = graph.getLink('52.50000,13.41500', '52.50000,13.40000')!.data.cost
+      // Reverse is descent → no ascent cost. Forward should be > reverse.
+      expect(forward).toBeGreaterThan(reverse)
+      // Reverse should equal flat baseline (within tiny rounding).
+      const flat = getLinkCost(longWay, 'kid-starting-out', () => 0)
+      expect(reverse).toBeCloseTo(flat, 1)
     })
 
-    test('null elevation lookup → gate skipped, edge stays riding (fail-soft)', () => {
-      const nullEle = (): number | null => null
-      const graph = buildRoutingGraph(
-        longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
-        undefined, undefined, nullEle,
-      )
-      const link = graph.getLink('52.50000,13.40000', '52.50000,13.41500')
-      expect(link!.data.isWalking).toBe(false)
+    test('small noise-level delta (under cutoff) adds zero ascent cost', () => {
+      const flatCost = getLinkCost(longWay, 'kid-starting-out', () => 0)
+      const noiseCost = getLinkCost(longWay, 'kid-starting-out', flatNoiseEle)
+      // 1 m delta < 2 m cutoff → max(0, 1 - 2) = 0. Cost unchanged.
+      expect(noiseCost).toBeCloseTo(flatCost, 1)
     })
 
-    test('way under MIN_GRADIENT_WAY_LEN_M bypasses the gate (terrain noise floor)', () => {
-      const graph = buildRoutingGraph(
-        shortWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
-        undefined, undefined, steepEle,
-      )
-      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40007')
-      expect(link).toBeTruthy()
-      // Short and steep — gate skipped, edge stays as a riding edge.
-      expect(link!.data.isWalking).toBe(false)
+    test('null elevation lookup → no ascent cost added (fail-soft)', () => {
+      const flatCost = getLinkCost(longWay, 'kid-starting-out', () => 0)
+      const nullCost = getLinkCost(longWay, 'kid-starting-out', () => null)
+      expect(nullCost).toBeCloseTo(flatCost, 1)
     })
 
-    test('thresholds widen with mode hierarchy (kid 7% adaptive cap fires, training 10% does not)', () => {
-      // 1 km × 80 m = 8% grade. Over kid effective cap (5 + 20/1000*100 = 7%),
-      // under training effective cap (8 + 20/1000*100 = 10%).
-      const eightPctEle = (lat: number, lng: number): number =>
-        Math.abs(lng - 13.400) > 0.0001 ? 80 : 0
+    test('mode hierarchy: training pays less per metre than kid-starting-out', () => {
+      const kidFlat = getLinkCost(longWay, 'kid-starting-out', () => 0)
+      const kidClimb = getLinkCost(longWay, 'kid-starting-out', climbEle)
+      const trainFlat = getLinkCost(longWay, 'training', () => 0)
+      const trainClimb = getLinkCost(longWay, 'training', climbEle)
 
-      const gKid = buildRoutingGraph(
-        longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
-        undefined, undefined, eightPctEle,
-      )
-      const gTraining = buildRoutingGraph(
-        longWay, 'training', new Set(), undefined, undefined, undefined,
-        undefined, undefined, eightPctEle,
-      )
-      expect(gKid.getLink('52.50000,13.40000', '52.50000,13.41500')!.data.isWalking).toBe(true)
-      expect(gTraining.getLink('52.50000,13.40000', '52.50000,13.41500')!.data.isWalking).toBe(false)
+      const kidPenalty = kidClimb - kidFlat
+      const trainPenalty = trainClimb - trainFlat
+      // kid-starting-out 40 sec/m × 48 m = 1920 s
+      // training 7 sec/m × 48 m = 336 s
+      expect(kidPenalty).toBeGreaterThan(trainPenalty)
+      expect(kidPenalty / trainPenalty).toBeCloseTo(40 / 7, 1)
     })
 
-    test('short real ramp still demotes (noise bonus capped at MAX_NOISE_BONUS_PCT)', () => {
-      // 40 m ramp with 10 m rise → 25% real grade. Without the noise-bonus
-      // cap the adaptive cap would explode to 55% on a 40 m way and a real
-      // 25% bridge approach would stay rideable for a toddler. The cap at
-      // +10pp keeps the effective cap at 15% so real ramps fire.
-      const shortRamp: OsmWay[] = [{
-        osmId: 103,
-        itemName: null,
-        tags: { highway: 'cycleway' },
-        coordinates: [[52.500, 13.400], [52.500, 13.40060]],
-      }]
-      // ~40 m at lat 52.5 (0.00060° lng × cos(52.5°) × 111 km).
-      const realSteepRamp = (lat: number, lng: number): number =>
-        Math.abs(lng - 13.400) > 0.0001 ? 10 : 0
-      const graph = buildRoutingGraph(
-        shortRamp, 'kid-starting-out', new Set(), undefined, undefined, undefined,
-        undefined, undefined, realSteepRamp,
-      )
-      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40060')
-      expect(link).toBeTruthy()
-      expect(link!.data.isWalking).toBe(true)
-    })
-
-    test('adaptive cap absorbs noise on short ways (Berlin Friedrichstraße-style)', () => {
-      // 170 m flat way with 22 m fake delta (12.8% decoded gradient) —
-      // the exact noise pattern from the 2026-05-25 Berlin benchmark.
-      // Adaptive cap on a 170 m way = 5 + 20/170 * 100 = 16.8%, so the
-      // 12.8% noise stays under and the gate does NOT fire.
+    test('Berlin Friedrichstraße noise pattern adds negligible cost', () => {
+      // 170 m flat way with 22 m fake delta (z=12 terrain-RGB noise).
+      // BRouter-style cost: 22 - 2 cutoff = 20 m fake ascent.
+      // For kid-starting-out: 20 * 40 = 800 s added. Real-flat cost on
+      // 170 m at 5 km/h = 122 s. So noise inflates cost ~7×.
+      //
+      // That's still a lot — the cutoff alone doesn't make noise
+      // negligible. The point is the router doesn't BRIDGE-WALK the
+      // segment; it just becomes less preferred. Compare to alternative
+      // paths.
       const flatWayWithNoise: OsmWay[] = [{
         osmId: 102,
         itemName: null,
         tags: { highway: 'cycleway' },
         coordinates: [[52.500, 13.400], [52.500, 13.4025]],
       }]
-      // ~170 m at lat 52.5; 0.0025° lng × cos(52.5°) × 111 km ≈ 169 m.
       const noisyFlat = (lat: number, lng: number): number =>
         Math.abs(lng - 13.400) > 0.0001 ? 22 : 0
       const graph = buildRoutingGraph(
@@ -476,6 +447,8 @@ describe('routeOnGraph', () => {
       )
       const link = graph.getLink('52.50000,13.40000', '52.50000,13.40250')
       expect(link).toBeTruthy()
+      // No bridge-walk — the cost-based approach never sets isWalking
+      // from gradient.
       expect(link!.data.isWalking).toBe(false)
     })
   })

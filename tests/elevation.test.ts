@@ -7,9 +7,9 @@ import {
   _resetElevationCache,
 } from '../src/services/elevation'
 
-// Keep in sync with the module's TILE_ZOOM (= 15; Mapbox's max for
-// terrain-rgb).
-const TILE_ZOOM = 15
+// Keep in sync with the module's TILE_ZOOM (= 12; matches SRTM source
+// resolution, robust to noise via the BRouter-style ascent-cost router).
+const TILE_ZOOM = 12
 const TILE_SIZE = 256
 
 beforeEach(() => _resetElevationCache())
@@ -34,20 +34,20 @@ function encodeMetres(metres: number): { r: number; g: number; b: number } {
 }
 
 test('lngLatToTile — known coords land in plausible Web-Mercator tiles', () => {
-  // Berlin Mitte (52.52°N, 13.405°E) at z=15. Float precision can shift
-  // ±1 at the boundary, so assert a small range.
+  // Berlin Mitte (52.52°N, 13.405°E) at z=12: x is solidly in the 2200
+  // column; the y can land in 1342 or 1343 depending on whether the
+  // lat sits just above/below the row boundary. Assert the column hard
+  // and the row within ±1.
   const berlin = lngLatToTile(13.405, 52.52, TILE_ZOOM)
-  expect(berlin.x).toBeGreaterThanOrEqual(17603)
-  expect(berlin.x).toBeLessThanOrEqual(17605)
-  expect(berlin.y).toBeGreaterThanOrEqual(10743)
-  expect(berlin.y).toBeLessThanOrEqual(10747)
+  expect(berlin.x).toBe(2200)
+  expect(berlin.y).toBeGreaterThanOrEqual(1342)
+  expect(berlin.y).toBeLessThanOrEqual(1343)
 
-  // SF Mission (37.76°N, -122.42°W) at z=15.
+  // SF Mission (37.76°N, -122.42°W).
   const sf = lngLatToTile(-122.42, 37.76, TILE_ZOOM)
-  expect(sf.x).toBeGreaterThanOrEqual(5239)
-  expect(sf.x).toBeLessThanOrEqual(5241)
-  expect(sf.y).toBeGreaterThanOrEqual(12660)
-  expect(sf.y).toBeLessThanOrEqual(12667)
+  expect(sf.x).toBe(655)
+  expect(sf.y).toBeGreaterThanOrEqual(1582)
+  expect(sf.y).toBeLessThanOrEqual(1583)
 })
 
 test('lookupElevation — returns null when the covering tile is uncached', () => {

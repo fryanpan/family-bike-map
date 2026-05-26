@@ -39,30 +39,31 @@ describe('applyModeRule — smoothness', () => {
   })
 })
 
-// Gradient caps added 2026-05-10. The actual gating logic is exercised
-// in clientRouter.test.ts; these tests just pin the per-mode threshold
-// values so an accidental edit (or skipped mode) gets caught.
-describe('mode gradient caps', () => {
-  it('kid modes default to 5% sustained grade (AASHTO shared-use-path)', () => {
-    expect(MODE_RULES['kid-starting-out'].gradientCapPct).toBe(5)
-    expect(MODE_RULES['kid-confident'].gradientCapPct).toBe(5)
+// BRouter-style ascent cost replaced binary gradient gate on 2026-05-26.
+// These tests pin the per-mode uphillCostSecPerMeter values so an
+// accidental edit (or skipped mode) gets caught. Cost decreases as the
+// mode tolerates more climbing.
+describe('mode ascent cost', () => {
+  it('kid-starting-out penalises climbing most heavily', () => {
+    expect(MODE_RULES['kid-starting-out'].uphillCostSecPerMeter).toBe(40)
   })
 
-  it('older-kid and carrying-kid lift to 7%', () => {
-    expect(MODE_RULES['kid-traffic-savvy'].gradientCapPct).toBe(7)
-    expect(MODE_RULES['carrying-kid'].gradientCapPct).toBe(7)
+  it('values descend with rider strength (kid → training)', () => {
+    expect(MODE_RULES['kid-starting-out'].uphillCostSecPerMeter).toBe(40)
+    expect(MODE_RULES['kid-confident'].uphillCostSecPerMeter).toBe(25)
+    expect(MODE_RULES['kid-traffic-savvy'].uphillCostSecPerMeter).toBe(15)
+    expect(MODE_RULES['carrying-kid'].uphillCostSecPerMeter).toBe(20)
+    expect(MODE_RULES['training'].uphillCostSecPerMeter).toBe(7)
   })
 
-  it('training accepts 8% (short-burst AASHTO)', () => {
-    expect(MODE_RULES.training.gradientCapPct).toBe(8)
-  })
-
-  it('caps are monotonic with rider strength', () => {
-    const order = ['kid-starting-out', 'kid-confident', 'kid-traffic-savvy', 'carrying-kid', 'training'] as const
-    for (let i = 1; i < order.length; i++) {
-      const prev = MODE_RULES[order[i - 1]].gradientCapPct!
-      const curr = MODE_RULES[order[i]].gradientCapPct!
-      expect(curr).toBeGreaterThanOrEqual(prev)
+  it('costs are non-increasing for the kid skill ladder', () => {
+    // Carrying-kid breaks strict monotonicity (heavier than solo-confident
+    // even though adult-piloted) — the kid ladder alone should descend.
+    const kidLadder = ['kid-starting-out', 'kid-confident', 'kid-traffic-savvy'] as const
+    for (let i = 1; i < kidLadder.length; i++) {
+      const prev = MODE_RULES[kidLadder[i - 1]].uphillCostSecPerMeter!
+      const curr = MODE_RULES[kidLadder[i]].uphillCostSecPerMeter!
+      expect(curr).toBeLessThanOrEqual(prev)
     }
   })
 })

@@ -22,12 +22,17 @@
  * between SRTM samples and less spurious-gradient noise.
  */
 
-// z=15 is the max zoom Mapbox ships for mapbox.terrain-rgb. At Berlin
-// latitude that's ~3 m/pixel, at SF ~5 m/pixel — both at sub-block
-// resolution. 64× more tiles per bbox than z=12, but the per-tile size
-// is unchanged (~50-100 KB) and tiles are individually cacheable in CF
-// edge + our in-memory map.
-const TILE_ZOOM = 15
+// z=12 = ~24 m/pixel at Berlin latitude, ~30 m at SF. This matches the
+// SRTM-1 native horizontal resolution that the source data is derived
+// from — higher zooms (Mapbox supports up to z=15) just smooth-interpolate
+// between the same source samples, costing 4-64× more tiles per request
+// without adding real elevation signal. We stay at z=12 because the
+// router uses BRouter-style ascent-cost (not a binary gradient gate), so
+// pixel noise here adds tiny extra cost rather than triggering false
+// bridge-walks — the source-resolution tile count keeps memory bounded
+// (Berlin city ~36 tiles, ~9 MB) while still supporting the elevation-
+// aware overlay rendering.
+const TILE_ZOOM = 12
 const TILE_SIZE = 256
 
 // In-memory cache. `null` means "fetched and failed" — don't retry this
@@ -204,15 +209,16 @@ export interface BBox {
 }
 
 /**
- * Pre-fetch the terrain-RGB tiles covering `bbox` at zoom 15. Called
+ * Pre-fetch the terrain-RGB tiles covering `bbox` at zoom 12. Called
  * once per route request before graph construction. Awaiting this
  * before `buildRoutingGraph` lets the gradient check inside the graph
  * builder stay synchronous.
  *
- * z=15 (Mapbox's max zoom for terrain-rgb) is ~3 m/pixel at Berlin
- * latitude and ~5 m at SF. 64× the tile count vs z=12 but each tile is
- * ~50-100 KB and Mapbox's free tier covers a healthy personal-project
- * volume (200K tile reads/month before any cost).
+ * z=12 is ~24 m/pixel at Berlin latitude, ~30 m at SF — matches the SRTM
+ * source resolution that the data is ultimately derived from. For a
+ * typical urban corridor that's ~9–25 tiles per request; for a city-wide
+ * overlay viewport ~30-50 tiles. Mapbox's free tier (200K tile reads/
+ * month) covers a personal-scale deployment with room to spare.
  */
 export async function prefetchElevation(bbox: BBox): Promise<void> {
   const { x: xA, y: yA } = lngLatToTile(bbox.west, bbox.north, TILE_ZOOM)

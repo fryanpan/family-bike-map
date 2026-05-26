@@ -66,36 +66,13 @@ interface EdgeData {
   isWalking: boolean
 }
 
-// Below this length, terrain-RGB pixel noise dominates the gradient
-// calculation — a 1 m elevation error over a 10 m way is 10% spurious
-// grade. Above ~30 m the signal-to-noise becomes useful and the worst
-// false-positives drop out.
-const MIN_GRADIENT_WAY_LEN_M = 30
-
-// MapTiler terrain-rgb at z=12 (the max zoom) has ~±10–20 m inter-pixel
-// noise: adjacent pixels on the same flat street can decode 20+ m apart
-// (Friedrichstraße A=41 m / B=63 m on a level 170 m run). We model the
-// noise as a fixed metres-of-error budget and inflate the gradient cap
-// by `noise / wayLen` so short ways need a higher decoded gradient to
-// trip the gate. A 170 m way needs > 5% + 20/170 * 100 = ~16.8% to
-// fire; a 500 m way needs > 9%; a 1000 m way needs > 7%.
-//
-// The bonus is capped at MAX_NOISE_BONUS_PCT so very short ways don't
-// disable the gate entirely. Without the cap, a 40 m bridge ramp would
-// get a 55% effective cap and a real 25% ramp would stay rideable. With
-// the cap at 10pp, a 40 m way still needs > 15% to demote — real
-// connectors fire, Berlin noise on 170+ m ways still under-fires.
-const ELEVATION_NOISE_M = 20
-const MAX_NOISE_BONUS_PCT = 10
-
-/** Total polyline length in metres (sum of consecutive segment distances). */
-function wayLengthM(coords: Array<[number, number]>): number {
-  let total = 0
-  for (let i = 0; i < coords.length - 1; i++) {
-    total += haversineM(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1])
-  }
-  return total
-}
+// Tiny elevation deltas don't count toward ascent cost — they're
+// terrain-RGB pixel-quantization noise, not real climbs. 2 m matches the
+// observed inter-pixel jitter on flat ground at z=12 (Berlin
+// Friedrichstraße A vs B differed ~22 m at z=12 on a level 170 m run;
+// even after smoothing, 2 m is the right floor). Mirrors BRouter's
+// `uphillcutoff` parameter.
+const UPHILL_CUTOFF_M = 2
 
 /** Canonical node ID from a coordinate pair.
  * Uses 5 decimal places (~1.1m precision) to snap nearby endpoints together,
@@ -303,49 +280,27 @@ export function buildRoutingGraph(
       speedKmh = Math.min(speedKmh, rule.slowSpeedKmh)
     }
 
-    // Gradient gate. Compute end-to-end gradient for the way; over the
-    // mode's cap, demote the whole way to bridge-walk (you'd be pushing
-    // the bike up). Per-way rather than per-segment because terrain-RGB
-    // pixel noise can produce false positives on short OSM segments.
-    // Skip very short ways — too short to give a stable gradient signal.
-    // Length-adaptive cap: rule.gradientCapPct + ELEVATION_NOISE_M /
-    // wayLen * 100 tolerates more decoded gradient on short ways where
-    // noise dominates (see ELEVATION_NOISE_M comment above).
-    if (
-      !isWalking &&
-      rule.gradientCapPct != null &&
-      elevationFn &&
-      coords.length >= 2
-    ) {
-      const wayLen = wayLengthM(coords)
-      if (wayLen >= MIN_GRADIENT_WAY_LEN_M) {
-        const [latA, lngA] = coords[0]
-        const [latB, lngB] = coords[coords.length - 1]
-        const eleA = elevationFn(latA, lngA)
-        const eleB = elevationFn(latB, lngB)
-        if (eleA != null && eleB != null) {
-          const gradientPct = (Math.abs(eleB - eleA) / wayLen) * 100
-          const noiseBonus = Math.min((ELEVATION_NOISE_M / wayLen) * 100, MAX_NOISE_BONUS_PCT)
-          const adaptiveCap = rule.gradientCapPct + noiseBonus
-          if (gradientPct > adaptiveCap) {
-            if (isBridgeWalkable(tags)) {
-              speedKmh = rule.walkingSpeedKmh
-              isWalking = true
-              costMultiplier = 1.0
-            } else {
-              continue
-            }
-          }
-        }
-      }
-    }
-
     const speed = speedKmh / 3.6  // km/h → m/s
 
     // Check one-way constraints
     const oneway = tags.oneway === 'yes' || tags['oneway:bicycle'] === 'yes'
     const bicycleOverride = tags['oneway:bicycle'] === 'no'
     const isOneway = oneway && !bicycleOverride
+
+    // Pre-compute elevation for every coordinate on this way so each
+    // segment can score its own ascent. Skipped when there's no usable
+    // elevation source — the gate fails soft to "no ascent cost added."
+    // BRouter-style: ascent contributes positive cost per metre climbed
+    // (rule.uphillCostSecPerMeter), descent contributes nothing. Per-
+    // direction asymmetry: A→B may climb while B→A descends.
+    const useAscentCost =
+      !isWalking &&
+      rule.uphillCostSecPerMeter != null &&
+      rule.uphillCostSecPerMeter > 0 &&
+      elevationFn != null
+    const elevations: Array<number | null> = useAscentCost
+      ? coords.map(([la, ln]) => elevationFn!(la, ln))
+      : []
 
     for (let i = 0; i < coords.length - 1; i++) {
       const [lat1, lng1] = coords[i]
@@ -362,15 +317,33 @@ export function buildRoutingGraph(
       // Multiplier biases the router away from accepted-but-worse infra
       // (e.g. LTS 2b for traffic-savvy at 1.5×, LTS 3 for carrying-kid at
       // 2×, rough surfaces at 5×) even when the base speed is unchanged.
-      const cost = (dist / speed) * costMultiplier
-      const edgeData: EdgeData = { distance: dist, cost, wayTags: tags, wayId: way.osmId, isWalking }
+      const baseCost = (dist / speed) * costMultiplier
 
-      // Forward edge (always)
-      graph.addLink(id1, id2, edgeData)
+      // BRouter-style ascent cost. Forward edge adds cost only when going
+      // up; reverse edge adds cost only when going up (i.e. when the
+      // physical descent traversed forward becomes an ascent traversed
+      // back). Cutoff filters terrain-RGB pixel noise.
+      let forwardAscent = 0
+      let reverseAscent = 0
+      if (useAscentCost) {
+        const e1 = elevations[i]
+        const e2 = elevations[i + 1]
+        if (e1 != null && e2 != null) {
+          forwardAscent = Math.max(0, e2 - e1 - UPHILL_CUTOFF_M)
+          reverseAscent = Math.max(0, e1 - e2 - UPHILL_CUTOFF_M)
+        }
+      }
+      const ascentMul = rule.uphillCostSecPerMeter ?? 0
+      const forwardCost = baseCost + forwardAscent * ascentMul
+      const reverseCost = baseCost + reverseAscent * ascentMul
+
+      const forwardData: EdgeData = { distance: dist, cost: forwardCost, wayTags: tags, wayId: way.osmId, isWalking }
+      graph.addLink(id1, id2, forwardData)
 
       // Reverse edge (unless one-way)
       if (!isOneway) {
-        graph.addLink(id2, id1, { ...edgeData })
+        const reverseData: EdgeData = { distance: dist, cost: reverseCost, wayTags: tags, wayId: way.osmId, isWalking }
+        graph.addLink(id2, id1, reverseData)
       }
     }
   }
