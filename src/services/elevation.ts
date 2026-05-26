@@ -25,7 +25,19 @@ const TILE_SIZE = 256
 const tileCache = new Map<string, Uint8ClampedArray | null>()
 const inflight = new Map<string, Promise<void>>()
 
+function canDecodeTiles(): boolean {
+  return (
+    (typeof createImageBitmap !== 'undefined' && typeof OffscreenCanvas !== 'undefined') ||
+    externalDecoder != null
+  )
+}
+
 function getMapTilerKey(): string | undefined {
+  // Skip fetches entirely in runtimes that can't decode the PNGs anyway —
+  // a Bun/Node script without a registered decoder would otherwise burn
+  // bandwidth pulling tiles only to discard them. Browser keeps its
+  // OffscreenCanvas path; benchmark registers a decoder before this runs.
+  if (!canDecodeTiles()) return undefined
   // Browser: Vite inlines `import.meta.env.VITE_MAPTILER_KEY` at build time.
   // Non-browser (Bun benchmark script, Node test runner): fall back to
   // process.env so the gradient gate can be exercised outside the browser.
@@ -91,7 +103,11 @@ let externalDecoder: ElevationDecoder | null = null
  *
  * Used by `scripts/benchmark-routing.ts` to inject a Bun-friendly
  * pngjs decoder so the gradient gate is actually exercised in the
- * benchmark. The browser app keeps using the OffscreenCanvas path.
+ * benchmark.
+ *
+ * DO NOT call this from browser code. The OffscreenCanvas path is
+ * preferred in the browser — it's faster and avoids bundling a JS
+ * PNG decoder. The decoder only runs when OffscreenCanvas is absent.
  */
 export function setElevationDecoder(decoder: ElevationDecoder | null): void {
   externalDecoder = decoder
@@ -208,10 +224,12 @@ export function lookupElevation(lat: number, lng: number): number | null {
   return decodeTerrainRgb(data[i], data[i + 1], data[i + 2])
 }
 
-/** Test-only — wipe caches between runs. */
+/** Test-only — wipe caches and clear module-level registrations between runs. */
 export function _resetElevationCache(): void {
   tileCache.clear()
   inflight.clear()
+  externalDecoder = null
+  fetchReferer = null
 }
 
 /** Test-only — seed a tile directly without going through fetch/decode. */

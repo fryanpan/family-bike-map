@@ -42,18 +42,9 @@ setElevationDecoder((bytes) => {
 // Forge the allowed Referer for the script-only path.
 setElevationReferer('https://bike-map.fryanpan.com/')
 
-// Bun loads `.env` automatically into `process.env`, but the elevation
-// module reads the key via `import.meta.env?.VITE_MAPTILER_KEY` (Vite
-// convention). Bridge it explicitly so the decoder path actually
-// fetches tiles.
-//
-// In Bun, import.meta.env mirrors process.env, but the optional-chain
-// guard in getMapTilerKey treats `import.meta.env?.VITE_MAPTILER_KEY`
-// as undefined if Bun's import.meta.env object hasn't been populated
-// with that key — depending on Bun version. Force-populate.
-if (process.env.VITE_MAPTILER_KEY && !(import.meta as { env?: Record<string, string> }).env?.VITE_MAPTILER_KEY) {
-  ;((import.meta as { env?: Record<string, string> }).env ??= {}).VITE_MAPTILER_KEY = process.env.VITE_MAPTILER_KEY
-}
+// `getMapTilerKey()` in elevation.ts already falls back to process.env
+// when import.meta.env isn't populated (the Vite vs. Bun mismatch). No
+// script-side env bridge needed.
 
 // ── Config ──────────────────────────────────────────────────────────────
 
