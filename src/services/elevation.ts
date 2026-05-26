@@ -16,6 +16,15 @@
  *   height (m) = -10000 + ((R*256*256 + G*256 + B) * 0.1)
  */
 
+// z=12 is the max zoom MapTiler ships for terrain-rgb (z=13+ returns 400
+// — verified 2026-05-26). At Berlin latitude that's ~24 m/pixel, at SF
+// ~38 m/pixel. The 2026-05-25 Berlin benchmark showed adjacent-pixel
+// ±10 m noise can fake 12% gradients on flat ways (Friedrichstraße
+// decoded as 41 m vs 63 m). Downstream fixes attempted on 2026-05-26
+// (bilinear interpolation, higher way-length floor) all traded SF
+// signal loss for Berlin noise reduction — neither was clearly better.
+// Real fix is multi-point sampling along the way or a higher-resolution
+// data source. Tracked as a follow-up.
 const TILE_ZOOM = 12
 const TILE_SIZE = 256
 
@@ -64,12 +73,13 @@ export function lngLatToTile(lng: number, lat: number, z: number): { x: number; 
   return { x, y }
 }
 
-// Full tile + sub-tile pixel position (nearest pixel) for a lat/lng.
-function lngLatToTilePixel(
+// Full tile + sub-tile pixel position (fractional) for a lat/lng. The
+// caller can floor for nearest-neighbour or use fpx/fpy for bilinear.
+function lngLatToTileSubPixel(
   lng: number,
   lat: number,
   z: number,
-): { tx: number; ty: number; px: number; py: number } {
+): { tx: number; ty: number; fpx: number; fpy: number } {
   const n = 2 ** z
   const fx = ((lng + 180) / 360) * n
   const latRad = (lat * Math.PI) / 180
@@ -77,9 +87,9 @@ function lngLatToTilePixel(
     ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n
   const tx = Math.floor(fx)
   const ty = Math.floor(fy)
-  const px = Math.min(TILE_SIZE - 1, Math.max(0, Math.floor((fx - tx) * TILE_SIZE)))
-  const py = Math.min(TILE_SIZE - 1, Math.max(0, Math.floor((fy - ty) * TILE_SIZE)))
-  return { tx, ty, px, py }
+  const fpx = (fx - tx) * TILE_SIZE
+  const fpy = (fy - ty) * TILE_SIZE
+  return { tx, ty, fpx, fpy }
 }
 
 /** terrain-RGB pixel → metres above sea level. */
@@ -192,8 +202,9 @@ export interface BBox {
  * before `buildRoutingGraph` lets the gradient check inside the graph
  * builder stay synchronous.
  *
- * z=12 gives roughly 9.5 m/pixel at the equator; for a typical urban
- * corridor that's ~9–25 tiles per request, well under any rate ceiling.
+ * z=12 (MapTiler's max zoom for terrain-rgb) is ~24 m/pixel at Berlin
+ * latitude and ~38 m at SF. For a typical urban corridor that's
+ * ~9–25 tiles per request, well under any rate ceiling.
  */
 export async function prefetchElevation(bbox: BBox): Promise<void> {
   const { x: xA, y: yA } = lngLatToTile(bbox.west, bbox.north, TILE_ZOOM)
@@ -215,11 +226,20 @@ export async function prefetchElevation(bbox: BBox): Promise<void> {
  * Synchronous elevation lookup (metres). Returns null when the covering
  * tile wasn't successfully fetched. Callers MUST treat null as
  * "elevation unknown, skip the gradient gate."
+ *
+ * Nearest-pixel lookup. Bilinear interpolation was tested 2026-05-26
+ * and over-smoothed real peaks — Bernal Heights' 22 m nearest-pixel
+ * read became 10 m bilinear because the peak is one z=12 pixel wide
+ * (~38 m at SF lat) and its 3 neighbours are valley floor. Smoothing
+ * destroyed the gradient signal that the gate needs. Noise mitigation
+ * has to come from the way-length floor in the router, not the lookup.
  */
 export function lookupElevation(lat: number, lng: number): number | null {
-  const { tx, ty, px, py } = lngLatToTilePixel(lng, lat, TILE_ZOOM)
+  const { tx, ty, fpx, fpy } = lngLatToTileSubPixel(lng, lat, TILE_ZOOM)
   const data = tileCache.get(tileKey(TILE_ZOOM, tx, ty))
   if (!data) return null
+  const px = Math.min(TILE_SIZE - 1, Math.max(0, Math.floor(fpx)))
+  const py = Math.min(TILE_SIZE - 1, Math.max(0, Math.floor(fpy)))
   const i = (py * TILE_SIZE + px) * 4
   return decodeTerrainRgb(data[i], data[i + 1], data[i + 2])
 }

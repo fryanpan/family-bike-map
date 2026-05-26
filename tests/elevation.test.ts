@@ -7,6 +7,8 @@ import {
   _resetElevationCache,
 } from '../src/services/elevation'
 
+// Keep in sync with the module's TILE_ZOOM (= 12; MapTiler's max for
+// terrain-rgb).
 const TILE_ZOOM = 12
 const TILE_SIZE = 256
 
