@@ -72,6 +72,20 @@ interface EdgeData {
 // false-positives drop out.
 const MIN_GRADIENT_WAY_LEN_M = 30
 
+// MapTiler terrain-rgb at z=12 (the max zoom) has ~±10–20 m inter-pixel
+// noise: adjacent pixels on the same flat street can decode 20+ m apart
+// (Friedrichstraße A=41 m / B=63 m on a level 170 m run). We model the
+// noise as a fixed metres-of-error budget and inflate the gradient cap
+// by `noise / wayLen` so short ways need a higher decoded gradient to
+// trip the gate. A 170 m way needs > 5% + 20/170 * 100 = ~16.8% to
+// fire; a 500 m way needs > 5% + 20/500 * 100 = 9%; a 1000 m way needs
+// > 6%. This filters the Berlin-style false positives while keeping
+// real SF climbs (Bernal 25%+ / 500 m+) gated correctly. Pulled from
+// the 2026-05-26 Berlin-vs-SF benchmark — bilinear interpolation and
+// floor=300 m alternatives both lost real SF signal; adaptive cap kept
+// signal on long ways and dropped noise on short ones.
+const ELEVATION_NOISE_M = 20
+
 /** Total polyline length in metres (sum of consecutive segment distances). */
 function wayLengthM(coords: Array<[number, number]>): number {
   let total = 0
@@ -292,6 +306,9 @@ export function buildRoutingGraph(
     // the bike up). Per-way rather than per-segment because terrain-RGB
     // pixel noise can produce false positives on short OSM segments.
     // Skip very short ways — too short to give a stable gradient signal.
+    // Length-adaptive cap: rule.gradientCapPct + ELEVATION_NOISE_M /
+    // wayLen * 100 tolerates more decoded gradient on short ways where
+    // noise dominates (see ELEVATION_NOISE_M comment above).
     if (
       !isWalking &&
       rule.gradientCapPct != null &&
@@ -306,7 +323,8 @@ export function buildRoutingGraph(
         const eleB = elevationFn(latB, lngB)
         if (eleA != null && eleB != null) {
           const gradientPct = (Math.abs(eleB - eleA) / wayLen) * 100
-          if (gradientPct > rule.gradientCapPct) {
+          const adaptiveCap = rule.gradientCapPct + (ELEVATION_NOISE_M / wayLen) * 100
+          if (gradientPct > adaptiveCap) {
             if (isBridgeWalkable(tags)) {
               speedKmh = rule.walkingSpeedKmh
               isWalking = true

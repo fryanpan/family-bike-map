@@ -346,14 +346,16 @@ describe('routeOnGraph', () => {
   })
 
   describe('gradient gate', () => {
-    // A 200 m E–W cycleway between (52.500, 13.400) and (52.500, 13.4030)
-    // — long enough to clear MIN_GRADIENT_WAY_LEN_M (30 m). Tag highway
-    // as cycleway so it's car-free and accepted in every mode.
+    // A 1 km E–W cycleway between (52.500, 13.400) and (52.500, 13.415).
+    // Long enough that ELEVATION_NOISE_M / wayLen * 100 = 2pp of headroom
+    // above the per-mode cap (kid effective cap = 7%, training = 10%) —
+    // gives the steep/gentle tests stable separation. Tag highway as
+    // cycleway so it's car-free and accepted in every mode.
     const longWay: OsmWay[] = [{
       osmId: 100,
       itemName: null,
       tags: { highway: 'cycleway' },
-      coordinates: [[52.500, 13.400], [52.500, 13.4030]],
+      coordinates: [[52.500, 13.400], [52.500, 13.415]],
     }]
     // A short 5 m way under the min-length threshold.
     const shortWay: OsmWay[] = [{
@@ -363,20 +365,21 @@ describe('routeOnGraph', () => {
       coordinates: [[52.500, 13.400], [52.500, 13.40007]],
     }]
 
-    // 200 m cycleway with 30 m rise → 15% grade — over every mode's cap.
+    // 1 km cycleway with 150 m rise → 15% grade — over every mode's
+    // effective cap (kid 7%, training 10%).
     const steepEle = (lat: number, lng: number): number =>
-      Math.abs(lng - 13.400) > 0.0001 ? 30 : 0
+      Math.abs(lng - 13.400) > 0.0001 ? 150 : 0
 
-    // 200 m cycleway with 2 m rise → 1% grade — under every cap.
+    // 1 km cycleway with 10 m rise → 1% grade — under every cap.
     const gentleEle = (lat: number, lng: number): number =>
-      Math.abs(lng - 13.400) > 0.0001 ? 2 : 0
+      Math.abs(lng - 13.400) > 0.0001 ? 10 : 0
 
     test('steep way (>cap) demotes to bridge-walk for kid modes', () => {
       const graph = buildRoutingGraph(
         longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
         undefined, undefined, steepEle,
       )
-      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40300')
+      const link = graph.getLink('52.50000,13.40000', '52.50000,13.41500')
       expect(link).toBeTruthy()
       expect(link!.data.isWalking).toBe(true)
     })
@@ -386,7 +389,7 @@ describe('routeOnGraph', () => {
         longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
         undefined, undefined, gentleEle,
       )
-      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40300')
+      const link = graph.getLink('52.50000,13.40000', '52.50000,13.41500')
       expect(link).toBeTruthy()
       expect(link!.data.isWalking).toBe(false)
     })
@@ -397,7 +400,7 @@ describe('routeOnGraph', () => {
         longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
         undefined, undefined, nullEle,
       )
-      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40300')
+      const link = graph.getLink('52.50000,13.40000', '52.50000,13.41500')
       expect(link!.data.isWalking).toBe(false)
     })
 
@@ -412,21 +415,45 @@ describe('routeOnGraph', () => {
       expect(link!.data.isWalking).toBe(false)
     })
 
-    test('thresholds widen with mode hierarchy (8% accepted by training, rejected by kid)', () => {
-      // 200 m way × 14 m rise = 7% grade. Over kid cap (5%), under training (8%).
-      const sevenPctEle = (lat: number, lng: number): number =>
-        Math.abs(lng - 13.400) > 0.0001 ? 14 : 0
+    test('thresholds widen with mode hierarchy (kid 7% adaptive cap fires, training 10% does not)', () => {
+      // 1 km × 80 m = 8% grade. Over kid effective cap (5 + 20/1000*100 = 7%),
+      // under training effective cap (8 + 20/1000*100 = 10%).
+      const eightPctEle = (lat: number, lng: number): number =>
+        Math.abs(lng - 13.400) > 0.0001 ? 80 : 0
 
       const gKid = buildRoutingGraph(
         longWay, 'kid-starting-out', new Set(), undefined, undefined, undefined,
-        undefined, undefined, sevenPctEle,
+        undefined, undefined, eightPctEle,
       )
       const gTraining = buildRoutingGraph(
         longWay, 'training', new Set(), undefined, undefined, undefined,
-        undefined, undefined, sevenPctEle,
+        undefined, undefined, eightPctEle,
       )
-      expect(gKid.getLink('52.50000,13.40000', '52.50000,13.40300')!.data.isWalking).toBe(true)
-      expect(gTraining.getLink('52.50000,13.40000', '52.50000,13.40300')!.data.isWalking).toBe(false)
+      expect(gKid.getLink('52.50000,13.40000', '52.50000,13.41500')!.data.isWalking).toBe(true)
+      expect(gTraining.getLink('52.50000,13.40000', '52.50000,13.41500')!.data.isWalking).toBe(false)
+    })
+
+    test('adaptive cap absorbs noise on short ways (Berlin Friedrichstraße-style)', () => {
+      // 170 m flat way with 22 m fake delta (12.8% decoded gradient) —
+      // the exact noise pattern from the 2026-05-25 Berlin benchmark.
+      // Adaptive cap on a 170 m way = 5 + 20/170 * 100 = 16.8%, so the
+      // 12.8% noise stays under and the gate does NOT fire.
+      const flatWayWithNoise: OsmWay[] = [{
+        osmId: 102,
+        itemName: null,
+        tags: { highway: 'cycleway' },
+        coordinates: [[52.500, 13.400], [52.500, 13.4025]],
+      }]
+      // ~170 m at lat 52.5; 0.0025° lng × cos(52.5°) × 111 km ≈ 169 m.
+      const noisyFlat = (lat: number, lng: number): number =>
+        Math.abs(lng - 13.400) > 0.0001 ? 22 : 0
+      const graph = buildRoutingGraph(
+        flatWayWithNoise, 'kid-starting-out', new Set(), undefined, undefined, undefined,
+        undefined, undefined, noisyFlat,
+      )
+      const link = graph.getLink('52.50000,13.40000', '52.50000,13.40250')
+      expect(link).toBeTruthy()
+      expect(link!.data.isWalking).toBe(false)
     })
   })
 
