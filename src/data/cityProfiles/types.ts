@@ -89,7 +89,11 @@ export interface CompiledProfile {
   avoidCorridors: Array<{ name: string; osmWays?: number[]; osmRelation?: number }>
 
   // Optional mobility caps — set by Layer 3 family prose.
-  gradientCapPct?: number
+  // `gradientCapPct` was removed 2026-05-26 when the binary gradient gate
+  // was replaced by BRouter-style per-mode `uphillCostSecPerMeter` on
+  // ModeRule. If Layer 3 needs city-level uphill tuning later, add the
+  // override on the same axis (cost-per-meter) rather than reintroducing
+  // a cap.
   minPassableWidthM?: number
   maxContinuousDistanceKm?: number
 

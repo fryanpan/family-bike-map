@@ -483,9 +483,9 @@ async function main() {
   // once, up-front. The module-level tile cache in elevation.ts is
   // reused across every mode's graph build, so this single fetch
   // exercises the gradient gate for all 5 modes' route searches.
-  // If VITE_MAPTILER_KEY isn't set the calls soft-null and the gate is
+  // If VITE_MAPBOX_TOKEN isn't set the calls soft-null and the gate is
   // skipped (same as pre-2026-05-25 benchmark behavior).
-  const elevationEnabled = process.argv.includes('--elevation') || !!process.env.VITE_MAPTILER_KEY
+  const elevationEnabled = process.argv.includes('--elevation') || !!process.env.VITE_MAPBOX_TOKEN
   if (elevationEnabled) {
     console.log('\nPrefetching elevation tiles…')
     const eT0 = performance.now()
@@ -496,7 +496,7 @@ async function main() {
     console.log(`  Elevation prefetch done in ${((performance.now() - eT0) / 1000).toFixed(1)}s`)
     logMem('after prefetchElevation')
   } else {
-    console.log('\nElevation prefetch skipped (no VITE_MAPTILER_KEY). Gradient gate will not be exercised.')
+    console.log('\nElevation prefetch skipped (no VITE_MAPBOX_TOKEN). Gradient gate will not be exercised.')
   }
 
   // Per-mode work extracted into its own function so `graph` and any

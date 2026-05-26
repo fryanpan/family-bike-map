@@ -74,12 +74,15 @@ export interface ModeRule {
   // unavoidable gap by walking the bike on the sidewalk.
   walkingSpeedKmh: number
 
-  // Optional gradient cap (percent grade). Ways whose end-to-end gradient
-  // exceeds this are demoted to bridge-walk (walkingSpeedKmh, isWalking=true)
-  // when bridge-walkable, mirroring the existing pattern for mode-rejected
-  // edges. Hard-rejected only when not bridge-walkable (motorway, foot=no).
-  // See src/services/clientRouter.ts gradient-gate block.
-  gradientCapPct?: number
+  // Per-metre-ascent cost in seconds (BRouter-style). Each edge in the
+  // routing graph adds `ascent * uphillCostSecPerMeter` to its time cost,
+  // where ascent is the positive end-to-end elevation delta minus a small
+  // noise cutoff. Higher value = the mode penalises climbing more heavily.
+  // Robust to terrain-RGB pixel noise: small spurious deltas add tiny
+  // costs rather than triggering a binary bridge-walk demote (which is
+  // what the prior `gradientCapPct` field did before 2026-05-26).
+  // 0 disables ascent cost for the mode.
+  uphillCostSecPerMeter?: number
 
   // Cost multiplier per PathLevel. Defaults to 1.0 for any level not listed.
   // Higher = more expensive per metre, biasing the router away from those
@@ -148,9 +151,12 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 5,
     slowSpeedKmh: 3,
     walkingSpeedKmh: 1,
-    // 5% grade ≈ 2.9°. AASHTO sustained-grade limit for shared-use paths;
-    // also where most early riders stop pedaling and walk a hill anyway.
-    gradientCapPct: 5,
+    // 40 s/m ascent → a 5 m climb on a 100 m way (5% grade) adds 200 s of
+    // cost on top of the 72 s base ride time. A 200 m flat alternative
+    // (144 s) wins — the router naturally routes around hills. Tuned from
+    // BRouter's "60 m route-equivalent per 1 m ascent" intuition at this
+    // mode's 1.4 m/s speed.
+    uphillCostSecPerMeter: 40,
   },
 
   'kid-confident': {
@@ -173,9 +179,11 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 10,
     slowSpeedKmh: 5,
     walkingSpeedKmh: 2,
-    // Same 5% as kid-starting-out — surface set widens in this mode,
-    // but kid stamina on grade does not.
-    gradientCapPct: 5,
+    // 25 s/m ascent — slightly faster mode tolerates hills better than
+    // kid-starting-out but still penalises them heavily. 5 m climb on a
+    // 100 m way adds 125 s; flat 200 m at 2.8 m/s = 72 s, so router
+    // detours around modest grades.
+    uphillCostSecPerMeter: 25,
   },
 
   'kid-traffic-savvy': {
@@ -199,10 +207,11 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 16,
     slowSpeedKmh: 10,
     walkingSpeedKmh: 3,
-    // 7% — older kid with stamina and gearing, but still well short of
-    // the 8% short-burst limit in AASHTO. Pushed up from 5% because at
-    // this skill level "walk the hill" is a meaningful detour penalty.
-    gradientCapPct: 7,
+    // 15 s/m ascent — older kid with stamina and gearing tolerates more
+    // climbing. 5 m climb on a 100 m way adds 75 s; flat 200 m at 4.4 m/s
+    // = 45 s, so router still detours, just with less hysteresis than
+    // the slower kid modes.
+    uphillCostSecPerMeter: 15,
   },
 
   'carrying-kid': {
@@ -226,10 +235,10 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 20,
     slowSpeedKmh: 12,
     walkingSpeedKmh: 4,
-    // 7% — trailer/bakfiets drag is real on grade; pegged to the same
-    // cap as kid-traffic-savvy. E-assist users can lift this in Layer 3
-    // once that toggle ships.
-    gradientCapPct: 7,
+    // 20 s/m ascent — trailer/bakfiets weight makes climbs harder than
+    // a comparable solo-adult mode. E-assist users can override this in
+    // Layer 3 once that toggle ships.
+    uphillCostSecPerMeter: 20,
   },
 
   training: {
@@ -250,9 +259,10 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     ridingSpeedKmh: 30,
     slowSpeedKmh: 20,
     walkingSpeedKmh: 5,
-    // 8% — short-burst maximum for shared-use paths. Adult-fitness riders
-    // accept brief steep climbs; above 8% the climb destroys flow.
-    gradientCapPct: 8,
+    // 7 s/m ascent — adult fitness rider takes hills; the climb still
+    // costs time but isn't avoided as aggressively as in kid modes.
+    // 5 m climb on 100 m way adds 35 s on top of the 12 s ride time.
+    uphillCostSecPerMeter: 7,
   },
 }
 

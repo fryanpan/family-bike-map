@@ -48,6 +48,10 @@ jobs:
           # the resolver falls back to OSM Carto with a console warning.
           VITE_MAPTILER_KEY: ${{ secrets.VITE_MAPTILER_KEY }}
           VITE_GOOGLE_MAPS_KEY: ${{ secrets.VITE_GOOGLE_MAPS_KEY }}
+          # Mapbox public token — used by elevation.ts for terrain-RGB at
+          # z=15. Bundled into client; URL-restrict in Mapbox dashboard.
+          # If unset, the gradient gate falls back to soft-null (no demote).
+          VITE_MAPBOX_TOKEN: ${{ secrets.VITE_MAPBOX_TOKEN }}
           # VITE_MAPILLARY_TOKEN removed 2026-04-21. Mapillary tokens can't
           # be referrer-locked so they no longer ship in the client bundle —
           # the Worker proxies the API with a server-side MAPILLARY_TOKEN

@@ -60,42 +60,20 @@ interface NodeData {
 
 interface EdgeData {
   distance: number  // metres
-  cost: number      // weighted cost for A*
+  cost: number      // weighted cost for A* (includes synthetic ascent penalty for hill avoidance)
+  durationSec: number // real expected travel time (no ascent penalty) — what we show users
   wayTags: Record<string, string>
   wayId: number     // OSM way id — used by tap-to-avoid to identify the source way
   isWalking: boolean
 }
 
-// Below this length, terrain-RGB pixel noise dominates the gradient
-// calculation — a 1 m elevation error over a 10 m way is 10% spurious
-// grade. Above ~30 m the signal-to-noise becomes useful and the worst
-// false-positives drop out.
-const MIN_GRADIENT_WAY_LEN_M = 30
-
-// MapTiler terrain-rgb at z=12 (the max zoom) has ~±10–20 m inter-pixel
-// noise: adjacent pixels on the same flat street can decode 20+ m apart
-// (Friedrichstraße A=41 m / B=63 m on a level 170 m run). We model the
-// noise as a fixed metres-of-error budget and inflate the gradient cap
-// by `noise / wayLen` so short ways need a higher decoded gradient to
-// trip the gate. A 170 m way needs > 5% + 20/170 * 100 = ~16.8% to
-// fire; a 500 m way needs > 9%; a 1000 m way needs > 7%.
-//
-// The bonus is capped at MAX_NOISE_BONUS_PCT so very short ways don't
-// disable the gate entirely. Without the cap, a 40 m bridge ramp would
-// get a 55% effective cap and a real 25% ramp would stay rideable. With
-// the cap at 10pp, a 40 m way still needs > 15% to demote — real
-// connectors fire, Berlin noise on 170+ m ways still under-fires.
-const ELEVATION_NOISE_M = 20
-const MAX_NOISE_BONUS_PCT = 10
-
-/** Total polyline length in metres (sum of consecutive segment distances). */
-function wayLengthM(coords: Array<[number, number]>): number {
-  let total = 0
-  for (let i = 0; i < coords.length - 1; i++) {
-    total += haversineM(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1])
-  }
-  return total
-}
+// Tiny elevation deltas don't count toward ascent cost — they're
+// terrain-RGB pixel-quantization noise, not real climbs. 2 m matches the
+// observed inter-pixel jitter on flat ground at z=12 (Berlin
+// Friedrichstraße A vs B differed ~22 m at z=12 on a level 170 m run;
+// even after smoothing, 2 m is the right floor). Mirrors BRouter's
+// `uphillcutoff` parameter.
+const UPHILL_CUTOFF_M = 2
 
 /** Canonical node ID from a coordinate pair.
  * Uses 5 decimal places (~1.1m precision) to snap nearby endpoints together,
@@ -303,49 +281,48 @@ export function buildRoutingGraph(
       speedKmh = Math.min(speedKmh, rule.slowSpeedKmh)
     }
 
-    // Gradient gate. Compute end-to-end gradient for the way; over the
-    // mode's cap, demote the whole way to bridge-walk (you'd be pushing
-    // the bike up). Per-way rather than per-segment because terrain-RGB
-    // pixel noise can produce false positives on short OSM segments.
-    // Skip very short ways — too short to give a stable gradient signal.
-    // Length-adaptive cap: rule.gradientCapPct + ELEVATION_NOISE_M /
-    // wayLen * 100 tolerates more decoded gradient on short ways where
-    // noise dominates (see ELEVATION_NOISE_M comment above).
-    if (
-      !isWalking &&
-      rule.gradientCapPct != null &&
-      elevationFn &&
-      coords.length >= 2
-    ) {
-      const wayLen = wayLengthM(coords)
-      if (wayLen >= MIN_GRADIENT_WAY_LEN_M) {
-        const [latA, lngA] = coords[0]
-        const [latB, lngB] = coords[coords.length - 1]
-        const eleA = elevationFn(latA, lngA)
-        const eleB = elevationFn(latB, lngB)
-        if (eleA != null && eleB != null) {
-          const gradientPct = (Math.abs(eleB - eleA) / wayLen) * 100
-          const noiseBonus = Math.min((ELEVATION_NOISE_M / wayLen) * 100, MAX_NOISE_BONUS_PCT)
-          const adaptiveCap = rule.gradientCapPct + noiseBonus
-          if (gradientPct > adaptiveCap) {
-            if (isBridgeWalkable(tags)) {
-              speedKmh = rule.walkingSpeedKmh
-              isWalking = true
-              costMultiplier = 1.0
-            } else {
-              continue
-            }
-          }
-        }
-      }
-    }
-
     const speed = speedKmh / 3.6  // km/h → m/s
 
     // Check one-way constraints
     const oneway = tags.oneway === 'yes' || tags['oneway:bicycle'] === 'yes'
     const bicycleOverride = tags['oneway:bicycle'] === 'no'
     const isOneway = oneway && !bicycleOverride
+
+    // BRouter-style ascent cost: per-segment elevation lookup, summed
+    // across the whole way, with UPHILL_CUTOFF_M applied ONCE to the
+    // total — not per-segment, which would make hill cost depend on OSM
+    // vertex density (a 10 m climb tagged as 10 × 1 m steps would clear
+    // the cutoff segment-by-segment and add zero penalty, while the same
+    // climb as a single 10 m segment would add 8 m of penalty). The
+    // effective per-segment cost is then the raw segment ascent scaled
+    // by `effective_total / raw_total`.
+    const useAscentCost =
+      !isWalking &&
+      rule.uphillCostSecPerMeter != null &&
+      rule.uphillCostSecPerMeter > 0 &&
+      elevationFn != null
+    const elevations: Array<number | null> = useAscentCost
+      ? coords.map(([la, ln]) => elevationFn!(la, ln))
+      : []
+    // Sum positive deltas in each direction (forward = traversing the
+    // way as listed; reverse = traversing it backwards). Forward ascent
+    // is the reverse's descent and vice versa.
+    let forwardRawAscent = 0
+    let reverseRawAscent = 0
+    if (useAscentCost) {
+      for (let i = 0; i < elevations.length - 1; i++) {
+        const e1 = elevations[i]
+        const e2 = elevations[i + 1]
+        if (e1 == null || e2 == null) continue
+        if (e2 > e1) forwardRawAscent += e2 - e1
+        else if (e1 > e2) reverseRawAscent += e1 - e2
+      }
+    }
+    const forwardEffectiveAscent = Math.max(0, forwardRawAscent - UPHILL_CUTOFF_M)
+    const reverseEffectiveAscent = Math.max(0, reverseRawAscent - UPHILL_CUTOFF_M)
+    const forwardScale = forwardRawAscent > 0 ? forwardEffectiveAscent / forwardRawAscent : 0
+    const reverseScale = reverseRawAscent > 0 ? reverseEffectiveAscent / reverseRawAscent : 0
+    const ascentMul = rule.uphillCostSecPerMeter ?? 0
 
     for (let i = 0; i < coords.length - 1; i++) {
       const [lat1, lng1] = coords[i]
@@ -358,19 +335,34 @@ export function buildRoutingGraph(
       if (!graph.getNode(id2)) graph.addNode(id2, { lat: lat2, lng: lng2 })
 
       const dist = haversineM(lat1, lng1, lat2, lng2)
-      // Cost = time-at-effective-speed × level-cost-multiplier.
-      // Multiplier biases the router away from accepted-but-worse infra
-      // (e.g. LTS 2b for traffic-savvy at 1.5×, LTS 3 for carrying-kid at
-      // 2×, rough surfaces at 5×) even when the base speed is unchanged.
-      const cost = (dist / speed) * costMultiplier
-      const edgeData: EdgeData = { distance: dist, cost, wayTags: tags, wayId: way.osmId, isWalking }
+      // durationSec is the real expected travel time (distance / speed).
+      // routing cost adds (a) level/multiplier bias and (b) ascent
+      // penalty; both are synthetic and stay OUT of durationSec so the
+      // UI's reported ETA reflects physical ride time, not router
+      // preferences. (Reviewer caught the duration-inflation bug.)
+      const durationSec = dist / speed
+      const baseCost = durationSec * costMultiplier
 
-      // Forward edge (always)
-      graph.addLink(id1, id2, edgeData)
+      let forwardSegAscent = 0
+      let reverseSegAscent = 0
+      if (useAscentCost) {
+        const e1 = elevations[i]
+        const e2 = elevations[i + 1]
+        if (e1 != null && e2 != null) {
+          if (e2 > e1) forwardSegAscent = (e2 - e1) * forwardScale
+          else if (e1 > e2) reverseSegAscent = (e1 - e2) * reverseScale
+        }
+      }
+      const forwardCost = baseCost + forwardSegAscent * ascentMul
+      const reverseCost = baseCost + reverseSegAscent * ascentMul
+
+      const forwardData: EdgeData = { distance: dist, cost: forwardCost, durationSec, wayTags: tags, wayId: way.osmId, isWalking }
+      graph.addLink(id1, id2, forwardData)
 
       // Reverse edge (unless one-way)
       if (!isOneway) {
-        graph.addLink(id2, id1, { ...edgeData })
+        const reverseData: EdgeData = { distance: dist, cost: reverseCost, durationSec, wayTags: tags, wayId: way.osmId, isWalking }
+        graph.addLink(id2, id1, reverseData)
       }
     }
   }
@@ -569,7 +561,10 @@ export function routeOnGraph(
     const link = graph.getLink(prevNode.id, currNode.id)
     if (link) {
       totalDistance += link.data.distance
-      totalTime += link.data.cost  // cost IS time in seconds
+      // cost includes routing-only multipliers (level bias, ascent
+      // penalty). For displayed ETA we sum durationSec — the physical
+      // distance/speed time, no synthetic biases.
+      totalTime += link.data.durationSec
       if (link.data.isWalking) walkingDistance += link.data.distance
 
       const itemName = classifyOsmTagsToItem(link.data.wayTags, profileKey, regionRules)
