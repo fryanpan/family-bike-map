@@ -25,8 +25,28 @@ const TILE_SIZE = 256
 const tileCache = new Map<string, Uint8ClampedArray | null>()
 const inflight = new Map<string, Promise<void>>()
 
+function canDecodeTiles(): boolean {
+  return (
+    (typeof createImageBitmap !== 'undefined' && typeof OffscreenCanvas !== 'undefined') ||
+    externalDecoder != null
+  )
+}
+
 function getMapTilerKey(): string | undefined {
-  return import.meta.env?.VITE_MAPTILER_KEY || undefined
+  // Skip fetches entirely in runtimes that can't decode the PNGs anyway —
+  // a Bun/Node script without a registered decoder would otherwise burn
+  // bandwidth pulling tiles only to discard them. Browser keeps its
+  // OffscreenCanvas path; benchmark registers a decoder before this runs.
+  if (!canDecodeTiles()) return undefined
+  // Browser: Vite inlines `import.meta.env.VITE_MAPTILER_KEY` at build time.
+  // Non-browser (Bun benchmark script, Node test runner): fall back to
+  // process.env so the gradient gate can be exercised outside the browser.
+  const viteKey = import.meta.env?.VITE_MAPTILER_KEY
+  if (viteKey) return viteKey
+  if (typeof process !== 'undefined' && process.env?.VITE_MAPTILER_KEY) {
+    return process.env.VITE_MAPTILER_KEY
+  }
+  return undefined
 }
 
 function tileKey(z: number, x: number, y: number): string {
@@ -67,19 +87,62 @@ export function decodeTerrainRgb(r: number, g: number, b: number): number {
   return -10000 + (r * 65536 + g * 256 + b) * 0.1
 }
 
+// Pluggable PNG decoder. The browser path uses OffscreenCanvas +
+// createImageBitmap. Non-browser environments (Bun, Node, benchmark
+// scripts) can register a decoder via `setElevationDecoder()` so the
+// gradient gate can actually be exercised in scripts. Returning null
+// keeps the soft-fail invariant.
+type ElevationDecoder = (bytes: Uint8Array) => Promise<Uint8ClampedArray | null> | Uint8ClampedArray | null
+
+let externalDecoder: ElevationDecoder | null = null
+
+/**
+ * Register a non-browser PNG → RGBA decoder. The decoder must return
+ * a `Uint8ClampedArray` of length `TILE_SIZE * TILE_SIZE * 4` (256×256
+ * RGBA pixels), or null on failure. Set to `null` to clear.
+ *
+ * Used by `scripts/benchmark-routing.ts` to inject a Bun-friendly
+ * pngjs decoder so the gradient gate is actually exercised in the
+ * benchmark.
+ *
+ * DO NOT call this from browser code. The OffscreenCanvas path is
+ * preferred in the browser — it's faster and avoids bundling a JS
+ * PNG decoder. The decoder only runs when OffscreenCanvas is absent.
+ */
+export function setElevationDecoder(decoder: ElevationDecoder | null): void {
+  externalDecoder = decoder
+}
+
+// MapTiler keys are origin-restricted in production; a request from a
+// browser tab on bike-map.fryanpan.com gets an automatic matching
+// Referer header. Bun's fetch sends no Referer, so MapTiler 403s. The
+// benchmark script registers a Referer here matching the allowed
+// origin so the same key works without us proxying through the worker.
+let fetchReferer: string | null = null
+
+export function setElevationReferer(url: string | null): void {
+  fetchReferer = url
+}
+
 async function decodeImageBlob(blob: Blob): Promise<Uint8ClampedArray | null> {
-  // OffscreenCanvas + createImageBitmap works in modern browsers and
-  // Workers. In a non-browser test environment these will throw; the
-  // catch in fetchTile turns the failure into a soft null.
-  if (typeof createImageBitmap === 'undefined' || typeof OffscreenCanvas === 'undefined') {
-    return null
+  // Prefer the browser-native path when it's available — fast and uses
+  // GPU-assisted decode where the runtime offers it.
+  if (typeof createImageBitmap !== 'undefined' && typeof OffscreenCanvas !== 'undefined') {
+    const bitmap = await createImageBitmap(blob)
+    const canvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(bitmap, 0, 0)
+    return ctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data
   }
-  const bitmap = await createImageBitmap(blob)
-  const canvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return null
-  ctx.drawImage(bitmap, 0, 0)
-  return ctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data
+  // Non-browser path: defer to the injected decoder if one was
+  // registered. No decoder = soft null (the historical Bun behavior).
+  if (externalDecoder) {
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    const result = await externalDecoder(bytes)
+    return result
+  }
+  return null
 }
 
 async function fetchTile(z: number, x: number, y: number): Promise<void> {
@@ -97,7 +160,8 @@ async function fetchTile(z: number, x: number, y: number): Promise<void> {
   const p = (async () => {
     try {
       const url = `https://api.maptiler.com/tiles/terrain-rgb/${z}/${x}/${y}.png?key=${apiKey}`
-      const res = await fetch(url)
+      const init: RequestInit = fetchReferer ? { headers: { Referer: fetchReferer } } : {}
+      const res = await fetch(url, init)
       if (!res.ok) {
         tileCache.set(key, null)
         return
@@ -160,10 +224,12 @@ export function lookupElevation(lat: number, lng: number): number | null {
   return decodeTerrainRgb(data[i], data[i + 1], data[i + 2])
 }
 
-/** Test-only — wipe caches between runs. */
+/** Test-only — wipe caches and clear module-level registrations between runs. */
 export function _resetElevationCache(): void {
   tileCache.clear()
   inflight.clear()
+  externalDecoder = null
+  fetchReferer = null
 }
 
 /** Test-only — seed a tile directly without going through fetch/decode. */
