@@ -115,6 +115,13 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
   // real elevations. Until then overlayGradientPct returns null and every
   // way shows (fail-soft) — steep ways simply pop out a beat later.
   const [elevReady, setElevReady] = useState(0)
+  // Per-way gross gradient, cached by OSM id. Gradient depends only on
+  // geometry + elevation (both stable per way for the session), NOT on
+  // mode — so a mode switch or zoom that re-runs the render effect reuses
+  // these instead of recomputing ~1600 lookups. Only non-null results are
+  // cached: a way computed before its terrain tile arrived stays uncached
+  // and recomputes on the next render (elevReady) so the gate still fires.
+  const gradientCache = useRef<Map<string | number, number>>(new Map())
 
   // Zoom drives cobble-marker visibility. Subscribe via the engine's
   // event facade rather than the underlying Leaflet/Google APIs.
@@ -186,8 +193,13 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
       if (!isPreferred) continue
       // Hide ways too steep for this mode. overlayGradientPct returns null
       // (→ shown) when elevation isn't loaded yet or the way is too short
-      // for z=12 to resolve a grade, so this fails soft.
-      const gradientPct = overlayGradientPct(way.coordinates)
+      // for z=12 to resolve a grade, so this fails soft. Cache hits skip
+      // the elevation lookups on mode/zoom re-renders.
+      let gradientPct = gradientCache.current.get(way.osmId) ?? null
+      if (gradientPct == null) {
+        gradientPct = overlayGradientPct(way.coordinates)
+        if (gradientPct != null) gradientCache.current.set(way.osmId, gradientPct)
+      }
       if (gradientPct != null && gradientPct > maxGradientPct) continue
       const color = colorForLevel(pathLevel, settings.tiers)
       const isBikeInfraTier = pathLevel === '1a' || pathLevel === '1b' || pathLevel === '2a'
