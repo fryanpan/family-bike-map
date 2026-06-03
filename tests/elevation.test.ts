@@ -150,3 +150,31 @@ test('overlayGradientPct — unknown elevation (all null) returns null', () => {
   const g = overlayGradientPct(coords, () => null)
   expect(g).toBeNull()
 })
+
+import { prefetchElevation } from '../src/services/elevation'
+
+test('prefetchElevation — skips a pathological region-spanning bbox', async () => {
+  const warns: string[] = []
+  const orig = console.warn
+  console.warn = ((m: unknown) => { warns.push(String(m)) }) as typeof console.warn
+  try {
+    // SF → Berlin: ~137° of longitude. At z=12 that's thousands of tiles —
+    // must trip the cap and return without firing a request storm.
+    await prefetchElevation({ south: 37, west: -123, north: 53, east: 14 })
+  } finally {
+    console.warn = orig
+  }
+  expect(warns.some((w) => w.includes('prefetch bbox spans'))).toBe(true)
+})
+
+test('prefetchElevation — does not trip the cap for a normal viewport bbox', async () => {
+  const warns: string[] = []
+  const orig = console.warn
+  console.warn = ((m: unknown) => { warns.push(String(m)) }) as typeof console.warn
+  try {
+    await prefetchElevation({ south: 37.74, west: -122.46, north: 37.80, east: -122.39 })
+  } finally {
+    console.warn = orig
+  }
+  expect(warns.some((w) => w.includes('prefetch bbox spans'))).toBe(false)
+})
