@@ -28,7 +28,7 @@ import { applyRegionOverlay } from '../data/cityProfiles/overlay'
 import type { RegionProfile } from '../data/cityProfiles/overlay'
 import { applyPreferenceAdjustments } from '../data/preferences'
 import type { RiderPreference } from '../data/preferences'
-import { prefetchElevation, lookupElevation } from './elevation'
+import { prefetchElevation, lookupElevation, wayAscentMeters } from './elevation'
 
 // ── Haversine ──────────────────────────────────────────────────────────────
 
@@ -301,23 +301,14 @@ export function buildRoutingGraph(
       rule.uphillCostSecPerMeter != null &&
       rule.uphillCostSecPerMeter > 0 &&
       elevationFn != null
-    const elevations: Array<number | null> = useAscentCost
-      ? coords.map(([la, ln]) => elevationFn!(la, ln))
-      : []
-    // Sum positive deltas in each direction (forward = traversing the
-    // way as listed; reverse = traversing it backwards). Forward ascent
-    // is the reverse's descent and vice versa.
-    let forwardRawAscent = 0
-    let reverseRawAscent = 0
-    if (useAscentCost) {
-      for (let i = 0; i < elevations.length - 1; i++) {
-        const e1 = elevations[i]
-        const e2 = elevations[i + 1]
-        if (e1 == null || e2 == null) continue
-        if (e2 > e1) forwardRawAscent += e2 - e1
-        else if (e1 > e2) reverseRawAscent += e1 - e2
-      }
-    }
+    // Sum positive deltas in each direction (forward = traversing the way
+    // as listed; reverse = traversing it backwards). Shared with the
+    // overlay's steepness gate via wayAscentMeters — one source of per-way
+    // ascent so display and routing can't drift on what counts as "uphill".
+    const { forwardM: forwardRawAscent, reverseM: reverseRawAscent, elevations } =
+      useAscentCost
+        ? wayAscentMeters(coords, elevationFn!)
+        : { forwardM: 0, reverseM: 0, elevations: [] as Array<number | null> }
     const forwardEffectiveAscent = Math.max(0, forwardRawAscent - UPHILL_CUTOFF_M)
     const reverseEffectiveAscent = Math.max(0, reverseRawAscent - UPHILL_CUTOFF_M)
     const forwardScale = forwardRawAscent > 0 ? forwardEffectiveAscent / forwardRawAscent : 0

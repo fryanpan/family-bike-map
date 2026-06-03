@@ -332,3 +332,22 @@ describe('computeRouteQuality — preferred/other/walking model', () => {
     expect(q.other).toBeCloseTo(1 / 5)
   })
 })
+
+import { getOverlayMaxGradientPct } from '../src/utils/classify'
+
+describe('getOverlayMaxGradientPct', () => {
+  it('rises monotonically across the kid-skill chain (superset invariant)', () => {
+    const start = getOverlayMaxGradientPct('kid-starting-out')
+    const conf = getOverlayMaxGradientPct('kid-confident')
+    const savvy = getOverlayMaxGradientPct('kid-traffic-savvy')
+    expect(start).toBeLessThanOrEqual(conf)
+    expect(conf).toBeLessThanOrEqual(savvy)
+  })
+  it('gives training the most headroom and kid-starting-out the least', () => {
+    expect(getOverlayMaxGradientPct('training')).toBeGreaterThan(getOverlayMaxGradientPct('kid-traffic-savvy'))
+    expect(getOverlayMaxGradientPct('kid-starting-out')).toBeLessThan(getOverlayMaxGradientPct('training'))
+  })
+  it('falls back to a sane default for unknown modes', () => {
+    expect(getOverlayMaxGradientPct('nonexistent-mode')).toBeGreaterThan(0)
+  })
+})

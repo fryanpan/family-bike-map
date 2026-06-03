@@ -203,6 +203,22 @@ export function isOverlayHiddenSurface(tags: Record<string, string>): boolean {
   return isRoughSurface(tags)
 }
 
+/**
+ * A crossing / traffic-island stub — one tiny way per intersection
+ * (`footway=crossing`, `cycleway=crossing`, `footway=traffic_island`, or
+ * `highway=crossing`). These are real network connectors so the router
+ * keeps them, but on the browse overlay they paint as disconnected
+ * confetti scattered across every junction. Hidden from the overlay only.
+ */
+export function isOverlayCrossing(tags: Record<string, string>): boolean {
+  return (
+    tags.footway === 'crossing' ||
+    tags.footway === 'traffic_island' ||
+    tags.cycleway === 'crossing' ||
+    tags.highway === 'crossing'
+  )
+}
+
 export function classifyOsmTagsToItem(
   tags: Record<string, string>,
   profileKey: string,

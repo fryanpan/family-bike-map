@@ -252,3 +252,21 @@ describe('buildQuery', () => {
     expect(q).toContain('"bicycle"~"^(yes|designated)$"')
   })
 })
+
+import { isOverlayCrossing } from '../src/services/overpass'
+
+describe('isOverlayCrossing', () => {
+  it('flags footway crossings and traffic islands', () => {
+    expect(isOverlayCrossing({ highway: 'footway', footway: 'crossing' })).toBe(true)
+    expect(isOverlayCrossing({ highway: 'footway', footway: 'traffic_island' })).toBe(true)
+  })
+  it('flags cycleway crossings and bare highway=crossing', () => {
+    expect(isOverlayCrossing({ highway: 'cycleway', cycleway: 'crossing' })).toBe(true)
+    expect(isOverlayCrossing({ highway: 'crossing' })).toBe(true)
+  })
+  it('does NOT flag real bike infra (cycleway, sidewalk footway, bike path)', () => {
+    expect(isOverlayCrossing({ highway: 'cycleway' })).toBe(false)
+    expect(isOverlayCrossing({ highway: 'footway', footway: 'sidewalk', bicycle: 'yes' })).toBe(false)
+    expect(isOverlayCrossing({ highway: 'path', bicycle: 'designated' })).toBe(false)
+  })
+})

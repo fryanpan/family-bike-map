@@ -364,6 +364,34 @@ export function getDefaultPreferredItems(
   return names
 }
 
+// Overlay steepness gate, per mode. A shown way whose gross gradient
+// (elevation climb / horizontal run) exceeds this is hidden from the
+// browse overlay — a 20% hiking trail tagged `highway=path` is car-free
+// in the LTS sense but no kid is riding up it. Display-only: routing
+// already prices ascent via uphillCostSecPerMeter; this just stops the
+// browse map from advertising too-steep ways as preferred infra.
+//
+// Thresholds rise with rider capability and mirror the kid-skill superset
+// invariant (starting-out ⊆ confident ⊆ traffic-savvy): a more capable
+// mode shows everything a less capable one does, plus steeper ways.
+const OVERLAY_MAX_GRADIENT_PCT: Record<string, number> = {
+  'kid-starting-out': 6,
+  'kid-confident': 8,
+  'carrying-kid': 8,
+  'kid-traffic-savvy': 10,
+  'training': 15,
+}
+const DEFAULT_OVERLAY_MAX_GRADIENT_PCT = 10
+
+/**
+ * Max gross gradient (%) a way may have and still appear on the browse
+ * overlay for `profileKey`. Steeper ways are hidden. Unknown modes fall
+ * back to a middle-of-the-road 10%.
+ */
+export function getOverlayMaxGradientPct(profileKey: string): number {
+  return OVERLAY_MAX_GRADIENT_PCT[profileKey] ?? DEFAULT_OVERLAY_MAX_GRADIENT_PCT
+}
+
 /**
  * Look up a legend item by name for a given profile. Used for tooltip icons.
  */

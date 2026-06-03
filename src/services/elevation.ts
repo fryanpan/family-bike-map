@@ -258,6 +258,77 @@ export function lookupElevation(lat: number, lng: number): number | null {
   return decodeTerrainRgb(data[i], data[i + 1], data[i + 2])
 }
 
+/**
+ * Sum of positive elevation deltas in each traversal direction over a
+ * way's vertices. `forwardM` is the climb when walking the coords as
+ * listed; `reverseM` is the climb walking them backwards (one way's
+ * ascent is the other's descent). Also returns the per-vertex elevations
+ * (null where the covering tile is unavailable) so callers that
+ * distribute ascent per-segment don't look them up twice.
+ *
+ * This is the single source of per-way ascent: the router consumes
+ * forward/reverse to weight A* cost; the overlay consumes them (via
+ * `overlayGradientPct`) to gate too-steep ways out of the browse map.
+ * Pure over `elevationFn`; defaults to the module's `lookupElevation`.
+ */
+export function wayAscentMeters(
+  coords: Array<[number, number]>,
+  elevationFn: (lat: number, lng: number) => number | null = lookupElevation,
+): { forwardM: number; reverseM: number; elevations: Array<number | null> } {
+  const elevations = coords.map(([lat, lng]) => elevationFn(lat, lng))
+  let forwardM = 0
+  let reverseM = 0
+  for (let i = 0; i < elevations.length - 1; i++) {
+    const a = elevations[i]
+    const b = elevations[i + 1]
+    if (a == null || b == null) continue
+    if (b > a) forwardM += b - a
+    else if (a > b) reverseM += a - b
+  }
+  return { forwardM, reverseM, elevations }
+}
+
+// Overlay steepness gate constants. The 2 m cutoff matches the router's
+// UPHILL_CUTOFF_M so a flat way reading ±noise across z=12 pixels doesn't
+// register a phantom grade. The 40 m length floor reflects the z=12 pixel
+// size (~24-30 m): below ~1.5 pixels a "gradient" is just two adjacent
+// noisy samples, so we report null (unknown) rather than gate on noise.
+const OVERLAY_GRADIENT_CUTOFF_M = 2
+const MIN_GRADED_LEN_M = 40
+
+// Local equirectangular metres-between — kept private here so elevation.ts
+// has no dependency on the routing module (which imports this one).
+function segMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLng = ((lng2 - lng1) * Math.PI) / 180
+  const meanLat = ((lat1 + lat2) / 2) * (Math.PI / 180)
+  const x = dLng * Math.cos(meanLat)
+  return Math.sqrt(dLat * dLat + x * x) * R
+}
+
+/**
+ * Gross gradient (%) for overlay display: the steeper of the two
+ * traversal climbs over the way's horizontal length, minus the noise
+ * cutoff. Returns null when the way is shorter than the z=12 resolution
+ * floor or no covering elevation tile is loaded — callers treat null as
+ * "unknown, show it" (fail-soft, matching the router's gradient handling).
+ */
+export function overlayGradientPct(
+  coords: Array<[number, number]>,
+  elevationFn: (lat: number, lng: number) => number | null = lookupElevation,
+): number | null {
+  let lengthM = 0
+  for (let i = 1; i < coords.length; i++) {
+    lengthM += segMeters(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1])
+  }
+  if (lengthM < MIN_GRADED_LEN_M) return null
+  const { forwardM, reverseM, elevations } = wayAscentMeters(coords, elevationFn)
+  if (elevations.every((e) => e == null)) return null
+  const gross = Math.max(0, Math.max(forwardM, reverseM) - OVERLAY_GRADIENT_CUTOFF_M)
+  return (gross / lengthM) * 100
+}
+
 /** Test-only — wipe caches and clear module-level registrations between runs. */
 export function _resetElevationCache(): void {
   tileCache.clear()

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey,
-  classifyOsmTagsToItem, isOverlayHiddenSurface, isRoughSurface,
+  classifyOsmTagsToItem, isOverlayHiddenSurface, isRoughSurface, isOverlayCrossing,
 } from '../services/overpass'
-import { getDisplayPathLevel } from '../utils/classify'
+import { getDisplayPathLevel, getOverlayMaxGradientPct } from '../utils/classify'
+import { prefetchElevation, overlayGradientPct } from '../services/elevation'
 import { classifyEdge, PATH_LEVEL_LABELS } from '../utils/lts'
 import type { PathLevel } from '../utils/lts'
 import { colorForLevel, weightMultiplierForLevel } from './SimpleLegend'
@@ -109,6 +110,11 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
 }) {
   const settings = useAdminSettings()
   const [zoom, setZoom] = useState<number>(() => engine.getZoom())
+  // Bumped once the terrain-RGB tiles covering the loaded ways have been
+  // fetched, so the render effect re-runs and the steepness gate can read
+  // real elevations. Until then overlayGradientPct returns null and every
+  // way shows (fail-soft) — steep ways simply pop out a beat later.
+  const [elevReady, setElevReady] = useState(0)
 
   // Zoom drives cobble-marker visibility. Subscribe via the engine's
   // event facade rather than the underlying Leaflet/Google APIs.
@@ -119,6 +125,28 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
     return () => { off() }
   }, [engine])
 
+  // Prefetch terrain-RGB tiles for the loaded ways' bounding box so the
+  // steepness gate has elevation data. Tiles are cached in-memory and
+  // shared with the router, so repeat pans and a subsequent route request
+  // reuse them. ~300 ms for a city viewport (≈ a dozen z=12 tiles).
+  useEffect(() => {
+    if (ways.length === 0) return
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity
+    for (const w of ways) {
+      for (const [la, ln] of w.coordinates) {
+        if (la < minLat) minLat = la
+        if (la > maxLat) maxLat = la
+        if (ln < minLng) minLng = ln
+        if (ln > maxLng) maxLng = ln
+      }
+    }
+    if (!Number.isFinite(minLat)) return
+    let cancelled = false
+    void prefetchElevation({ south: minLat, west: minLng, north: maxLat, east: maxLng })
+      .then(() => { if (!cancelled) setElevReady((v) => v + 1) })
+    return () => { cancelled = true }
+  }, [ways])
+
   useEffect(() => {
     const polylineHandles: PolylineHandle[] = []
     const pathLayerHandles: PathLayerHandle[] = []
@@ -126,12 +154,19 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
 
     const BROWSING_WEIGHT = 4
 
+    // Max gross gradient this mode tolerates on the browse overlay. Steeper
+    // shown ways (e.g. 20% `highway=path` hiking trails) are hidden.
+    const maxGradientPct = getOverlayMaxGradientPct(profileKey)
+
     // Pass 0 — classify + filter.
     const toRender: RenderedWay[] = []
     const roughWays: OsmWay[] = []
     for (const way of ways) {
       const { pathLevel: routingPathLevel } = classifyEdge(way.tags)
       if (routingPathLevel === '4') continue
+      // Crossing / traffic-island stubs are real connectors for routing but
+      // render as disconnected confetti on the browse overlay — drop them.
+      if (isOverlayCrossing(way.tags)) continue
       if (isOverlayHiddenSurface(way.tags)) {
         // Surface IS rough — keep it for the cobble-marker pass.
         if (isRoughSurface(way.tags)) roughWays.push(way)
@@ -149,6 +184,11 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
       // (see useRoutePolylines in Map.tsx) so users see every segment
       // along their actual route regardless of overlay visibility.
       if (!isPreferred) continue
+      // Hide ways too steep for this mode. overlayGradientPct returns null
+      // (→ shown) when elevation isn't loaded yet or the way is too short
+      // for z=12 to resolve a grade, so this fails soft.
+      const gradientPct = overlayGradientPct(way.coordinates)
+      if (gradientPct != null && gradientPct > maxGradientPct) continue
       const color = colorForLevel(pathLevel, settings.tiers)
       const isBikeInfraTier = pathLevel === '1a' || pathLevel === '1b' || pathLevel === '2a'
       const browsingWeight = BROWSING_WEIGHT * weightMultiplierForLevel(pathLevel, settings.tiers)
@@ -300,7 +340,7 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
       for (const h of pathLayerHandles) engine.removePathLayer(h)
       if (openPopup) engine.closePopup(openPopup)
     }
-  }, [engine, ways, profileKey, preferredItemNames, hasRoute, regionRules, settings, zoom])
+  }, [engine, ways, profileKey, preferredItemNames, hasRoute, regionRules, settings, zoom, elevReady])
 
   return null
 }
