@@ -35,6 +35,12 @@
 const TILE_ZOOM = 12
 const TILE_SIZE = 256
 
+// Upper bound on tiles a single prefetch may request. A full-screen z=12
+// viewport is ~a few dozen tiles; this caps pathological bboxes (outlier
+// OSM nodes, region-spanning unions) so prefetch can never fire a storm
+// of fetches. ~14×14 tiles ≈ a very generous metro viewport.
+const MAX_PREFETCH_TILES = 200
+
 // In-memory cache. `null` means "fetched and failed" — don't retry this
 // session. A `Uint8ClampedArray` is the decoded RGBA pixel data (length
 // 256*256*4).
@@ -227,6 +233,15 @@ export async function prefetchElevation(bbox: BBox): Promise<void> {
   const maxX = Math.max(xA, xB)
   const minY = Math.min(yA, yB)
   const maxY = Math.max(yA, yB)
+  // Backstop: a viewport-sized bbox is a few dozen tiles. Anything past
+  // this means the caller passed a pathological bbox (an outlier node, a
+  // bbox spanning regions) — skip rather than fire thousands of fetches
+  // and hang the page. The gradient gate fails soft (null → shown).
+  const tileCount = (maxX - minX + 1) * (maxY - minY + 1)
+  if (tileCount > MAX_PREFETCH_TILES) {
+    console.warn(`[elevation] prefetch bbox spans ${tileCount} tiles (> ${MAX_PREFETCH_TILES}) — skipping to avoid a request storm`)
+    return
+  }
   const tasks: Promise<void>[] = []
   for (let x = minX; x <= maxX; x++) {
     for (let y = minY; y <= maxY; y++) {

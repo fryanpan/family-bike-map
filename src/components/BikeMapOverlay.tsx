@@ -132,27 +132,25 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
     return () => { off() }
   }, [engine])
 
-  // Prefetch terrain-RGB tiles for the loaded ways' bounding box so the
-  // steepness gate has elevation data. Tiles are cached in-memory and
-  // shared with the router, so repeat pans and a subsequent route request
-  // reuse them. ~300 ms for a city viewport (≈ a dozen z=12 tiles).
+  // Prefetch terrain-RGB tiles for the steepness gate. Bounded to the
+  // VISIBLE viewport (engine.getBounds()), NOT the union of all loaded
+  // ways: tileData accumulates across pans and a single OSM way with an
+  // outlier node can span the bbox across a continent, which would make
+  // prefetchElevation fire thousands of tile requests and stall the page.
+  // The viewport is always small (≤ MAX_VISIBLE_TILES). Off-screen ways
+  // fail soft (null gradient → shown) until the user pans to them.
+  // Re-runs when ways change (i.e. a pan loaded new tiles). Tiles are
+  // cached in-memory and shared with the router.
   useEffect(() => {
     if (ways.length === 0) return
-    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity
-    for (const w of ways) {
-      for (const [la, ln] of w.coordinates) {
-        if (la < minLat) minLat = la
-        if (la > maxLat) maxLat = la
-        if (ln < minLng) minLng = ln
-        if (ln > maxLng) maxLng = ln
-      }
-    }
-    if (!Number.isFinite(minLat)) return
+    const [sw, ne] = engine.getBounds()
+    const bbox = { south: sw[0], west: sw[1], north: ne[0], east: ne[1] }
+    if (![bbox.south, bbox.west, bbox.north, bbox.east].every(Number.isFinite)) return
     let cancelled = false
-    void prefetchElevation({ south: minLat, west: minLng, north: maxLat, east: maxLng })
+    void prefetchElevation(bbox)
       .then(() => { if (!cancelled) setElevReady((v) => v + 1) })
     return () => { cancelled = true }
-  }, [ways])
+  }, [ways, engine])
 
   useEffect(() => {
     const polylineHandles: PolylineHandle[] = []
