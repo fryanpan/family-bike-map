@@ -338,3 +338,59 @@
 **Verification**: 204/204 tests pass; `bunx tsc --noEmit` clean; production build succeeds.
 
 **Status**: Shipped.
+
+---
+
+## 2026-06-02: Elevation-aware overlay (gradient gate + crossing hide)
+
+**Context**: Bryan browsing SF kid-confident saw (a) steep hiking trails on
+Mt Davidson / Glen Canyon still painted as preferred green, and (b) "weird
+short path segments all over SF." Diagnosed with the real classify/elevation
+functions over central-SF OSM. See
+[`../research/2026-06-02-overlay-gradient-results.md`](../research/2026-06-02-overlay-gradient-results.md).
+
+**Findings**:
+
+- The BRouter-style ascent cost (PR #192) shipped to **routing only**. The
+  browse overlay had **zero** elevation awareness — so 19–26% `highway=path`
+  trails rendered as preferred "Bike path."
+- "Short segments now" had a clear cause: PR #175 (2026-05-03) removed the
+  `OVERLAY_MIN_RENDER_ZOOM = 12` floor, so at city-overview zoom every tiny
+  crossing/path stub now paints. ~190 of them in central SF are crossing /
+  traffic-island stubs (one per intersection).
+
+**Decisions**:
+
+1. **Hide crossing/traffic-island stubs from the overlay** (`isOverlayCrossing`
+   in `overpass.ts`): `footway=crossing`, `cycleway=crossing`,
+   `footway=traffic_island`, `highway=crossing`. Display-only; routing keeps
+   them (they connect the network).
+
+2. **Per-mode overlay steepness gate** (`getOverlayMaxGradientPct` in
+   `classify.ts`; `overlayGradientPct` in `elevation.ts`). A shown way whose
+   gross gradient exceeds the mode's threshold is hidden. Thresholds:
+   starting-out 6%, confident 8%, carrying-kid 8%, traffic-savvy 10%,
+   training 15% — monotonic with capability, preserving the kid-skill
+   superset invariant. Fails soft (null gradient → shown) so the overlay is
+   never blocked on elevation tiles.
+
+3. **One source of "uphill": `wayAscentMeters` in `elevation.ts`.** Extracted
+   from `clientRouter`'s inline ascent sum; the router (A* cost) and the
+   overlay (steepness gate) now share it, so display and routing can't drift
+   on what counts as a climb. Refactor is behavior-preserving — full
+   benchmark reproduces PR #192's SF + Berlin numbers exactly.
+
+4. **Did NOT touch `classifyEdge`'s bare-`highway=path` handling.** Bryan's
+   pick was the slope gate, not a classification change. The gate catches the
+   *steep* trails; flat no-bike-tag park paths still show. Changing the
+   classifier affects routing and would need its own benchmark — deferred.
+
+**Performance** (Bryan asked): prefetch ~300 ms one-time (≈ a dozen z=12
+tiles, shared with the router); per-way gradient ~31 ms for 1638 ways.
+
+**Verification**: 320 tests pass (11 new); `bunx tsc --noEmit` clean; build
+succeeds; SF + Berlin benchmark match PR #192 to the digit; overlay renders
+in-browser (Berlin) without regression; SF effect measured at the data layer
+(1638 → 1360 shown, −203 crossings, −75 steep trails).
+
+**Status**: Shipped.
