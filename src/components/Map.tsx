@@ -4,7 +4,7 @@ import { classifyEdge, PATH_LEVEL_LABELS } from '../utils/lts'
 import { colorForLevel } from './SimpleLegend'
 import { useAdminSettings } from '../services/adminSettings'
 import { getCachedTile, latLngToTile, classifyOsmTagsToItem, getVisibleTiles } from '../services/overpass'
-import { getStreetViewUrl } from '../services/streetview'
+import { StreetImagery } from './StreetImagery'
 import { createEngine, resolveEngine, readEnvKeys } from '../services/mapEngine'
 import type { MapEngine, PolylineHandle, MarkerHandle, LatLng as EngineLatLng } from '../services/mapEngine'
 import { MapEngineContext } from '../services/mapEngine/context'
@@ -156,7 +156,6 @@ function SegmentPopupOverlay({
   const segMid: [number, number] = seg.coordinates.length > 0
     ? seg.coordinates[Math.floor(seg.coordinates.length / 2)]
     : latLng
-  const imgUrl = useMemo(() => getStreetViewUrl(segMid[0], segMid[1], { size: '400x240' }), [segMid])
 
   const tagRows = useMemo(() => {
     const rows: string[] = []
@@ -219,9 +218,7 @@ function SegmentPopupOverlay({
               <div className="segment-popup-lts-desc">{levelInfo.description}</div>
             </div>
 
-            {imgUrl && (
-              <img src={imgUrl} alt="Street view" className="segment-popup-img" loading="lazy" />
-            )}
+            <StreetImagery lat={segMid[0]} lng={segMid[1]} />
 
             {tagRows.length > 0 && (
               <div className="segment-popup-tags">

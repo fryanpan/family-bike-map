@@ -277,6 +277,59 @@ const handler = {
       return response
     }
 
+    // ── Google Street View metadata (coverage check) ──────────────────
+    // FREE per Google — metadata requests aren't billed — so we use it to
+    // ask "is there Street View imagery near this point?" before deciding
+    // whether to show Street View or fall back to Mapillary. The Static
+    // image API returns a generic gray "no imagery" tile (HTTP 200) for
+    // uncovered points, so the image itself can't reveal a coverage gap;
+    // only this metadata endpoint can. Edge-cached 30 days like the image
+    // proxy. We re-serialize to just { status } so the key-bearing upstream
+    // URL never leaks and the payload is minimal.
+    if (path === '/api/streetview/metadata') {
+      if (!env.GOOGLE_MAPS_API_KEY) {
+        return new Response(JSON.stringify({ status: 'UNCONFIGURED' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      const lat = url.searchParams.get('lat')
+      const lng = url.searchParams.get('lng')
+      if (!lat || !lng) {
+        return new Response(JSON.stringify({ error: 'lat and lng required' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      const cacheKey = new Request(`${url.origin}${path}?lat=${lat}&lng=${lng}`, { method: 'GET' })
+      const edgeCache = caches.default
+      const cached = await edgeCache.match(cacheKey)
+      if (cached) {
+        return new Response(cached.body, {
+          status: cached.status,
+          headers: { ...Object.fromEntries(cached.headers), 'X-Cache': 'HIT' },
+        })
+      }
+
+      const mParams = new URLSearchParams({
+        location: `${lat},${lng}`,
+        key: env.GOOGLE_MAPS_API_KEY,
+      })
+      const resp = await fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?${mParams}`)
+      const upstream = (await resp.json().catch(() => ({}))) as { status?: string }
+      const response = new Response(JSON.stringify({ status: upstream.status ?? 'UNKNOWN' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=2592000', // 30 days
+          'X-Cache': 'MISS',
+        },
+      })
+      if (resp.ok) edgeCache.put(cacheKey, response.clone()).catch(() => {})
+      return response
+    }
+
     // ── Nominatim proxy ───────────────────────────────────────────────
     if (path.startsWith('/api/nominatim/')) {
       const upstream = path.replace(/^\/api\/nominatim/, '')

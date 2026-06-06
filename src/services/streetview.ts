@@ -37,3 +37,27 @@ export function getStreetViewUrl(lat: number, lng: number, opts: StreetViewOptio
   if (opts.fov     != null) params.set('fov',     String(opts.fov))
   return `/api/streetview?${params}`
 }
+
+export type StreetViewCoverage = 'ok' | 'none'
+
+/**
+ * Ask Google (via the Worker's metadata proxy) whether Street View imagery
+ * exists near this point. The Static image API returns a generic gray "no
+ * imagery" tile for uncovered points, so coverage can't be inferred from the
+ * image itself — this metadata check is the only reliable signal. Metadata
+ * requests are free, so this adds no billable cost.
+ *
+ * Returns 'none' on any non-OK outcome (unconfigured key → 503, network
+ * error, ZERO_RESULTS) so the caller falls back to Mapillary.
+ */
+export async function getStreetViewCoverage(lat: number, lng: number): Promise<StreetViewCoverage> {
+  try {
+    const params = new URLSearchParams({ lat: lat.toFixed(6), lng: lng.toFixed(6) })
+    const resp = await fetch(`/api/streetview/metadata?${params}`)
+    if (!resp.ok) return 'none'
+    const body = (await resp.json()) as { status?: string }
+    return body.status === 'OK' ? 'ok' : 'none'
+  } catch {
+    return 'none'
+  }
+}
