@@ -394,3 +394,45 @@ in-browser (Berlin) without regression; SF effect measured at the data layer
 (1638 → 1360 shown, −203 crossings, −75 steep trails).
 
 **Status**: Shipped.
+
+## 2026-06-06: Mapillary fallback when Street View has no coverage
+
+**Context**: The segment popup (routing mode) and the browse-overlay way /
+rough-surface popups all showed a single Google Street View static image.
+Where Google has no coverage (alleys, paths, newer developments — common in
+SF), the Static API returns a generic gray "no imagery" tile (HTTP 200), so
+the user just saw a blank. Mapillary infra already existed (`getStreetImage`
++ Worker proxy) but was admin-audit-only.
+
+**Decisions**:
+
+1. **Detect coverage via the Street View *metadata* API**, not the image.
+   The Static image can't reveal a gap (gray tile is HTTP 200). The metadata
+   endpoint returns `{status: "OK" | "ZERO_RESULTS"}` and is **free** (not
+   billed), so the check adds no Google cost. New Worker route
+   `/api/streetview/metadata` mirrors the image proxy (server-side key, 30-day
+   edge cache, re-serialized to just `{status}` so the key-bearing upstream
+   URL never leaks). Same key + same Street View Static API enablement as the
+   existing image proxy — no new API to enable.
+
+2. **Fallback order: Street View → Mapillary → nothing.** Pure resolver
+   `resolveStreetImagery` (`src/services/streetImagery.ts`): coverage OK →
+   Street View; else nearest Mapillary image (already widens 100→250→500 m);
+   else a subtle "No street imagery here" note. Any failure (unconfigured
+   key → 503, network error, ZERO_RESULTS) degrades to the next source.
+
+3. **Two render surfaces, one resolver.** Routing-mode popup uses a React
+   `<StreetImagery>` component; the imperative overlay popups
+   (`BikeMapOverlay`) call the same resolver via a `fillPopupImagery` helper
+   that re-checks the popup is still active before updating (async coverage
+   check; user may have clicked away). Mapillary images get a "via Mapillary"
+   attribution caption; Street View carries Google's own baked-in watermark
+   so no caption there.
+
+**Cost / latency**: covered points now cost one extra metadata round-trip
+(free, edge-cached per location) before the image; popup shows immediately
+with a "Loading street view…" placeholder. Not a routing change — no
+`clientRouter`/`modes`/`lts`/`classify`/`overpass`-query edits, so no
+benchmark gate.
+
+**Status**: Shipped.

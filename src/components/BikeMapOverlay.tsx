@@ -9,7 +9,7 @@ import { classifyEdge, PATH_LEVEL_LABELS } from '../utils/lts'
 import type { PathLevel } from '../utils/lts'
 import { colorForLevel, weightMultiplierForLevel } from './SimpleLegend'
 import { useAdminSettings } from '../services/adminSettings'
-import { getStreetViewUrl } from '../services/streetview'
+import { resolveStreetImagery } from '../services/streetImagery'
 import { useMapEngine } from '../services/mapEngine/context'
 import type { MapEngine, PolylineHandle, PopupHandle, PathLayerHandle, PathLayerFeature } from '../services/mapEngine'
 import type { ClassificationRule } from '../services/rules'
@@ -58,6 +58,7 @@ function buildTooltipHtml(
   tags: Record<string, string>,
   isPreferred: boolean,
   imageUrl?: string | null,
+  imageCredit?: string | null,
 ): string {
   const debugTags = getDebugTags(tags)
   const name = tags.name ? ` — ${escapeHtml(tags.name)}` : ''
@@ -65,8 +66,13 @@ function buildTooltipHtml(
     ? `<span style="color:#10b981;font-weight:600">Preferred</span>`
     : `<span style="color:#f97316;font-weight:600">Not preferred</span>`
   const tagsHtml = debugTags.map((t) => `<div>${escapeHtml(t)}</div>`).join('')
+  // Mapillary images need an attribution caption; Street View carries its
+  // own baked-in watermark, so a credit is passed only for the fallback.
+  const creditHtml = imageUrl && imageCredit
+    ? `<div style="font-size:10px;color:#6b7280;text-align:right;margin-top:2px">via ${escapeHtml(imageCredit)}</div>`
+    : ''
   const imageHtml = imageUrl
-    ? `<img src="${escapeHtml(imageUrl)}" alt="Street view" style="width:100%;border-radius:4px;margin-top:6px;display:block" loading="lazy" />`
+    ? `<img src="${escapeHtml(imageUrl)}" alt="Street-level view" style="width:100%;border-radius:4px;margin-top:6px;display:block" loading="lazy" />${creditHtml}`
     : ''
   const { pathLevel } = classifyEdge(tags)
   const info = PATH_LEVEL_LABELS[pathLevel]
@@ -232,6 +238,22 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
     const wayIndex = new Map<string | number, RenderedWay>()
     for (const r of toRender) wayIndex.set(r.way.osmId, r)
 
+    // Resolve street-level imagery for an already-open popup and fill it in.
+    // Street View where Google has coverage, else Mapillary, else nothing —
+    // so coverage gaps don't show a gray "no imagery" tile. Async (a free
+    // metadata coverage check runs first), so we re-check the popup is still
+    // the active one before updating: the user may have clicked away.
+    const fillPopupImagery = (
+      handle: PopupHandle,
+      mid: [number, number],
+      render: (imgUrl: string | null, credit: string | null) => string,
+    ) => {
+      void resolveStreetImagery(mid[0], mid[1]).then((r) => {
+        if (openPopup !== handle) return
+        engine.updatePopup(handle, render(r.url ?? null, r.credit ?? null))
+      })
+    }
+
     const openSegmentPopup = (r: RenderedWay) => {
       if (openPopup) engine.closePopup(openPopup)
       const mid = r.way.coordinates[Math.floor(r.way.coordinates.length / 2)]
@@ -245,8 +267,8 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
         },
       )
       openPopup = handle
-      const imgUrl = getStreetViewUrl(mid[0], mid[1], { size: '400x240' })
-      engine.updatePopup(handle, buildTooltipHtml(r.itemName, r.way.tags, r.isPreferred, imgUrl))
+      fillPopupImagery(handle, mid, (imgUrl, credit) =>
+        buildTooltipHtml(r.itemName, r.way.tags, r.isPreferred, imgUrl, credit))
     }
 
     // Pass 1 — halos. Done first (lowest z-order) so a later coloured
@@ -325,8 +347,8 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
             },
           )
           openPopup = popupHandle
-          const imgUrl = getStreetViewUrl(mid[0], mid[1], { size: '400x240' })
-          engine.updatePopup(popupHandle, buildTooltipHtml('Rough surface', way.tags, false, imgUrl))
+          fillPopupImagery(popupHandle, mid, (imgUrl, credit) =>
+            buildTooltipHtml('Rough surface', way.tags, false, imgUrl, credit))
         }
         polylineHandles.push(engine.addPolyline(
           way.coordinates,

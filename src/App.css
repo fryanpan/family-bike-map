@@ -2308,8 +2308,12 @@ body.mobile-preview-label {
   flex: 0 0 100%;
   font-size: 11px; color: #4b5563; line-height: 1.35;
 }
+.segment-popup-img-figure { margin: 0; }
 .segment-popup-img {
   width: 100%; border-radius: 6px; display: block;
+}
+.segment-popup-img-credit {
+  font-size: 10px; color: #6b7280; text-align: right; margin-top: 2px;
 }
 .segment-popup-img-loading,
 .segment-popup-img-missing {
