@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { getStreetViewCoverage } from '../src/services/streetview'
+import { getStreetViewCoverage, __resetCoverageCacheForTests } from '../src/services/streetview'
 
 describe('getStreetViewCoverage', () => {
   let originalFetch: typeof fetch
 
-  beforeEach(() => { originalFetch = globalThis.fetch })
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    __resetCoverageCacheForTests()
+  })
   afterEach(() => { globalThis.fetch = originalFetch })
 
   it('hits the Worker metadata proxy with lat/lng and no API key', async () => {
@@ -41,5 +44,32 @@ describe('getStreetViewCoverage', () => {
   it("returns 'none' on a network error", async () => {
     globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
     expect(await getStreetViewCoverage(52.52, 13.405)).toBe('none')
+  })
+
+  it('memoizes a definitive result — second call for the same point does not refetch', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls++
+      return new Response(JSON.stringify({ status: 'OK' }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    expect(await getStreetViewCoverage(37.76, -122.45)).toBe('ok')
+    expect(await getStreetViewCoverage(37.76, -122.45)).toBe('ok')
+    expect(calls).toBe(1)
+  })
+
+  it('does NOT memoize a transient failure — a later call retries', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls++
+      // First call fails transiently (503), second succeeds.
+      return calls === 1
+        ? new Response('{}', { status: 503 })
+        : new Response(JSON.stringify({ status: 'OK' }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    expect(await getStreetViewCoverage(40.0, -74.0)).toBe('none')
+    expect(await getStreetViewCoverage(40.0, -74.0)).toBe('ok')
+    expect(calls).toBe(2)
   })
 })
