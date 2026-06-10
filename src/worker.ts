@@ -81,12 +81,14 @@ const handler = {
       const col = url.searchParams.get('col') ?? ''
 
       // Synthetic GET URL used as Cloudflare cache key (POST responses aren't cacheable).
-      // Cache version (v2) is bumped whenever buildQuery() changes which OSM ways a
+      // Cache version is bumped whenever buildQuery() changes which OSM ways a
       // tile contains — the row/col key is otherwise query-independent, so a query
       // change would keep serving stale tiles for the full 30-day TTL. v2 added the
-      // `highway=pedestrian` (bike-designated) fetch for car-free promenades.
+      // `highway=pedestrian` (bike-designated) fetch for car-free promenades; v3
+      // invalidates a poisoned central-SF tile (a diagnostic request had reused the
+      // real row/col key with a non-tile query, and the response was cached).
       const cacheKey = new Request(
-        `https://overpass-tile-cache.internal/v2/${row}/${col}`,
+        `https://overpass-tile-cache.internal/v3/${row}/${col}`,
       )
 
       const cached = await caches.default.match(cacheKey)
@@ -111,9 +113,24 @@ const handler = {
 
       const respBody = await resp.arrayBuffer()
 
-      // Only cache successful responses. Non-200 (429, 504) should not be cached
-      // so the client can retry against a fresh Overpass response later.
-      if (resp.ok) {
+      // Overpass returns HTTP 200 with a top-level `"remark"` (and PARTIAL data)
+      // when a query times out — the dense central-SF tile fetches in ~19s against
+      // a 25s timeout, so this happens in the wild. Caching a truncated tile would
+      // poison it for the full 30-day TTL (a tile that suddenly shows few/no paths).
+      // Detect the remark (it trails the elements array) and skip caching so the
+      // next request retries for a complete response. Tail-decode only; defaults to
+      // caching if the check throws.
+      let isPartial = false
+      try {
+        const tail = new TextDecoder().decode(
+          new Uint8Array(respBody).subarray(Math.max(0, respBody.byteLength - 8192)),
+        )
+        isPartial = tail.includes('"remark"')
+      } catch { isPartial = false }
+
+      // Only cache successful, complete responses. Non-200 (429, 504) and partial
+      // (remark) responses are not cached so the client can retry for fresh data.
+      if (resp.ok && !isPartial) {
         const toCache = new Response(respBody, {
           headers: {
             'Content-Type': 'application/json',
