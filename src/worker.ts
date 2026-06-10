@@ -81,8 +81,12 @@ const handler = {
       const col = url.searchParams.get('col') ?? ''
 
       // Synthetic GET URL used as Cloudflare cache key (POST responses aren't cacheable).
+      // Cache version (v2) is bumped whenever buildQuery() changes which OSM ways a
+      // tile contains — the row/col key is otherwise query-independent, so a query
+      // change would keep serving stale tiles for the full 30-day TTL. v2 added the
+      // `highway=pedestrian` (bike-designated) fetch for car-free promenades.
       const cacheKey = new Request(
-        `https://overpass-tile-cache.internal/v1/${row}/${col}`,
+        `https://overpass-tile-cache.internal/v2/${row}/${col}`,
       )
 
       const cached = await caches.default.match(cacheKey)

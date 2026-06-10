@@ -31,7 +31,12 @@ import type { OsmWay } from '../utils/types'
 
 const DB_NAME = 'bike-tile-store'
 const STORE_NAME = 'tiles'
-const DB_VERSION = 1
+// Bumped to 2 when buildQuery() started fetching highway=pedestrian
+// (bike-designated) promenades. Tiles persisted under v1 were fetched with
+// the old query and lack those ways, so the v1→v2 upgrade clears the store
+// and lets tiles refetch fresh. It's a cache, not an authoritative source —
+// a one-time refetch is the right trade for not serving 30-day-stale data.
+const DB_VERSION = 2
 
 // 30 days in milliseconds. Matches the Cloudflare edge cache TTL.
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
@@ -119,11 +124,16 @@ function idbAvailable(): boolean {
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         // Use the tile key as the primary key so lookups are O(1).
         db.createObjectStore(STORE_NAME, { keyPath: 'key' })
+      } else if (event.oldVersion < 2) {
+        // v1 → v2: buildQuery() now fetches highway=pedestrian (bike-designated)
+        // promenades. Tiles cached under v1 predate that and lack those ways,
+        // so clear the store and let them refetch fresh on next view.
+        request.transaction!.objectStore(STORE_NAME).clear()
       }
     }
     request.onsuccess = () => resolve(request.result)

@@ -119,11 +119,21 @@ const _fetchSemaphore = new Semaphore(MAX_CONCURRENT_FETCHES)
 export function buildQuery(bbox: { south: number; west: number; north: number; east: number }): string {
   const { south, west, north, east } = bbox
   const b = `${south},${west},${north},${east}`
-  // 6 sub-queries instead of 18 — semantically equivalent but much less load on Overpass:
+  // 7 sub-queries instead of 18 — semantically equivalent but much less load on Overpass:
   //   - Combine residential/path/track (all need bicycle!=no) into one regex highway filter.
   //   - Combine all cycleway/cycleway:right/cycleway:left/cycleway:both value variants into
   //     one regex key+value filter. The key regex ^cycleway(:right|:left|:both)?$ matches
   //     the plain "cycleway" key and all three directional variants.
+  //
+  // `highway=pedestrian` is fetched on the SAME terms as `highway=footway`:
+  // only when cycling is explicitly permitted (bicycle=yes|designated). This
+  // is how car-free shared-use promenades that allow bikes are tagged — e.g.
+  // SF's JFK Promenade (highway=pedestrian + bicycle=designated), the entire
+  // car-free spine through Golden Gate Park. Without this line those ways
+  // never enter the routing graph, so the router can't use them and routes
+  // detour onto non-preferred surface streets. We deliberately do NOT fetch
+  // plain pedestrian zones (shopping streets, plazas) where bikes aren't
+  // designated — those would over-paint as car-free bike infra on the overlay.
   return `
 [out:json][timeout:25];
 (
@@ -132,6 +142,7 @@ export function buildQuery(bbox: { south: number; west: number; north: number; e
   way["highway"="living_street"](${b});
   way["highway"~"^(residential|path|track)$"]["bicycle"!="no"](${b});
   way["highway"="footway"]["bicycle"~"^(yes|designated)$"](${b});
+  way["highway"="pedestrian"]["bicycle"~"^(yes|designated)$"](${b});
   way[~"^cycleway(:right|:left|:both)?$"~"^(track|lane|opposite_track|opposite_lane|share_busway)$"](${b});
 );
 out geom;
@@ -264,7 +275,7 @@ export function classifyOsmTagsToItem(
 
   switch (pathLevel) {
     case '1a':
-      if (highway === 'footway' || (highway === 'path' && (tags.bicycle === 'yes' || tags.bicycle === 'designated'))) return 'Shared use path'
+      if (highway === 'footway' || highway === 'pedestrian' || (highway === 'path' && (tags.bicycle === 'yes' || tags.bicycle === 'designated'))) return 'Shared use path'
       if (isSeparatedTrack || isPhysicallySeparatedLane) {
         // Curb-separated track next to a busy underlying road (Folsom, 17th
         // in SF) is car-free in the LTS sense but the adjacent traffic

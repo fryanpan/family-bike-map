@@ -133,9 +133,15 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
 
   const query = buildQuery(bbox)
 
+  // The Worker edge-caches Overpass tiles by row/col only (query-independent).
+  // When buildQuery() changes which ways a tile contains, set TILE_BUST=<tag>
+  // to prefix the cache key and force the Worker to proxy the fresh query
+  // instead of serving a stale pre-change tile. No effect when unset.
+  const bust = process.env.TILE_BUST ? `${process.env.TILE_BUST}-` : ''
+
   let resp: Response | null = null
   for (let attempt = 0; attempt < 3; attempt++) {
-    resp = await fetch(`${OVERPASS_URL}?row=${row}&col=${col}`, {
+    resp = await fetch(`${OVERPASS_URL}?row=${bust}${row}&col=${col}`, {
       method: 'POST',
       body: `data=${encodeURIComponent(query)}`,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
