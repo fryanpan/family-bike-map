@@ -166,6 +166,12 @@ describe('classifyOsmTagsToItem', () => {
     expect(classifyOsmTagsToItem({ highway: 'footway', bicycle: 'designated' }, 'kid-starting-out')).toBe('Shared use path')
   })
 
+  it('returns Shared use path for bike-designated pedestrian promenade', () => {
+    // SF JFK Promenade: highway=pedestrian + bicycle=designated (+ motor_vehicle=bus).
+    expect(classifyOsmTagsToItem({ highway: 'pedestrian', bicycle: 'designated', motor_vehicle: 'bus' }, 'kid-starting-out')).toBe('Shared use path')
+    expect(classifyOsmTagsToItem({ highway: 'pedestrian', bicycle: 'designated' }, 'kid-confident')).toBe('Shared use path')
+  })
+
   it('returns Bike boulevard for residential with motor_vehicle=destination', () => {
     expect(classifyOsmTagsToItem({ highway: 'residential', motor_vehicle: 'destination' }, 'kid-confident')).toBe('Bike boulevard')
     expect(classifyOsmTagsToItem({ highway: 'residential', motor_vehicle: 'permissive' }, 'kid-confident')).toBe('Bike boulevard')
@@ -227,11 +233,11 @@ describe('buildQuery', () => {
     expect(q).toContain('52.5,13.4,52.6,13.5')
   })
 
-  it('has exactly 6 sub-queries (down from 18)', () => {
+  it('has exactly 7 sub-queries (down from 18)', () => {
     const q = buildQuery(bbox)
     // Each sub-query starts with "way["
     const subQueryCount = (q.match(/^\s*way\[/gm) ?? []).length
-    expect(subQueryCount).toBe(6)
+    expect(subQueryCount).toBe(7)
   })
 
   it('combines cycleway variants with a key regex', () => {
@@ -250,6 +256,17 @@ describe('buildQuery', () => {
     const q = buildQuery(bbox)
     expect(q).toContain('"highway"="footway"')
     expect(q).toContain('"bicycle"~"^(yes|designated)$"')
+  })
+
+  it('fetches highway=pedestrian only with explicit bike access', () => {
+    // Car-free shared-use promenades (SF JFK Promenade) are tagged
+    // highway=pedestrian + bicycle=designated. Without this the entire
+    // promenade is absent from the routing graph. Gated to bike-access
+    // ways (same as footway) so plain pedestrian zones don't over-paint.
+    const q = buildQuery(bbox)
+    expect(q).toContain('"highway"="pedestrian"')
+    const pedLine = q.split('\n').find((l) => l.includes('"highway"="pedestrian"'))
+    expect(pedLine).toContain('"bicycle"~"^(yes|designated)$"')
   })
 })
 

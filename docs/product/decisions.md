@@ -436,3 +436,68 @@ with a "Loading street view…" placeholder. Not a routing change — no
 benchmark gate.
 
 **Status**: Shipped.
+
+## 2026-06-10: Fetch car-free bike-designated pedestrian promenades (JFK Promenade class)
+
+**Context**: A route 118 Hancock St → Hook Fish Co (Outer Sunset) came out
+8.4 km / 70% non-preferred and did **not** use the car-free JFK Promenade
+through Golden Gate Park, even though that is exactly the kind of segment the
+router should prefer. Reported by Bryan.
+
+**Root cause**: The JFK Promenade — the entire car-free spine through Golden
+Gate Park — is tagged `highway=pedestrian` + `bicycle=designated`
+(+ `motor_vehicle=bus|no`). `buildQuery()` in `overpass.ts` fetched cycleway,
+residential/path/track, footway (bike-access), living_street and cycleway-lane
+ways, but **never `highway=pedestrian`**. So the promenade never entered the
+routing graph and the router couldn't use it — it detoured onto non-preferred
+surface streets. Same bug class as the long-standing "streets without bike tags
+aren't in the graph at all" note in `learnings.md`. Everything downstream
+already handled pedestrian ways correctly: `classifyEdge` marks `highway=
+pedestrian` car-free LTS 1, and `isWalkingOnly`/`isBridgeWalkable` in
+`clientRouter` ride bike-designated pedestrian ways rather than walking them.
+
+**Decisions**:
+
+1. **Fetch `highway=pedestrian` only with explicit bike access**
+   (`bicycle=yes|designated`), mirroring the existing `highway=footway` rule.
+   This pulls in shared-use promenades that allow cycling (JFK Promenade) while
+   deliberately NOT admitting plain pedestrian zones (shopping streets, plazas)
+   where bikes aren't designated — those would over-paint as car-free bike infra
+   on the browse overlay. Display: such ways classify as "Shared use path"
+   (added `highway=pedestrian` to that branch in `classifyOsmTagsToItem`).
+   Note: `classifyEdge` treats `highway=pedestrian` as car-free LTS 1
+   regardless of `motor_vehicle=bus`, so a bike-designated transit mall
+   (Market-St-class) classifies as preferred. Intentional — the
+   `bicycle=designated` fetch gate already excludes plain transit malls, and a
+   genuinely bus-heavy corridor is demoted via the per-region overlay
+   (`cityProfiles/overlay.ts`), the same escape hatch used for Oranienstraße.
+   JFK Promenade is `motor_vehicle=bus|no` with negligible bus presence.
+
+2. **Bump tile-cache versions so the fix reaches existing tiles.** All three
+   tile caches (Worker edge cache, client IndexedDB, in-memory) key on row/col
+   only — query-independent — so a `buildQuery` change would otherwise serve
+   30-day-stale tiles. Bumped the Worker cache key `/v1/`→`/v2/` and the client
+   IndexedDB `DB_VERSION` 1→2 (clears the store on upgrade). One-time refetch;
+   it's a cache, not a source.
+
+**Evidence** (`docs/research/2026-06-10-routing-benchmark-results.md`): SF
+benchmark, all 5 modes still 17/17 routes found; avg-preferred up or flat
+(kid-starting-out +8pp, carrying-kid +5pp, kid-traffic-savvy +3pp, others flat).
+The Hancock→Hook Fish corridor now runs ~25% on the JFK Promenade across all
+modes (was 0%); kid-starting-out walking dropped 78%→27%. Purely additive to the
+graph — routes-found cannot decrease.
+
+**Deliberately scoped OUT — Berlin park bare footways**: Bryan also reported
+Treptower Park foot paths "no longer marked bike friendly." Investigation
+(production overlay pipeline over real OSM + Mapbox elevation) showed this is NOT
+the same fix and NOT the elevation/steepness gate (that gate drops only 9 of
+9403 ways region-wide, all genuinely steep or `surface=ground`). Treptower's
+visible path grid is `highway=footway` with **no bicycle tag** (and ~⅓ tagged
+`bicycle=no`, i.e. cycling explicitly forbidden). The bike-access-tagged park
+paths already render green. Admitting bare footways is a genuine cross-city
+policy decision (SF street sidewalks are the same `highway=footway` tag;
+`footway=sidewalk` does not cleanly separate them — SF has 421 standalone
+`footway` ways including pedestrian-only and Lands End hiking segments Bryan
+wants EXCLUDED). Surfaced to the fleet for a scoped follow-up rather than
+greening all footways globally. **Status of this entry: Shipped (JFK pedestrian
+fetch). Treptower footway policy: open follow-up.**
