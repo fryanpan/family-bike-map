@@ -31,12 +31,13 @@ import type { OsmWay } from '../utils/types'
 
 const DB_NAME = 'bike-tile-store'
 const STORE_NAME = 'tiles'
-// Bumped to 2 when buildQuery() started fetching highway=pedestrian
-// (bike-designated) promenades. Tiles persisted under v1 were fetched with
-// the old query and lack those ways, so the v1→v2 upgrade clears the store
-// and lets tiles refetch fresh. It's a cache, not an authoritative source —
-// a one-time refetch is the right trade for not serving 30-day-stale data.
-const DB_VERSION = 2
+// Bumped on tile-content changes so clients drop stale/poisoned tiles and
+// refetch. v2: buildQuery() started fetching highway=pedestrian promenades.
+// v3: clears a poisoned central-SF tile (a diagnostic request had cached a
+// truncated, geometry-less response under the real tile key, so clients that
+// fetched it stored 125 geometry-less ways and rendered no paths). It's a
+// cache, not a source — a one-time refetch beats serving 30-day-stale data.
+const DB_VERSION = 3
 
 // 30 days in milliseconds. Matches the Cloudflare edge cache TTL.
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
@@ -129,10 +130,10 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         // Use the tile key as the primary key so lookups are O(1).
         db.createObjectStore(STORE_NAME, { keyPath: 'key' })
-      } else if (event.oldVersion < 2) {
-        // v1 → v2: buildQuery() now fetches highway=pedestrian (bike-designated)
-        // promenades. Tiles cached under v1 predate that and lack those ways,
-        // so clear the store and let them refetch fresh on next view.
+      } else if (event.oldVersion < 3) {
+        // Upgrade to v3 (covers v1 and v2): clear the store so clients drop
+        // any stale (pre-pedestrian) or poisoned (truncated central-SF) tiles
+        // and refetch fresh from the worker on next view.
         request.transaction!.objectStore(STORE_NAME).clear()
       }
     }
