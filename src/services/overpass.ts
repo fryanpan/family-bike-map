@@ -13,6 +13,7 @@ export interface BoundsLike {
 }
 import * as Sentry from '@sentry/react'
 import { loadTile as loadTileFromIdb, storeTile as storeTileToIdb } from './tileStore'
+import { tileQueued, tileLoading, tileProgress, tileDone, tileError } from './tileLoadStatus'
 
 // Proxy through our own Cloudflare Worker (same-origin request) to avoid:
 //   - Content blockers on iOS that block third-party domains
@@ -364,6 +365,44 @@ function parseOverpassResponse(data: { elements: OverpassElement[] }): OsmWay[] 
 }
 
 /**
+ * Read an OK Overpass response body, streaming it so the tile-load indicator can
+ * show byte progress (SF's central tile is several MB). Reports progress + done
+ * to the tile-load store. Falls back to response.json() when no readable stream
+ * exists (mocked fetch in tests). Decodes the complete buffer once, so a
+ * multi-byte UTF-8 sequence split across chunks is decoded correctly.
+ */
+async function readTileBody(
+  response: Response,
+  row: number,
+  col: number,
+): Promise<{ elements: OverpassElement[]; remark?: string }> {
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const json = (await response.json()) as { elements: OverpassElement[]; remark?: string }
+    tileDone(row, col, 0)
+    return json
+  }
+  const total = Number(response.headers.get('Content-Length')) || null
+  if (total != null) tileLoading(row, col, total)
+  const chunks: Uint8Array[] = []
+  let received = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (value) {
+      chunks.push(value)
+      received += value.length
+      tileProgress(row, col, received)
+    }
+  }
+  const buf = new Uint8Array(received)
+  let offset = 0
+  for (const c of chunks) { buf.set(c, offset); offset += c.length }
+  tileDone(row, col, received)
+  return JSON.parse(new TextDecoder().decode(buf)) as { elements: OverpassElement[]; remark?: string }
+}
+
+/**
  * Fetch bike infrastructure for a single tile, returning cached data immediately
  * if available. Retries up to 2 times on transient network/API errors.
  *
@@ -400,7 +439,11 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
   const fetchUrl = `${OVERPASS_URL}?row=${row}&col=${col}`
 
   let response: Response
+  // Report status so the browse map can show a live loading indicator. Only
+  // network fetches register — the cache hits above returned already.
+  tileQueued(row, col)
   await _fetchSemaphore.acquire()
+  tileLoading(row, col, null)
   try {
     response = await fetchWithRetry(fetchUrl, {
       method: 'POST',
@@ -415,6 +458,7 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
     // they drown out signal. The console.warn from fetchWithRetry still
     // surfaces them in browser dev tools when debugging.
     console.error(`[Overpass] Tile ${row}:${col} failed after all retries:`, err)
+    tileError(row, col)
     throw err
   } finally {
     _fetchSemaphore.release()
@@ -432,10 +476,15 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
     if (!isTransient) {
       Sentry.captureException(err, { extra: { ...tileCtx, status: response.status, body: body.slice(0, 500) } })
     }
+    tileError(row, col)
     throw err
   }
 
-  const data = await response.json() as { elements: OverpassElement[]; remark?: string }
+  // Stream the body so the indicator can show download progress (the central-SF
+  // tile is multi-MB). Falls back to response.json() where the body stream isn't
+  // available (e.g. mocked fetch in tests). Bytes are decoded once, after the
+  // full buffer arrives, so multi-byte UTF-8 split across chunks is safe.
+  const data = await readTileBody(response, row, col)
   if (data.remark) {
     // Overpass sometimes returns 200 with partial results and a remark (e.g. query timeout)
     console.warn(`[Overpass] Tile ${row}:${col} remark:`, data.remark)
