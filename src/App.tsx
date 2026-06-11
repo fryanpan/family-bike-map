@@ -3,6 +3,7 @@ import { useGeolocation } from './hooks/useGeolocation'
 const Map = lazy(() => import('./components/Map'))
 const AdminPanel = lazy(() => import('./components/AdminPanel'))
 import SimpleLegend from './components/SimpleLegend'
+import { TileLoadIndicator } from './components/TileLoadIndicator'
 import SearchBar from './components/SearchBar'
 import type { QuickOption } from './components/SearchBar'
 import PlaceCard from './components/PlaceCard'
@@ -602,7 +603,8 @@ export default function App() {
 
 
   const overlayStatusMsg =
-    overlayStatus === 'loading' ? '⏳ Loading bike map…' :
+    // 'loading' is handled by the richer <TileLoadIndicator> (per-tile progress);
+    // keep this line for the zoom + error states only.
     overlayStatus === 'zoom'    ? '🔍 Zoom in to see bike infrastructure' :
     overlayStatus === 'error'   ? '⚠️ Could not load bike map — pan or zoom to retry' :
     null
@@ -732,6 +734,9 @@ export default function App() {
           </div>
           {overlayStatusMsg && <p className="bike-layer-status">{overlayStatusMsg}</p>}
         </div>
+
+        {/* Live tile-load progress indicator (queued / loading / bytes). */}
+        <TileLoadIndicator />
 
         {/* --- Floating UI card (changes per uiState) --- */}
 
