@@ -1,7 +1,6 @@
 # Launch Strategy — validate usefulness, then grow one city at a time
 
-**Status:** Draft for Bryan's review
-**Scope:** Go-to-market, not engineering (engineering readiness items are called out as gates where they block a phase).
+**Status:** Draft for Bryan's review **Scope:** Go-to-market, not engineering (engineering readiness items are called out as gates where they block a phase).
 
 ## The question this plan answers
 
@@ -10,7 +9,7 @@ Is family-bike-map useful to anyone beyond our own family — and if yes, what's
 ## What we know going in
 
 - **Product state:** Live at bike-map.fryanpan.com since 2026-04-28 (blog-post launch). 5 ride modes, mobile-first PWA, no accounts. Berlin + SF have calibrated profiles and benchmark coverage (22/22 and 17/17 routes). 14 city research profiles exist beyond that.
-- **Instruments that already exist:** every computed route logs to D1 (`/api/route-log`); Userback widget for in-app feedback; Sentry. No general web analytics yet — we can't currently answer "how many distinct people used this last week?"
+- **Instruments that already exist:** every computed route logs to D1 (`/api/route-log`); Userback widget for in-app feedback; Sentry; Plausible web analytics (cookieless, production-only) for visits and pageviews. The gap: route logs and Plausible aren't linkable, so "distinct riders who computed a route this week" and week-over-week return aren't queryable yet.
 - **The one piece of real user feedback we have** (Joanna, 2026-04-20): the route quality was good but **turn density made routes hard to follow** without voice nav. She abandoned the suggested route for her own. This is the single biggest threat to word-of-mouth: in tight parent communities, one "I tried it, the route was unfollowable" kills ten referrals.
 - **Infrastructure constraint:** Overpass public API rate-limits hard (we hit it repeatedly this week). An uncached city under sudden load = timeouts and blank maps. Any city we promote must be tile-pre-warmed first.
 
@@ -48,9 +47,9 @@ flowchart LR
 
 ### Phase 0 — Make the experiment measurable and the product referable (gate for everything else)
 
-1. **Add privacy-friendly analytics.** Cloudflare Web Analytics (free, already on CF, no cookie banner) for visitors/activation; add an anonymous session ID to route-log rows so "distinct riders/week" and "return rate" become queryable. Without this, every later phase is flying blind.
-2. **Fix turn density.** Add the turn penalty to the A* cost (already specced in `user-feedback.md`) and surface turn count on the route card. This is the known #1 quality complaint from real use; shipping community invites before fixing it burns first impressions we can't get back.
-3. **Pre-warm SF tiles + verify on 3 phones.** We know cold tiles time out. The new tile-load indicator helps perceived performance, but launch-city tiles should simply be hot.
+1. Wire the funnel into Plausible (already live). Add custom events/goals — route_computed, route_shared, second_visit — and an anonymous session ID on route-log rows so "distinct riders/week," activation %, and return rate become queryable. Without this, every later phase is flying blind.
+2. Fix turn density + ETA realism. Implement the turn/intersection cost model (criteria in docs/product/plans/2026-06-11-turn-cost-design.md): angle-based turn costs at junctions, expected signal-wait times so ETAs are roughly right on average, and turn count on the route card. This is the known #1 quality complaint from real use; shipping community invites before fixing it burns first impressions we can't get back.
+3. Launch-city load time: under 2 seconds to interactive map with route layer. Pre-warm SF tiles (we know cold tiles time out), and treat 2 s as the budget for the whole first paint: app shell (SW-cached), basemap, and hot overlay tiles. Verify on 3 real phones on cellular. The tile-load indicator covers the degraded case; the launch city shouldn't need it.
 4. **A "how did you find this?" + "could we follow up?" prompt** after the 2nd computed route (one tap + optional email). This is the attribution + interview pipeline for outcomes 3–4.
 
 ### Phase 1 — Founder-led validation: 10–20 SF families (2–4 weeks of calendar time)
@@ -67,17 +66,17 @@ Recruit personally, one at a time, from: Bea's school parent network, bike-bus p
 
 Ordered by expected trust-per-impression, highest first:
 
-| Channel | Why / fit | How | Risk |
-|---|---|---|---|
-| **Bike buses** | The perfect user: organized parents riding kid-safe routes weekly, hungry for route tools | Offer to map their existing routes in the app + plan new ones; ride along once | Low. Worst case: polite no |
-| **SF Bicycle Coalition / Kid Safe SF** | Advocacy orgs amplify tools that advance their mission; family-biking programs have newsletters | Email intro + 15-min demo; offer the map for their family-ride event planning | Low; may be slow to respond |
-| **Kidical Mass SF / family group rides** | Riders self-select for exactly our use case | Show up, ride, share the link when people ask about routes (they will) | Low |
-| **Nextdoor + neighborhood parent Facebook groups** | Where SF parents actually ask "safe way to bike to X with kids?" | Answer real route questions with a route link, not an ad. Post genuinely as a parent who built a thing | Medium: self-promo norms — lead with usefulness, disclose you built it |
-| **Reddit (r/sanfrancisco, r/bayarea, r/bikecommuting)** | Reach, and bike threads recur weekly | Same rule: answer real questions; one "I built this" show-and-tell post max | Medium: downvote-sensitive; do it once, well |
-| **Streetsblog SF / local urbanism blogs** | One good post = durable referral stream | Pitch after Phase-1 proof so the story is "SF families are using this," not "I made this" | Low, but save it until there's a story |
-| **Facebook/Instagram ads, geo-targeted SF parents** | Tests *messaging* cheaply, not a growth engine yet | $100–300, 2–3 ad variants ("Google Maps doesn't know which streets are safe for kids"), landing on the map centered on a Slow Street | Wasted spend if retention isn't proven — run only after the gate, to learn which words convert |
+| Channel                                                 | Why / fit                                                    | How                                                          | Risk                                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **Bike buses**                                          | The perfect user: organized parents riding kid-safe routes weekly, hungry for route tools | Offer to map their existing routes in the app + plan new ones; ride along once | Low. Worst case: polite no                                   |
+| **SF Bicycle Coalition / Kid Safe SF**                  | Advocacy orgs amplify tools that advance their mission; family-biking programs have newsletters | Email intro + 15-min demo; offer the map for their family-ride event planning | Low; may be slow to respond                                  |
+| **Kidical Mass SF / family group rides**                | Riders self-select for exactly our use case                  | Show up, ride, share the link when people ask about routes (they will) | Low                                                          |
+| **Nextdoor + neighborhood parent Facebook groups**      | Where SF parents actually ask "safe way to bike to X with kids?" | Answer real route questions with a route link, not an ad. Post genuinely as a parent who built a thing | Medium: self-promo norms — lead with usefulness, disclose you built it |
+| **Reddit (r/sanfrancisco, r/bayarea, r/bikecommuting)** | Reach, and bike threads recur weekly                         | Same rule: answer real questions; one "I built this" show-and-tell post max | Medium: downvote-sensitive; do it once, well                 |
+| **Streetsblog SF / local urbanism blogs**               | One good post = durable referral stream                      | Pitch after Phase-1 proof so the story is "SF families are using this," not "I made this" | Low, but save it until there's a story                       |
+| **Facebook/Instagram ads, geo-targeted SF parents**     | Tests *messaging* cheaply, not a growth engine yet           | $100–300, 2–3 ad variants ("Google Maps doesn't know which streets are safe for kids"), landing on the map centered on a Slow Street | Wasted spend if retention isn't proven — run only after the gate, to learn which words convert |
 
-The share mechanic to build into all of this: **route links**. A parent sharing "here's our route to the library" with another parent is the atomic unit of growth. The URL already encodes mode + location; make sure a computed route is one tap to share and renders a nice preview card (OG image) when pasted into WhatsApp/FB/iMessage. That's cheap engineering with outsized channel leverage.
+The share mechanic to build into all of this: shareable links, two kinds. (a) Map links — "look at this map of kid-safe streets in our neighborhood" (mode + viewport, already URL-encoded today); (b) Route links — "here's our route to the library" (start/end/waypoints + mode, one tap to share from the route card). Both should render a nice preview card (OG image) when pasted into WhatsApp/FB/iMessage. A parent forwarding a route to another parent is the atomic unit of growth; cheap engineering with outsized channel leverage.
 
 **Gate:** outcome 4 (unprompted spread) plus stable/retained usage from channel cohorts.
 
