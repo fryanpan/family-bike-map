@@ -173,6 +173,9 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
     const toRender: RenderedWay[] = []
     const roughWays: OsmWay[] = []
     for (const way of ways) {
+      // Traffic-control pseudo-ways (single-coordinate signal/stop nodes in
+      // the tile payload — see isControlNode) are router input, not paint.
+      if (way.coordinates.length < 2) continue
       const { pathLevel: routingPathLevel } = classifyEdge(way.tags)
       if (routingPathLevel === '4') continue
       // Crossing / traffic-island stubs are real connectors for routing but

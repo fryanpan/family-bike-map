@@ -157,7 +157,7 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
     return []
   }
 
-  const data = await resp.json() as { elements: Array<{ type: string; id: number; tags?: Record<string, string>; geometry?: Array<{ lat: number; lon: number }> }> }
+  const data = await resp.json() as { elements: Array<{ type: string; id: number; tags?: Record<string, string>; geometry?: Array<{ lat: number; lon: number }>; lat?: number; lon?: number }> }
   const ways: OsmWay[] = data.elements
     .filter((el) => el.type === 'way' && el.geometry != null)
     .map((el) => ({
@@ -166,6 +166,14 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
       tags: el.tags ?? {},
       itemName: null,
     }))
+  // Mirror production parseOverpassResponse: traffic-control nodes ride along
+  // as single-coordinate pseudo-ways so the benchmark exercises signal waits.
+  for (const el of data.elements) {
+    if (el.type !== 'node' || el.lat == null || el.lon == null) continue
+    const hw = el.tags?.highway
+    if (hw !== 'traffic_signals' && hw !== 'stop') continue
+    ways.push({ osmId: el.id, coordinates: [[el.lat, el.lon]], tags: el.tags ?? {}, itemName: null })
+  }
 
   tileCache.set(key, ways)
   return ways
@@ -221,6 +229,7 @@ function scoreRouteCoords(
 
     let nearestWay: OsmWay | null = null, nearestDist = Infinity
     for (const way of allWays) {
+      if (way.coordinates.length < 2) continue // control pseudo-ways (signals)
       for (const [wLat, wLng] of way.coordinates) {
         const wd = Math.abs(coords[i][0] - wLat) + Math.abs(coords[i][1] - wLng)
         if (wd < nearestDist && wd < 0.0005) { nearestDist = wd; nearestWay = way }
@@ -470,6 +479,7 @@ async function main() {
     durationMin: number
     preferredPct: number
     walkingPct: number
+    turnCount: number
     levelPct: LevelBreakdown
   }
   const modeRows: ModeRow[] = []
@@ -533,10 +543,11 @@ async function main() {
           durationMin: result.durationS / 60,
           preferredPct: scored.preferredPct,
           walkingPct: result.walkingPct,
+          turnCount: result.turnCount,
           levelPct: scored.levelPct,
         })
       } else {
-        modeRows.push({ mode, pair: pairLabel, found: false, distanceKm: 0, durationMin: 0, preferredPct: 0, walkingPct: 0, levelPct: emptyBreakdown() })
+        modeRows.push({ mode, pair: pairLabel, found: false, distanceKm: 0, durationMin: 0, preferredPct: 0, walkingPct: 0, turnCount: 0, levelPct: emptyBreakdown() })
       }
     }
     console.log(`  Routes found: ${found}/${pairs.length}`)
@@ -577,15 +588,15 @@ async function main() {
 
   // ── Results ──
   console.log('\n=== PER-MODE SUMMARY ===\n')
-  console.log('| Mode | Found | Avg Distance | Avg Time | Avg Preferred | Avg Walk | Graph Nodes | Graph Edges |')
-  console.log('|------|-------|--------------|----------|---------------|----------|-------------|-------------|')
+  console.log('| Mode | Found | Avg Distance | Avg Time | Avg Preferred | Avg Walk | Avg Turns | Graph Nodes | Graph Edges |')
+  console.log('|------|-------|--------------|----------|---------------|----------|-----------|-------------|-------------|')
   const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0
   for (const mode of MODES) {
     const rows = modeRows.filter((r) => r.mode === mode && r.found)
     const total = modeRows.filter((r) => r.mode === mode).length
     const stats = modeGraphStats[mode]
     console.log(
-      `| ${mode} | ${rows.length}/${total} | ${avg(rows.map((r) => r.distanceKm)).toFixed(1)} km | ${avg(rows.map((r) => r.durationMin)).toFixed(0)} min | ${(avg(rows.map((r) => r.preferredPct)) * 100).toFixed(0)}% | ${(avg(rows.map((r) => r.walkingPct)) * 100).toFixed(0)}% | ${stats.nodes} | ${stats.edges} |`
+      `| ${mode} | ${rows.length}/${total} | ${avg(rows.map((r) => r.distanceKm)).toFixed(1)} km | ${avg(rows.map((r) => r.durationMin)).toFixed(0)} min | ${(avg(rows.map((r) => r.preferredPct)) * 100).toFixed(0)}% | ${(avg(rows.map((r) => r.walkingPct)) * 100).toFixed(0)}% | ${avg(rows.map((r) => r.turnCount)).toFixed(1)} | ${stats.nodes} | ${stats.edges} |`
     )
   }
 

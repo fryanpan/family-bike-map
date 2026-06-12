@@ -501,3 +501,21 @@ policy decision (SF street sidewalks are the same `highway=footway` tag;
 wants EXCLUDED). Surfaced to the fleet for a scoped follow-up rather than
 greening all footways globally. **Status of this entry: Shipped (JFK pedestrian
 fetch). Treptower footway policy: open follow-up.**
+
+## 2026-06-11: Edge-keyed A* with turn & intersection costs
+
+Replaced ngraph.path's node-keyed A* with our own edge-keyed search
+(`edgeAStar.ts`) — search states are directed links, the standard fix (OSRM
+edge-expansion, Valhalla edge labels) for angle-dependent transition costs.
+Decisions: (1) three-component cost per the 2026-06-11 design (maneuver time
+→ ETA+cost; junction turn penalty → cost only; expected signal/stop waits →
+ETA+cost) with constants in ModeRule; (2) signals fetched as nodes in the
+tile query and carried as single-coordinate pseudo-ways so all caches stay
+OsmWay[] (`isControlNode`); cache bumps worker v4 + IDB v4; (3) turn
+*instructions* counted at junctions OR way changes, but the shaping penalty
+only at junctions (a forced corner has no alternative); (4) walking
+transitions skip turn costs but pay signal waits; (5) corridor continuation
+(same named street straight through its own signal) pays half the through
+wait — without it, arterial riding over-paid and SF carrying-kid lost 6pp to
+bridge-walk shortcuts. Evidence: docs/research/2026-06-11-routing-benchmark-
+results.md. **Status: Shipped.**

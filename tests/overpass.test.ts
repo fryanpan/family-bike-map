@@ -271,6 +271,11 @@ describe('buildQuery', () => {
     expect(q).toContain('"bicycle"~"^(yes|designated)$"')
   })
 
+  it('fetches traffic_signals and stop nodes for intersection costs', () => {
+    const q = buildQuery(bbox)
+    expect(q).toContain('node["highway"~"^(traffic_signals|stop)$"]')
+  })
+
   it('fetches highway=pedestrian only with explicit bike access', () => {
     // Car-free shared-use promenades (SF JFK Promenade) are tagged
     // highway=pedestrian + bicycle=designated. Without this the entire

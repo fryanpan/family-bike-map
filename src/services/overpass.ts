@@ -157,6 +157,8 @@ export function buildQuery(bbox: { south: number; west: number; north: number; e
   way[~"^cycleway(:right|:left|:both)?$"~"^(track|lane|opposite_track|opposite_lane|share_busway)$"](${b});
 );
 out geom;
+node["highway"~"^(traffic_signals|stop)$"](${b});
+out;
 `
 }
 
@@ -327,6 +329,22 @@ interface OverpassElement {
   id: number
   tags?: Record<string, string>
   geometry?: Array<{ lat: number; lon: number }>
+  // Present on node elements (traffic_signals / stop output).
+  lat?: number
+  lon?: number
+}
+
+/**
+ * Traffic-control pseudo-way: a single-coordinate OsmWay carrying a
+ * `highway=traffic_signals` or `highway=stop` node. Stored in the same tile
+ * payload as real ways so every cache layer (memory / IDB / edge) stays a
+ * plain OsmWay[] — the router indexes them into per-node control flags
+ * (intersection wait costs) and every renderer/scorer skips them via this
+ * predicate (a 1-point way paints nothing meaningful anyway).
+ */
+export function isControlNode(way: { coordinates: Array<[number, number]>; tags: Record<string, string> }): boolean {
+  return way.coordinates.length === 1 &&
+    (way.tags.highway === 'traffic_signals' || way.tags.highway === 'stop')
 }
 
 const MAX_RETRIES = 2
@@ -362,7 +380,7 @@ async function fetchWithRetry(url: string, init: RequestInit, retries = MAX_RETR
 // Stored OsmWay objects have itemName: null — classification is deferred to render
 // time via classifyOsmTagsToItem() so the cache is profile-independent.
 function parseOverpassResponse(data: { elements: OverpassElement[] }): OsmWay[] {
-  return data.elements
+  const ways: OsmWay[] = data.elements
     .filter((el): el is OverpassElement & { geometry: NonNullable<OverpassElement['geometry']> } =>
       el.type === 'way' && el.geometry != null,
     )
@@ -372,6 +390,15 @@ function parseOverpassResponse(data: { elements: OverpassElement[] }): OsmWay[] 
       osmId: el.id,
       tags: el.tags ?? {},
     }))
+  // Traffic-control nodes ride along as single-coordinate pseudo-ways (see
+  // isControlNode). The router turns them into intersection wait costs.
+  for (const el of data.elements) {
+    if (el.type !== 'node' || el.lat == null || el.lon == null) continue
+    const hw = el.tags?.highway
+    if (hw !== 'traffic_signals' && hw !== 'stop') continue
+    ways.push({ itemName: null, coordinates: [[el.lat, el.lon]], osmId: el.id, tags: el.tags ?? {} })
+  }
+  return ways
 }
 
 /**
