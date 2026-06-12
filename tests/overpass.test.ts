@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, getVisibleTiles, isTileCached, getCachedTile, Semaphore, buildQuery, classifyOsmTagsToItem } from '../src/services/overpass'
+import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, Semaphore, buildQuery, classifyOsmTagsToItem } from '../src/services/overpass'
 
 // Minimal LatLngBounds stub
 function makeBounds(south: number, west: number, north: number, east: number) {
@@ -39,6 +39,19 @@ describe('latLngToTile', () => {
   it('handles negative longitude', () => {
     const { col } = latLngToTile(37.77, -122.42)
     expect(col).toBe(-1225)
+  })
+})
+
+describe('tileBounds', () => {
+  it('is the inverse of latLngToTile (round-trips a coordinate into its tile)', () => {
+    const { row, col } = latLngToTile(37.77, -122.42)
+    const b = tileBounds(row, col)
+    expect(b.south).toBeCloseTo(37.7, 6)
+    expect(b.north).toBeCloseTo(37.8, 6)
+    expect(b.west).toBeCloseTo(-122.5, 6)
+    expect(b.east).toBeCloseTo(-122.4, 6)
+    expect(37.77).toBeGreaterThanOrEqual(b.south)
+    expect(37.77).toBeLessThan(b.north)
   })
 })
 

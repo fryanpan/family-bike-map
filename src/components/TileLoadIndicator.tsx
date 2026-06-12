@@ -36,31 +36,10 @@ export function TileLoadIndicator() {
       </div>
       <div className="tile-load-bytes">
         {fmtBytes(s.loadedBytes)} downloaded
+        {s.loading.length > 0 && <span> · {s.loading.length} loading</span>}
+        {s.queued.length > 0 && <span> · {s.queued.length} queued</span>}
         {s.errorCount > 0 && <span className="tile-load-err"> · {s.errorCount} failed</span>}
       </div>
-
-      {s.loading.length > 0 && (
-        <ul className="tile-load-list">
-          {s.loading.map((t) => (
-            <li key={t.key} className="tile-load-row tile-load-row--active">
-              <span className="tile-load-dot tile-load-dot--active" aria-hidden="true" />
-              <span className="tile-load-key">{t.key}</span>
-              <span className="tile-load-prog">
-                {t.totalBytes
-                  ? `${fmtBytes(t.loadedBytes)} / ${fmtBytes(t.totalBytes)}`
-                  : fmtBytes(t.loadedBytes)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {s.queued.length > 0 && (
-        <div className="tile-load-queued">
-          <span className="tile-load-dot tile-load-dot--queued" aria-hidden="true" />
-          Queued: {s.queued.map((t) => t.key).join(', ')}
-        </div>
-      )}
     </div>
   )
 }
