@@ -45,6 +45,16 @@ export function latLngToTile(lat: number, lng: number): { row: number; col: numb
   }
 }
 
+/** Geographic bounds of a tile, from its row/col. */
+export function tileBounds(row: number, col: number): { south: number; north: number; west: number; east: number } {
+  return {
+    south: row * TILE_DEGREES,
+    north: (row + 1) * TILE_DEGREES,
+    west: col * TILE_DEGREES,
+    east: (col + 1) * TILE_DEGREES,
+  }
+}
+
 /** All tile row/col pairs that intersect the given bounds. */
 export function getVisibleTiles(bounds: BoundsLike): Array<{ row: number; col: number }> {
   const minRow = Math.floor(bounds.getSouth() / TILE_DEGREES)

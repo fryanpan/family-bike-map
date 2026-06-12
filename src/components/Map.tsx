@@ -9,6 +9,7 @@ import { createEngine, resolveEngine, readEnvKeys } from '../services/mapEngine'
 import type { MapEngine, PolylineHandle, MarkerHandle, LatLng as EngineLatLng } from '../services/mapEngine'
 import { MapEngineContext } from '../services/mapEngine/context'
 import BikeMapOverlay from './BikeMapOverlay'
+import { TileLoadingBoxes } from './TileLoadingBoxes'
 import type { ClassificationRule } from '../services/rules'
 import type { Place, Route, RouteSegment, OsmWay } from '../utils/types'
 
@@ -799,6 +800,9 @@ export default function Map(props: Props) {
               regionRules={regionRules}
             />
           )}
+
+          {/* Translucent grey boxes over tiles still loading. */}
+          {engine && <TileLoadingBoxes engine={engine} />}
 
           {selectedSegment && engine && (
             <SegmentPopupOverlay
