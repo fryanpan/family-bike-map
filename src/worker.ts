@@ -86,9 +86,10 @@ const handler = {
       // change would keep serving stale tiles for the full 30-day TTL. v2 added the
       // `highway=pedestrian` (bike-designated) fetch for car-free promenades; v3
       // invalidates a poisoned central-SF tile (a diagnostic request had reused the
-      // real row/col key with a non-tile query, and the response was cached).
+      // real row/col key with a non-tile query, and the response was cached); v4
+      // added traffic_signals/stop nodes for intersection wait costs.
       const cacheKey = new Request(
-        `https://overpass-tile-cache.internal/v3/${row}/${col}`,
+        `https://overpass-tile-cache.internal/v4/${row}/${col}`,
       )
 
       const cached = await caches.default.match(cacheKey)

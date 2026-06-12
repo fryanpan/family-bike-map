@@ -100,6 +100,34 @@ export interface ModeRule {
   // heavy) while still accepting the rest of 1a. The values match
   // classifyOsmTagsToItem's output strings.
   rejectPathTypes?: Set<string>
+
+  // ── Turn & intersection costs ──────────────────────────────────────────
+  // See docs/product/plans/2026-06-11-turn-cost-design.md. Applied by the
+  // edge-keyed A* at junction transitions (nodes with ≥3 unique neighbours).
+  // Three separately-tunable components, following the Valhalla cost-vs-
+  // penalty split that our cost/durationSec fields already encode:
+
+  // Real maneuver time by turn-angle class (slow, shoulder check, re-
+  // accelerate). Added to BOTH routing cost and the reported ETA.
+  //   slight: 30–60°, turn: 60–120°, sharp: >120° (incl. U-turns)
+  turnTimeSec?: { slight: number; turn: number; sharp: number }
+
+  // Path-shaping penalty per junction turn ≥60°. Added to routing cost ONLY
+  // (not ETA) so A* prefers fewer-instruction routes without inflating the
+  // displayed time — the Valhalla maneuver_penalty pattern. At 10 km/h,
+  // 12 s ≈ 33 m of detour the router will trade to drop one instruction.
+  turnPenaltySec?: number
+
+  // Expected wait when passing through a highway=traffic_signals node, by
+  // movement. Averages by design (expected wait at uniform arrival is
+  // red²/(2·cycle); urban cycles run 60–120 s). `left` models the two-stage
+  // pedestrian-style crossing for family modes — cross one leg, wait out
+  // the next phase, cross the other. Added to BOTH cost and ETA: it's
+  // real time, the thing that makes ETAs honest.
+  signalWaitSec?: { through: number; left: number }
+
+  // Expected wait at a highway=stop node, any direction. Cost AND ETA.
+  stopSignWaitSec?: number
 }
 
 // Surfaces universally OK for paved riding across all modes.
@@ -157,6 +185,13 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // BRouter's "60 m route-equivalent per 1 m ascent" intuition at this
     // mode's 1.4 m/s speed.
     uphillCostSecPerMeter: 40,
+    // Turn/intersection costs (2026-06-11 design): kid modes pay the most
+    // per instruction — coordinating a turn with a kid is the hard part —
+    // and signal lefts are two-stage pedestrian-style crossings.
+    turnTimeSec: { slight: 3, turn: 6, sharp: 10 },
+    turnPenaltySec: 12,
+    signalWaitSec: { through: 15, left: 45 },
+    stopSignWaitSec: 5,
   },
 
   'kid-confident': {
@@ -184,6 +219,10 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // 100 m way adds 125 s; flat 200 m at 2.8 m/s = 72 s, so router
     // detours around modest grades.
     uphillCostSecPerMeter: 25,
+    turnTimeSec: { slight: 3, turn: 6, sharp: 10 },
+    turnPenaltySec: 12,
+    signalWaitSec: { through: 15, left: 45 },
+    stopSignWaitSec: 5,
   },
 
   'kid-traffic-savvy': {
@@ -212,6 +251,10 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // = 45 s, so router still detours, just with less hysteresis than
     // the slower kid modes.
     uphillCostSecPerMeter: 15,
+    turnTimeSec: { slight: 2, turn: 4, sharp: 8 },
+    turnPenaltySec: 8,
+    signalWaitSec: { through: 12, left: 30 },
+    stopSignWaitSec: 4,
   },
 
   'carrying-kid': {
@@ -239,6 +282,10 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // a comparable solo-adult mode. E-assist users can override this in
     // Layer 3 once that toggle ships.
     uphillCostSecPerMeter: 20,
+    turnTimeSec: { slight: 2, turn: 4, sharp: 8 },
+    turnPenaltySec: 8,
+    signalWaitSec: { through: 12, left: 30 },
+    stopSignWaitSec: 4,
   },
 
   training: {
@@ -263,6 +310,11 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // costs time but isn't avoided as aggressively as in kid modes.
     // 5 m climb on 100 m way adds 35 s on top of the 12 s ride time.
     uphillCostSecPerMeter: 7,
+    turnTimeSec: { slight: 1, turn: 3, sharp: 5 },
+    turnPenaltySec: 5,
+    // Training does vehicular lefts, not two-stage crossings.
+    signalWaitSec: { through: 10, left: 20 },
+    stopSignWaitSec: 3,
   },
 }
 

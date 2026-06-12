@@ -7,7 +7,6 @@
  */
 
 import createGraph from 'ngraph.graph'
-import { aStar } from 'ngraph.path'
 import type { Graph, Node } from 'ngraph.graph'
 import {
   getCachedTile,
@@ -15,7 +14,9 @@ import {
   latLngToTile,
   tileKey,
   classifyOsmTagsToItem,
+  isControlNode,
 } from './overpass'
+import { edgeAStar } from './edgeAStar'
 import { buildSegments, healSegmentGaps, getLegendItem } from '../utils/classify'
 import { classifyEdge } from '../utils/lts'
 import { MODE_RULES, applyModeRule, getEffectiveModeRule } from '../data/modes'
@@ -53,12 +54,15 @@ export function haversineM(
 
 // ── Graph types ────────────────────────────────────────────────────────────
 
-interface NodeData {
+export interface NodeData {
   lat: number
   lng: number
+  // Traffic control at this node (from highway=traffic_signals / stop nodes
+  // in the tile data). The edge-keyed A* charges expected waits here.
+  control?: 'signal' | 'stop'
 }
 
-interface EdgeData {
+export interface EdgeData {
   distance: number  // metres
   cost: number      // weighted cost for A* (includes synthetic ascent penalty for hill avoidance)
   durationSec: number // real expected travel time (no ascent penalty) — what we show users
@@ -212,6 +216,16 @@ export function buildRoutingGraph(
   const graph = createGraph<NodeData, EdgeData>()
   const rule = resolveRule(profileKey, settings)
 
+  // Pre-pass: collect traffic-control nodes (single-coordinate pseudo-ways,
+  // see isControlNode in overpass.ts). Applied to graph nodes after the way
+  // loop so it doesn't matter which order ways and control nodes arrive in.
+  const controlByCoord = new Map<string, 'signal' | 'stop'>()
+  for (const way of ways) {
+    if (!isControlNode(way)) continue
+    const [lat, lng] = way.coordinates[0]
+    controlByCoord.set(coordId(lat, lng), way.tags.highway === 'stop' ? 'stop' : 'signal')
+  }
+
   for (const way of ways) {
     const coords = way.coordinates
     if (coords.length < 2) continue
@@ -358,6 +372,13 @@ export function buildRoutingGraph(
     }
   }
 
+  // Stamp traffic-control flags onto the graph nodes they landed on. A
+  // control node whose coordinate isn't on any fetched way simply no-ops.
+  for (const [id, control] of controlByCoord) {
+    const node = graph.getNode(id)
+    if (node) node.data.control = control
+  }
+
   return graph
 }
 
@@ -478,6 +499,9 @@ export interface ClientRouteResult {
   walkingDistanceKm: number
   walkingPct: number
   durationS: number
+  /** Junction turns ≥60° along the route — the instruction count a rider
+   *  has to follow. Produced by the edge-keyed A*. */
+  turnCount: number
   graphNodes: number
   graphEdges: number
 }
@@ -507,67 +531,51 @@ export function routeOnGraph(
   const rule = resolveRule(profileKey)
   const maxSpeedMs = rule.ridingSpeedKmh / 3.6  // optimistic lower-bound for A*
 
-  const pathFinder = aStar(graph, {
-    oriented: true,
-    distance(_from: Node<NodeData>, _to: Node<NodeData>, link) {
-      return link.data.cost
-    },
-    heuristic(from: Node<NodeData>, to: Node<NodeData>) {
-      // Heuristic must be in same units as cost (time in seconds).
-      // Use the mode's top riding speed as the optimistic lower bound —
-      // A* correctness requires the heuristic to never overestimate.
-      const dist = haversineM(from.data.lat, from.data.lng, to.data.lat, to.data.lng)
-      return dist / maxSpeedMs
-    },
-  })
+  // Edge-keyed A*: search states are directed links, so transition costs
+  // (turn maneuvers, turn penalties, signal/stop waits) can depend on the
+  // approach direction — impossible in the previous node-keyed ngraph A*.
+  // See src/services/edgeAStar.ts and the 2026-06-11 turn-cost design.
+  const search = edgeAStar(graph, startId, endId, rule, maxSpeedMs)
+  if (!search) return null
 
-  const path = pathFinder.find(startId, endId)
-  if (!path || path.length === 0) return null
+  const startNode = graph.getNode(startId)!
+  const coordinates: [number, number][] = [
+    [startNode.data.lat, startNode.data.lng],
+    ...search.links.map((l) => {
+      const n = graph.getNode(l.toId)!
+      return [n.data.lat, n.data.lng] as [number, number]
+    }),
+  ]
 
-  // ngraph.path returns nodes from END to START — reverse
-  const nodes = [...path].reverse()
-
-  const coordinates: [number, number][] = nodes.map((n) => [n.data.lat, n.data.lng])
-
-  // Build segments by walking the path edges
+  // Build segments by walking the path links directly (the search returns
+  // them in order — no getLink(prev, curr) ambiguity on parallel edges).
   let totalDistance = 0
   let walkingDistance = 0
-  let totalTime = 0
+  // Displayed ETA comes from the search: per-link durationSec plus REAL
+  // transition time (turn maneuvers, expected signal/stop waits). Routing-
+  // only shaping (turn penalty, level bias, ascent penalty) stays out.
+  const totalTime = search.durationSec
   interface ClassifiedPoint {
     itemName: string | null
     coord: [number, number]
     isWalking?: boolean
     wayId?: number  // null on the first point (no inbound edge)
   }
-  const classified: ClassifiedPoint[] = []
+  const classified: ClassifiedPoint[] = [
+    { itemName: null, coord: [startNode.data.lat, startNode.data.lng] },
+  ]
 
-  for (let i = 0; i < nodes.length; i++) {
-    if (i === 0) {
-      classified.push({ itemName: null, coord: [nodes[0].data.lat, nodes[0].data.lng] })
-      continue
-    }
-
-    const prevNode = nodes[i - 1]
-    const currNode = nodes[i]
-    const link = graph.getLink(prevNode.id, currNode.id)
-    if (link) {
-      totalDistance += link.data.distance
-      // cost includes routing-only multipliers (level bias, ascent
-      // penalty). For displayed ETA we sum durationSec — the physical
-      // distance/speed time, no synthetic biases.
-      totalTime += link.data.durationSec
-      if (link.data.isWalking) walkingDistance += link.data.distance
-
-      const itemName = classifyOsmTagsToItem(link.data.wayTags, profileKey, regionRules)
-      classified.push({
-        itemName,
-        coord: [currNode.data.lat, currNode.data.lng],
-        isWalking: link.data.isWalking,
-        wayId: link.data.wayId,
-      })
-    } else {
-      classified.push({ itemName: null, coord: [currNode.data.lat, currNode.data.lng] })
-    }
+  for (const link of search.links) {
+    const currNode = graph.getNode(link.toId)!
+    totalDistance += link.data.distance
+    if (link.data.isWalking) walkingDistance += link.data.distance
+    const itemName = classifyOsmTagsToItem(link.data.wayTags, profileKey, regionRules)
+    classified.push({
+      itemName,
+      coord: [currNode.data.lat, currNode.data.lng],
+      isWalking: link.data.isWalking,
+      wayId: link.data.wayId,
+    })
   }
 
   // Build walking-aware segments: walking edges get a special itemName marker
@@ -623,6 +631,7 @@ export function routeOnGraph(
     walkingDistanceKm: walkingDistance / 1000,
     walkingPct: totalDistance > 0 ? walkingDistance / totalDistance : 0,
     durationS: totalTime,
+    turnCount: search.turnCount,
     graphNodes: graph.getNodeCount(),
     graphEdges: graph.getLinkCount(),
   }
@@ -765,6 +774,7 @@ export async function clientRoute(
     summary: {
       distance: result.distanceKm,
       duration: result.durationS,
+      turns: result.turnCount,
     },
     segments: result.segments,
     engine: 'client',

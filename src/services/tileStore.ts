@@ -37,7 +37,9 @@ const STORE_NAME = 'tiles'
 // truncated, geometry-less response under the real tile key, so clients that
 // fetched it stored 125 geometry-less ways and rendered no paths). It's a
 // cache, not a source — a one-time refetch beats serving 30-day-stale data.
-const DB_VERSION = 3
+// v4: buildQuery() now also fetches traffic_signals/stop nodes (intersection
+// wait costs); pre-v4 tiles lack them.
+const DB_VERSION = 4
 
 // 30 days in milliseconds. Matches the Cloudflare edge cache TTL.
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
@@ -130,10 +132,10 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         // Use the tile key as the primary key so lookups are O(1).
         db.createObjectStore(STORE_NAME, { keyPath: 'key' })
-      } else if (event.oldVersion < 3) {
-        // Upgrade to v3 (covers v1 and v2): clear the store so clients drop
-        // any stale (pre-pedestrian) or poisoned (truncated central-SF) tiles
-        // and refetch fresh from the worker on next view.
+      } else if (event.oldVersion < 4) {
+        // Upgrade to v4 (covers v1–v3): clear the store so clients drop any
+        // tiles fetched with an older buildQuery (no pedestrian ways, no
+        // signal nodes) or poisoned entries, and refetch fresh on next view.
         request.transaction!.objectStore(STORE_NAME).clear()
       }
     }

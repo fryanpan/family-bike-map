@@ -139,6 +139,8 @@ export interface Route {
   summary: {
     distance: number // km
     duration: number // seconds
+    /** Junction turns ≥60° (instruction count). Client router only. */
+    turns?: number
   }
   segments?: RouteSegment[]
   /** Which routing engine produced this route (e.g. 'valhalla', 'brouter'). */

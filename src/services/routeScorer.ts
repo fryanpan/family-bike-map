@@ -52,6 +52,7 @@ export async function scoreRoute(
     let nearest: { way: OsmWay; dist: number } | null = null
 
     for (const way of allWays) {
+      if (way.coordinates.length < 2) continue // control pseudo-ways (signals)
       for (const [wLat, wLng] of way.coordinates) {
         const dLat = Math.abs(lat - wLat)
         const dLng = Math.abs(lng - wLng)

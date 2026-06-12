@@ -173,6 +173,12 @@ export default function DirectionsPanel({ route, onClose, preferredItemNames, cu
             <span className="summary-distance">{formatDistance(summary.distance)}</span>
             <span className="summary-sep">·</span>
             <span className="summary-time">{formatDuration(summary.duration)}</span>
+            {summary.turns != null && (
+              <>
+                <span className="summary-sep">·</span>
+                <span className="summary-turns">{summary.turns} {summary.turns === 1 ? 'turn' : 'turns'}</span>
+              </>
+            )}
           </div>
           <button className="close-btn" onClick={onClose} title="Clear route">✕</button>
         </div>
