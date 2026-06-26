@@ -95,6 +95,18 @@ export interface ModeRule {
   // `surface ∈ ALWAYS_BAD_SURFACES` or smoothness is bad). Default 1.0.
   roughSurfaceMultiplier?: number
 
+  // Cost discount on physically car-free edges (classifyEdge `carFree`:
+  // cycleways, park paths, pedestrian promenades, curb-separated tracks).
+  // Multiplies the edge's base routing cost; < 1 makes separated infra
+  // cheaper so the router prefers it over a shorter car-shared route.
+  // Families value car-free separation beyond raw time — this expresses that
+  // preference as a tunable bias rather than a hard rule. Cost-only (the
+  // displayed ETA is unaffected). Default 1.0 (no bonus). Lower for modes
+  // that accept busier streets (carrying-kid, training) — that's where the
+  // pull toward separated routes matters most. See the 2026-06-20 JFK
+  // Promenade fix. Does NOT apply to bridge-walks.
+  carFreeBonus?: number
+
   // Path types this mode refuses outright even if the level is accepted.
   // Used by training to exclude "Elevated sidewalk path" (narrow, pedestrian-
   // heavy) while still accepting the rest of 1a. The values match
@@ -185,6 +197,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // BRouter's "60 m route-equivalent per 1 m ascent" intuition at this
     // mode's 1.4 m/s speed.
     uphillCostSecPerMeter: 40,
+    // Already car-free/bike-priority only (1a); the bonus mainly tips ties
+    // toward a separated cycleway over a Fahrradstraße. Mild.
+    carFreeBonus: 0.9,
     // Turn/intersection costs (2026-06-11 design): kid modes pay the most
     // per instruction — coordinating a turn with a kid is the hard part —
     // and signal lefts are two-stage pedestrian-style crossings.
@@ -219,6 +234,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // 100 m way adds 125 s; flat 200 m at 2.8 m/s = 72 s, so router
     // detours around modest grades.
     uphillCostSecPerMeter: 25,
+    // Accepts quiet residential (1b) too; bonus prefers a separated cycleway
+    // over riding a car-shared street when one parallels the route.
+    carFreeBonus: 0.85,
     turnTimeSec: { slight: 3, turn: 6, sharp: 10 },
     turnPenaltySec: 12,
     signalWaitSec: { through: 15, left: 45 },
@@ -251,6 +269,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // = 45 s, so router still detours, just with less hysteresis than
     // the slower kid modes.
     uphillCostSecPerMeter: 15,
+    // Accepts painted lanes / quiet residential (2a/2b); stronger pull to
+    // separated infra than the slower kid modes since it rides busier streets.
+    carFreeBonus: 0.8,
     turnTimeSec: { slight: 2, turn: 4, sharp: 8 },
     turnPenaltySec: 8,
     signalWaitSec: { through: 12, left: 30 },
@@ -282,6 +303,11 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // a comparable solo-adult mode. E-assist users can override this in
     // Layer 3 once that toggle ships.
     uphillCostSecPerMeter: 20,
+    // Strongest pull: a parent piloting a trailer/cargo bike strongly prefers
+    // the car-free promenade over a shorter, more-direct arterial (the JFK
+    // Promenade case). Accepts up to LTS 2b, so without this the direct LTS-3
+    // street wins on time alone.
+    carFreeBonus: 0.7,
     turnTimeSec: { slight: 2, turn: 4, sharp: 8 },
     turnPenaltySec: 8,
     signalWaitSec: { through: 12, left: 30 },
@@ -310,6 +336,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // costs time but isn't avoided as aggressively as in kid modes.
     // 5 m climb on 100 m way adds 35 s on top of the 12 s ride time.
     uphillCostSecPerMeter: 7,
+    // Fitness rider still prefers a separated greenway when it doesn't cost
+    // much extra time, but won't detour far off a fast corridor for it.
+    carFreeBonus: 0.8,
     turnTimeSec: { slight: 1, turn: 3, sharp: 5 },
     turnPenaltySec: 5,
     // Training does vehicular lefts, not two-stage crossings.

@@ -244,6 +244,12 @@ export function buildRoutingGraph(
     let speedKmh: number
     let isWalking: boolean
     let costMultiplier = 1.0
+    // Whether the ridden edge is physically car-free (cycleway, path,
+    // pedestrian zone, curb-separated track). Drives the car-free cost bonus
+    // below — family modes prefer separated routes even when a bit longer.
+    // False for walking-only ways and bridge-walks (the bonus rewards riding
+    // separated infra, not cheapening a dismount).
+    let carFree = false
     if (walkingOnly) {
       speedKmh = rule.walkingSpeedKmh
       isWalking = true
@@ -274,6 +280,7 @@ export function buildRoutingGraph(
         speedKmh = decision.speedKmh
         isWalking = decision.isWalking
         costMultiplier = decision.costMultiplier
+        carFree = classification.carFree
       } else if (isBridgeWalkable(tags)) {
         // Mode rule rejected this edge (too stressful, bad surface, …)
         // but it's still walkable on the sidewalk. Add as a bridge-walk
@@ -310,8 +317,14 @@ export function buildRoutingGraph(
     // climb as a single 10 m segment would add 8 m of penalty). The
     // effective per-segment cost is then the raw segment ascent scaled
     // by `effective_total / raw_total`.
+    // Ascent cost applies to WALKING edges too, not just ridden ones. A
+    // dismounted rider pushing a bike up a 25% footway is slow and miserable
+    // — exempting walking let A* take the steepest, shortest bridge-walk
+    // straight up a hill (kid-confident walked up Buena Vista Park rather
+    // than ride the flat-but-longer Wiggle, 2026-06-20). Charging walking
+    // ascent the same per-metre rate makes the router prefer the flatter
+    // connection. Cost-only (not duration), same as ridden ascent.
     const useAscentCost =
-      !isWalking &&
       rule.uphillCostSecPerMeter != null &&
       rule.uphillCostSecPerMeter > 0 &&
       elevationFn != null
@@ -346,7 +359,14 @@ export function buildRoutingGraph(
       // UI's reported ETA reflects physical ride time, not router
       // preferences. (Reviewer caught the duration-inflation bug.)
       const durationSec = dist / speed
-      const baseCost = durationSec * costMultiplier
+      // Car-free preference bonus: physically separated infra (cycleway, park
+      // path, pedestrian promenade) is discounted for family modes so the
+      // router prefers it over a shorter car-shared arterial. Restores the
+      // JFK Promenade for carrying-kid/training, which otherwise took the
+      // flatter, more-direct LTS-2/3 streets (2026-06-20). Cost-only, so the
+      // displayed ETA stays honest. Bridge-walks never get it (carFree=false).
+      const carFreeMul = !isWalking && carFree && rule.carFreeBonus != null ? rule.carFreeBonus : 1.0
+      const baseCost = durationSec * costMultiplier * carFreeMul
 
       let forwardSegAscent = 0
       let reverseSegAscent = 0

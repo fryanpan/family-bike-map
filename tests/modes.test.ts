@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { MODE_RULES, applyModeRule } from '../src/data/modes'
+import { MODE_RULES, applyModeRule, getEffectiveModeRule } from '../src/data/modes'
 import { classifyEdge } from '../src/utils/lts'
 
 // Minimal, focused tests for the smoothness-aware rough penalty added
@@ -65,5 +65,25 @@ describe('mode ascent cost', () => {
       const curr = MODE_RULES[kidLadder[i]].uphillCostSecPerMeter!
       expect(curr).toBeLessThanOrEqual(prev)
     }
+  })
+})
+
+describe('getEffectiveModeRule — carFreeBonus survives admin overrides', () => {
+  // carFreeBonus is not in the override allowlist, so it must ride through the
+  // `...base` spread when an unrelated override is active. Regression guard for
+  // the documented "no admin-override wiring yet" follow-up — the field must
+  // not silently drop to undefined when the Routing sliders touch other knobs.
+  it('preserves the default carFreeBonus when a global rough override is set', () => {
+    const eff = getEffectiveModeRule('carrying-kid', { roughSurfaceMultiplierGlobal: 2 })
+    expect(eff.carFreeBonus).toBe(MODE_RULES['carrying-kid'].carFreeBonus)
+    expect(eff.carFreeBonus).toBe(0.7)
+  })
+
+  it('preserves carFreeBonus under a per-mode speed override', () => {
+    const eff = getEffectiveModeRule('kid-confident', {
+      modeRouting: { 'kid-confident': { ridingSpeedKmh: 12 } },
+    })
+    expect(eff.carFreeBonus).toBe(0.85)
+    expect(eff.ridingSpeedKmh).toBe(12)
   })
 })
