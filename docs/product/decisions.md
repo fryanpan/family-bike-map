@@ -519,3 +519,43 @@ transitions skip turn costs but pay signal waits; (5) corridor continuation
 wait — without it, arterial riding over-paid and SF carrying-kid lost 6pp to
 bridge-walk shortcuts. Evidence: docs/research/2026-06-11-routing-benchmark-
 results.md. **Status: Shipped.**
+
+## 2026-06-26: Ascent cost on walking edges + car-free preference bonus
+
+Bryan reported two suboptimal routes on the deployed build: kid-confident
+summited Buena Vista Park (steep), and carrying-kid/training stopped using the
+car-free JFK Promenade. The 2026-06-12 handoff hypothesized turn/stop costs
+from PR #200. **Reproduce-before-fixing disproved that**: a cost-component
+ablation (zero each term, observe the route) showed turn/signal/stop costs move
+neither route — only **ascent cost** does. The turn-cost fix the handoff
+specified was built, didn't help, and was reverted.
+
+Root causes and fixes (both cost-only — displayed ETA unaffected):
+
+1. **Buena Vista** — walking (bridge-walk) edges were exempt from ascent cost
+   (`useAscentCost = !isWalking`). kid-confident (LTS-1-only) has no rideable
+   connection between the Castro/Wiggle network and Golden Gate Park, so it
+   bridge-walks — and with zero ascent penalty it took the *steepest, shortest*
+   walk straight up the park. Fix: charge walking edges the mode's
+   `uphillCostSecPerMeter` like ridden edges. Router now prefers the flatter
+   (longer) Wiggle approach; park entry eliminated, route ascent 116 m → 84 m.
+
+2. **JFK Promenade** — carrying-kid/training accept LTS 2–3, so a shorter,
+   flatter arterial (Lincoln Way) beats the longer, climbier car-free promenade
+   on pure time+ascent. This is partly working-as-intended for time-optimizing
+   modes; Bryan's call (2026-06-20) was to nudge them toward car-free. Fix: new
+   `ModeRule.carFreeBonus` — a <1 cost multiplier on `classifyEdge.carFree`
+   edges (physical separation only; bikePriority-but-shared like Fahrradstraße/
+   living-street does NOT qualify). Per-mode: carrying-kid 0.7, training/
+   traffic-savvy 0.8, kid-confident 0.85, kid-starting-out 0.9 (stronger pull
+   for modes that accept busier streets). Promenade usage: carrying-kid
+   10%→17%, training 0%→16%; kid-confident reference unchanged at 31%.
+
+Why a bonus, not a hard rule: families value car-free separation beyond raw
+time, but it's a preference, not an absolute — expressed as a tunable bias so a
+city showing over-preference can dial it toward 1.0 rather than removing it.
+
+Evidence: `docs/research/2026-06-26-routing-benchmark-results.md`. SF + Berlin,
+all 34 mode×pair routes still found, preferred-% up or flat (only −1pp dips,
+within the ~3pp band). **Status: Shipped.** Follow-up: `carFreeBonus` has no
+admin-override wiring yet (same gap as the turn-cost fields).

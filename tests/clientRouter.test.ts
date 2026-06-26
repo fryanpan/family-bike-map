@@ -532,3 +532,67 @@ describe('routeOnGraph', () => {
     expect(midLat).toBeCloseTo(52.5005, 3)
   })
 })
+
+describe('ascent cost on walking edges (2026-06-20 Buena Vista fix)', () => {
+  // A footway (walking-only) climbing 10 m over ~111 m. The uphill (forward)
+  // edge must now carry ascent cost; the downhill (reverse) edge must not.
+  // Before the fix, walking edges were exempt and the router happily walked
+  // straight up a steep park rather than ride a flatter, longer route.
+  const uphillFootway: OsmWay[] = [{
+    osmId: 1, itemName: null, tags: { highway: 'footway' },
+    coordinates: [[37.7600, -122.4300], [37.7610, -122.4300]],
+  }]
+  // Elevation increases with latitude: south point 0 m, north point 10 m.
+  const elev = (lat: number) => (lat - 37.7600) * 10_000
+
+  test('uphill walking edge costs more than its flat ride time; downhill does not', () => {
+    const graph = buildRoutingGraph(
+      uphillFootway, 'kid-confident', new Set(),
+      undefined, null, null, null, undefined, elev,
+    )
+    const links = [...(graph.getLinks('37.76000,-122.43000') ?? [])]
+    const forward = links.find((l) => l.toId === '37.76100,-122.43000')!   // uphill
+    const reverse = [...(graph.getLinks('37.76100,-122.43000') ?? [])]
+      .find((l) => l.toId === '37.76000,-122.43000')!                      // downhill
+    expect(forward.data.isWalking).toBe(true)
+    // Uphill: cost = durationSec + ascent penalty (>0). Downhill: cost == durationSec.
+    expect(forward.data.cost).toBeGreaterThan(forward.data.durationSec + 100)
+    expect(reverse.data.cost).toBeCloseTo(reverse.data.durationSec, 5)
+    // ETA is unaffected — ascent is path-shaping cost only.
+    expect(forward.data.durationSec).toBeCloseTo(reverse.data.durationSec, 5)
+  })
+})
+
+describe('car-free cost bonus (2026-06-20 JFK Promenade fix)', () => {
+  // Flat elevation isolates the car-free bonus from ascent. A car-free
+  // cycleway edge is discounted by the mode's carFreeBonus; a car-shared
+  // living street (bikePriority but NOT carFree) is not.
+  const flat = () => 100
+  const carFreeWay: OsmWay[] = [{
+    osmId: 1, itemName: null, tags: { highway: 'cycleway' },
+    coordinates: [[37.7600, -122.4300], [37.7610, -122.4300]],
+  }]
+  const carSharedWay: OsmWay[] = [{
+    osmId: 2, itemName: null, tags: { highway: 'living_street' },
+    coordinates: [[37.7600, -122.4300], [37.7610, -122.4300]],
+  }]
+
+  test('car-free cycleway cost is discounted by carFreeBonus (0.85 for kid-confident)', () => {
+    const graph = buildRoutingGraph(
+      carFreeWay, 'kid-confident', new Set(['Bike path']),
+      undefined, null, null, null, undefined, flat,
+    )
+    const link = [...(graph.getLinks('37.76000,-122.43000') ?? [])][0]
+    // cost = durationSec * levelMul(1) * carFreeBonus(0.85)
+    expect(link.data.cost / link.data.durationSec).toBeCloseTo(0.85, 2)
+  })
+
+  test('car-shared living street gets no car-free discount', () => {
+    const graph = buildRoutingGraph(
+      carSharedWay, 'kid-confident', new Set(['Living street']),
+      undefined, null, null, null, undefined, flat,
+    )
+    const link = [...(graph.getLinks('37.76000,-122.43000') ?? [])][0]
+    expect(link.data.cost / link.data.durationSec).toBeCloseTo(1.0, 2)
+  })
+})

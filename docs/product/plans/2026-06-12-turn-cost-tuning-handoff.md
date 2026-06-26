@@ -1,3 +1,11 @@
+> **SUPERSEDED 2026-06-26.** The turn-cost hypothesis below was *disproven* by a
+> cost-component ablation (reproduce-before-fixing): zeroing turn/signal/stop
+> costs moves neither route — only **ascent cost** does. Both regressions were
+> fixed via (1) ascent cost on walking edges and (2) a per-mode `carFreeBonus`,
+> not turn tuning. See `docs/product/decisions.md` (2026-06-26) and
+> `docs/research/2026-06-26-routing-benchmark-results.md`. Kept for the process
+> record. The turn-cost fix this doc specified was built, didn't help, reverted.
+
 # Turn-cost tuning — handoff notes (2026-06-12)
 
 Bryan-approved follow-up to the edge-keyed A* (PR #200, shipped 2026-06-11).
