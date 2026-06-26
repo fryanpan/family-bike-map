@@ -117,3 +117,41 @@ And from prior sessions (BC-242), I had already *celebrated* consolidating 6→4
 - Valhalla and OSM overlay had subtly different classifications for the same path types (e.g., share_busway: Valhalla=good/trailer vs OSM=ok/trailer). These divergences are intentional (routing preference vs display) but should be documented explicitly.
 
 **Action:** When changing path classification rules, update integration test quality thresholds to match the new model. Consider adding a comment explaining why the threshold is set where it is.
+
+---
+
+## 2026-06-26 — Turn-cost tuning → ascent-cost fix (Buena Vista + JFK regressions)
+
+### Time Breakdown
+| Started | Phase | 👤 Hands-On | 🤖 Agent | Problems |
+|---------|-------|------------|----------|----------|
+| Jun 26 11:45 | Reproduce both routes + cost-component ablation (disprove turn-cost hypothesis) | ~12m (reading) | ~14m | |
+| Jun 26 ~12:02 | Escalate broken assumption → user picks fix direction | ~2m (1 decision) | | |
+| Jun 26 ~12:06 | Implement fix (walking-ascent + carFreeBonus), tune, benchmark gate | | ~14m | ⚠ built handoff's turn-cost fix first, reverted |
+| Jun 26 ~12:20 | Ship: tests, review, PRs #203/#204, merge, deploy + autonomous loop | ~2m | ~16m | ⚠ Codex review unusable (exit 137) |
+
+### Metrics
+| Metric | Duration |
+|--------|----------|
+| Total wall-clock | ~3.8 h |
+| Hands-on (corrected) | ~0.25 h (~7%) |
+| Automated agent time | ~0.9 h (~25%) |
+| Idle/away (autonomous loop + waiting) | ~2.6 h (~68%) |
+| Retro analysis time | ~3 min |
+
+### Key Observations
+- The cost-component **ablation** was the highest-value move — it disproved the handoff's turn-cost hypothesis and found the real cause (ascent cost). But it came one step too late: the routes were reproduced (per the rule), then the handoff's prescribed turn-cost fix was *built and reverted* before ablating. Ablate-before-fix would have skipped that cycle.
+- Escalation was well-timed: when data contradicted the handoff, stopped and asked the user for the car-free-vs-arterial direction (one batched AskUserQuestion + recommendation) rather than deciding the product stance solo.
+- Near-fully autonomous otherwise — one user decision across the whole fix→ship→deploy arc. The `routing-changes.md` benchmark gate did its job (caught no regression because there was none).
+- Codex review produced no output (killed, exit 137) twice; the Claude review agent carried the review.
+
+### Feedback
+**What worked:** N/A — user approved the action with "sounds good" but did not elaborate on the feedback questions.
+**What didn't:** N/A — see above.
+
+### Actions Taken
+| Issue | Action Type | Change |
+|-------|-------------|--------|
+| Rule covers post-fix validation but not diagnosing the cause; led to a build/revert cycle | Update rule | Added "Diagnosing a reported regression" section to `.claude/rules/routing-changes.md` — ablate to isolate the cost term before fixing |
+| Reusable lesson (ablation + walking-ascent loophole + carFreeBonus rationale) | Update learnings | Already shipped in PR #204 (`docs/process/learnings.md` "Diagnosing routing regressions") |
+| Codex reviewer non-functional in this env | No action | Environment issue (exit 137 / OOM), not a systemic process gap; Claude review covered it |

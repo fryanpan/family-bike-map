@@ -18,6 +18,22 @@ Any edit that could plausibly change the *set of routes returned*, the
 
 A cosmetic rename or a pure comment edit in these files does not count.
 
+## Diagnosing a reported regression
+
+When a handoff, bug report, or user says "route X got worse," **isolate which
+cost term is responsible before fixing — by ablation, not by trusting the
+report's hypothesis.** Reproducing the route shows the symptom, not the cause.
+
+1. Reproduce the regressed route(s) locally.
+2. Ablate: zero each cost term in turn (turn penalty, signal/stop wait, ascent,
+   distance/speed) and re-route. The term whose removal restores the expected
+   route is the culprit.
+3. Fix the implicated term, then run the benchmark gate below.
+
+A named cause is a lead, not a diagnosis: on 2026-06-12 a handoff blamed turn
+costs for two regressions; that fix was built and reverted — ablation showed
+ascent cost was the real cause (PRs #203/#204).
+
 ## Required workflow
 
 1. **Before merging**, run `bun scripts/benchmark-routing.ts` (add
