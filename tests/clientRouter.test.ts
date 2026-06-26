@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { buildRoutingGraph, routeOnGraph, haversineM } from '../src/services/clientRouter'
+import { MODE_RULES } from '../src/data/modes'
 import type { OsmWay } from '../src/utils/types'
 
 describe('haversineM', () => {
@@ -594,5 +595,24 @@ describe('car-free cost bonus (2026-06-20 JFK Promenade fix)', () => {
     )
     const link = [...(graph.getLinks('37.76000,-122.43000') ?? [])][0]
     expect(link.data.cost / link.data.durationSec).toBeCloseTo(1.0, 2)
+  })
+
+  test('a car-free edge that is WALKED gets no bonus (the !isWalking guard)', () => {
+    // A cobblestone cycleway is car-free, but kid-starting-out dismounts on
+    // cobbles (cobbleHandling: walking_pace → isWalking). The bonus must NOT
+    // apply to a walked edge even though carFree is true — cost should reflect
+    // the rough multiplier (5×) alone, not 5 × 0.9.
+    const cobbleCycleway: OsmWay[] = [{
+      osmId: 3, itemName: null, tags: { highway: 'cycleway', surface: 'cobblestone' },
+      coordinates: [[37.7600, -122.4300], [37.7610, -122.4300]],
+    }]
+    const graph = buildRoutingGraph(
+      cobbleCycleway, 'kid-starting-out', new Set(['Bike path']),
+      undefined, null, null, null, undefined, flat,
+    )
+    const link = [...(graph.getLinks('37.76000,-122.43000') ?? [])][0]
+    expect(link.data.isWalking).toBe(true)
+    const roughMul = MODE_RULES['kid-starting-out'].roughSurfaceMultiplier!
+    expect(link.data.cost / link.data.durationSec).toBeCloseTo(roughMul, 2)
   })
 })
