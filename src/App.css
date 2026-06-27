@@ -283,7 +283,10 @@ button { font-family: inherit; cursor: pointer; }
    the search bar (top-left), travel-mode (top-right) and layer toggle (bottom). */
 .tile-load-indicator {
   position: absolute;
-  top: 64px;
+  /* Bottom-center so it never overlaps the top-right mode selector on narrow
+     screens (both previously sat at top: 64px). env() clears the iOS home
+     indicator. */
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 460;
