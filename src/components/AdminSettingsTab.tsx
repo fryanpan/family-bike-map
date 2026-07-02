@@ -292,22 +292,6 @@ export default function AdminSettingsTab() {
         </label>
       </section>
 
-      {/* ── Overlay filtering ──────────────────────────────────────── */}
-      <section className="admin-section">
-        <h3>Overlay filtering</h3>
-        <label className="admin-num-field">
-          Steep approach push budget (m)
-          <input type="number" min="0" max="200" step="10" className="admin-input"
-            value={settings.steepApproachPushM}
-            onChange={(e) => update('steepApproachPushM', Number(e.target.value))}
-            style={{ width: 80 }} />
-          <span className="admin-hint">
-            0 = strict: hide car-free paths only reachable via a too-steep climb.
-            &gt;0: a steep approach way up to this length counts as walkable (dismount and push).
-          </span>
-        </label>
-      </section>
-
       {/* ── Formatting: per-tier color + weight ────────────────────── */}
       <section className="admin-section">
         <h3>Formatting</h3>

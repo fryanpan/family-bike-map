@@ -40,11 +40,6 @@ export interface AdminSettings {
   overlayOpacityWithRoute: number
   /** Overlay opacity when browsing (no route). */
   overlayOpacityBrowsing: number
-  /** Steep-moat overlay filter: push budget in metres. 0 = strict — hide
-   *  car-free ways only reachable via a too-steep climb. >0: a steep
-   *  approach way up to this length still counts as walkable (dismount
-   *  and push the bike). Consumed by computeMoatIsolation. */
-  steepApproachPushM: number
   /** Route line width (uniform across tiers). */
   routeLineWeight: number
   routeLineWeightSelected: number
@@ -105,7 +100,6 @@ export const DEFAULT_SETTINGS: AdminSettings = {
   overlayHaloExtra: 4,
   overlayOpacityWithRoute: 0.35,
   overlayOpacityBrowsing: 1.0,
-  steepApproachPushM: 0,
   routeLineWeight: 7,
   routeLineWeightSelected: 8,
   routeHaloExtra: 3,
