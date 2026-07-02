@@ -252,3 +252,84 @@ describe('computeMoatIsolation', () => {
     expect(isolated.size).toBe(0)
   })
 })
+
+// ── inheritStubVerdicts ─────────────────────────────────────────────────────
+//
+// Sub-noise-floor stubs (gradient null) inherit the verdict of their graded
+// painted context instead of individually fail-softing to shown — the
+// white-pill-confetti fix from the #208→#209 revert.
+
+import { inheritStubVerdicts, type StubVerdict } from '../src/services/overlayReachability'
+
+function verdicts(byId: Record<number, StubVerdict>): (w: OsmWay) => StubVerdict {
+  return (w) => byId[w.osmId as number] ?? 'unknown'
+}
+
+// Shared geometry: a long way A [52.55,13.45]→[52.551,13.45], a stub S
+// touching A's far end, and a long way B continuing from the stub's far end.
+const LONG_A = way(10, [
+  [52.5500, 13.4500],
+  [52.5510, 13.4500],
+])
+const STUB = way(11, [
+  [52.5510, 13.4500],
+  [52.5512, 13.4500],
+])
+const LONG_B = way(12, [
+  [52.5512, 13.4500],
+  [52.5522, 13.4500],
+])
+// A second stub chained onto the first (shares only the stub's far end).
+const STUB_2 = way(13, [
+  [52.5512, 13.4500],
+  [52.5514, 13.4500],
+])
+
+describe('inheritStubVerdicts', () => {
+  test('stub adjacent only to hidden ways inherits hidden', () => {
+    const hidden = inheritStubVerdicts(
+      [LONG_A, STUB],
+      verdicts({ 10: 'hidden', 11: 'unknown' }),
+    )
+    expect(hidden.has(11)).toBe(true)
+  })
+
+  test('stub touching any shown way stays shown', () => {
+    const hidden = inheritStubVerdicts(
+      [LONG_A, STUB, LONG_B],
+      verdicts({ 10: 'hidden', 11: 'unknown', 12: 'shown' }),
+    )
+    expect(hidden.size).toBe(0)
+  })
+
+  test('standalone stub with no graded adjacency keeps the old fail-soft (shown)', () => {
+    const hidden = inheritStubVerdicts([STUB], verdicts({ 11: 'unknown' }))
+    expect(hidden.size).toBe(0)
+  })
+
+  test('a chain of stubs inherits as a unit', () => {
+    // STUB touches hidden LONG_A; STUB_2 touches only STUB. Both hide.
+    const hidden = inheritStubVerdicts(
+      [LONG_A, STUB, STUB_2],
+      verdicts({ 10: 'hidden', 11: 'unknown', 13: 'unknown' }),
+    )
+    expect(hidden.has(11)).toBe(true)
+    expect(hidden.has(13)).toBe(true)
+  })
+
+  test('a chain rescued by one shown way at either end stays shown as a unit', () => {
+    const hidden = inheritStubVerdicts(
+      [LONG_A, STUB, STUB_2, LONG_B],
+      verdicts({ 10: 'hidden', 11: 'unknown', 13: 'unknown', 12: 'shown' }),
+    )
+    expect(hidden.size).toBe(0)
+  })
+
+  test('graded ways never appear in the result', () => {
+    const hidden = inheritStubVerdicts(
+      [LONG_A, STUB],
+      verdicts({ 10: 'hidden', 11: 'unknown' }),
+    )
+    expect(hidden.has(10)).toBe(false)
+  })
+})

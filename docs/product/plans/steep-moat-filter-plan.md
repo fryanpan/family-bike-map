@@ -157,3 +157,21 @@ Chunks 1–3 run in parallel (disjoint files), then 4, then 5. Risks:
   divergence learning: verify painted DOM, not just data layer).
 - **Deployment:** normal PR → CI → prod. Display-only; no migration, no flag.
   Rollback = revert.
+
+## v2 addendum (2026-07-02, after the #208→#209 revert)
+
+The v1 data layer was correct; three rendering/perf integrations failed on
+prod (see learnings.md "Overlay rendering"). v2 re-lands with:
+
+1. **Engine race fix** — `GoogleMapsEngine.removePathLayer` tombstones ids
+   whose async add hasn't landed, so the pending add is skipped instead of
+   leaking an unremovable deck layer (the double-plotting artifact).
+2. **Stub verdict inheritance** — pass 0 is now gate-verdict (0a) →
+   `inheritStubVerdicts` (0b) → styling (0c). A sub-noise-floor way
+   (gradient null) whose entire graded painted adjacency is hidden inherits
+   'hidden'; touching any shown way, or having no graded context, keeps the
+   old fail-soft (the white-pill-confetti fix).
+3. **Off-hot-path moat computation** — `computeMoatIsolation` moved from a
+   render-blocking useMemo to an idle-scheduled effect (empty set → shown
+   until it lands), and the gradient cache now stores null results keyed by
+   the elevReady generation so unknown ways aren't re-graded on every pass.

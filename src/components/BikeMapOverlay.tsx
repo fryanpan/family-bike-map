@@ -5,7 +5,7 @@ import {
 } from '../services/overpass'
 import { getDisplayPathLevel, getOverlayMaxGradientPct } from '../utils/classify'
 import { prefetchElevation, overlayGradientPct, hasFineElevationAt } from '../services/elevation'
-import { computeMoatIsolation } from '../services/overlayReachability'
+import { computeMoatIsolation, inheritStubVerdicts } from '../services/overlayReachability'
 import { classifyEdge, PATH_LEVEL_LABELS } from '../utils/lts'
 import type { PathLevel } from '../utils/lts'
 import { colorForLevel, weightMultiplierForLevel } from './SimpleLegend'
@@ -129,24 +129,33 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
   // Per-way gross gradient, cached by OSM id. Gradient depends only on
   // geometry + elevation, NOT on mode — so a mode switch or zoom that
   // re-runs the render effect reuses these instead of recomputing ~1600
-  // lookups. Only non-null results are cached: a way computed before its
-  // terrain tile arrived stays uncached and recomputes on the next render
-  // (elevReady) so the gate still fires. A `coarse` entry (z=10 data fed
-  // it) is provisional the same way: once a later prefetch loads the z=12
-  // tile over the way's midpoint, the entry recomputes — otherwise a
-  // coarse over-ceiling reading would keep a way hidden after fine data
-  // that clears it has arrived.
-  const gradientCache = useRef<Map<string | number, { pct: number; coarse: boolean }>>(new Map())
+  // lookups. NULL results are cached too, keyed by the elevReady generation
+  // they were computed under — recomputing every unknown way on every
+  // render was the #208 perf regression (the moat pass grades ALL fetched
+  // ways, ~10× the painted set). A null entry from an older generation
+  // recomputes once when new terrain lands; a `coarse` entry (z=10 data fed
+  // it) recomputes once the z=12 tile over the way's midpoint arrives, so a
+  // provisional over-ceiling reading can't keep a way hidden after fine
+  // data that clears it.
+  const gradientCache = useRef<Map<string | number, { pct: number | null; coarse: boolean; gen: number }>>(new Map())
 
-  // Single gradient accessor shared by the moat memo and pass 0 below, so
+  // Single gradient accessor shared by the moat effect and pass 0 below, so
   // both consumers see identical values and cache-refresh behaviour.
-  const gradientFor = (way: OsmWay): number | null => {
+  const gradientFor = (way: OsmWay, elevGen: number): number | null => {
+    const hit = gradientCache.current.get(way.osmId)
+    if (hit) {
+      if (hit.pct != null && !hit.coarse) return hit.pct
+      if (hit.pct == null && hit.gen === elevGen) return null
+      // Coarse non-null or stale null: recompute only if the situation
+      // could have changed (fine data arrived / new elevation generation).
+      const mid = way.coordinates[Math.floor(way.coordinates.length / 2)]
+      const fineNow = mid != null && hasFineElevationAt(mid[0], mid[1])
+      if (hit.pct != null && hit.coarse && !fineNow) return hit.pct
+    }
     const mid = way.coordinates[Math.floor(way.coordinates.length / 2)]
     const fine = mid != null && hasFineElevationAt(mid[0], mid[1])
-    const hit = gradientCache.current.get(way.osmId)
-    if (hit && (!hit.coarse || !fine)) return hit.pct
     const pct = overlayGradientPct(way.coordinates)
-    if (pct != null) gradientCache.current.set(way.osmId, { pct, coarse: !fine })
+    gradientCache.current.set(way.osmId, { pct, coarse: !fine, gen: elevGen })
     return pct
   }
 
@@ -189,18 +198,40 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
   // access, not pleasantness. Untagged arterials are absent from the
   // Overpass query entirely, so the filter demands positive moat evidence
   // (a bordering too-steep way) before hiding — see the module header.
-  const moatIsolated = useMemo(() => {
-    // elevReady is a re-run trigger, not a data input: when terrain tiles
-    // land, gradients flip null → real and connectivity must recompute.
-    void elevReady
-    return computeMoatIsolation(ways, {
-      maxGradientPct: getOverlayMaxGradientPct(profileKey),
-      pushBudgetM: settings.steepApproachPushM,
-      // Same per-way gradient accessor as pass 0 below — the two
-      // consumers share cache hits and coarse-refresh behaviour.
-      gradientPct: gradientFor,
-      isTileLoaded: (row, col) => loadedTileKeys.has(tileKey(row, col)),
-    })
+  // Computed OFF the tile-arrival hot path: the union-find + gradient pass
+  // covers every fetched way, and running it synchronously inside render
+  // (the #208 useMemo) janked the map on every tile load at metro zoom.
+  // Idle-scheduled instead; until the result lands the set is empty, which
+  // fail-softs to SHOWN — steep networks pop out a beat later, matching the
+  // elevReady behaviour above.
+  const [moatIsolated, setMoatIsolated] = useState<Set<string | number>>(() => new Set())
+  useEffect(() => {
+    let cancelled = false
+    const run = () => {
+      if (cancelled) return
+      const result = computeMoatIsolation(ways, {
+        maxGradientPct: getOverlayMaxGradientPct(profileKey),
+        pushBudgetM: settings.steepApproachPushM,
+        // Same per-way gradient accessor as pass 0 below — the two
+        // consumers share cache hits and refresh behaviour. elevReady is
+        // the cache generation: when terrain lands, stale null gradients
+        // recompute exactly once.
+        gradientPct: (way) => gradientFor(way, elevReady),
+        isTileLoaded: (row, col) => loadedTileKeys.has(tileKey(row, col)),
+      })
+      if (!cancelled) setMoatIsolated(result)
+    }
+    // Safari still lacks requestIdleCallback; fall back to a short timeout.
+    const hasIdle = typeof window.requestIdleCallback === 'function'
+    const handle = hasIdle
+      ? window.requestIdleCallback(run, { timeout: 2000 })
+      : window.setTimeout(run, 50)
+    return () => {
+      cancelled = true
+      if (hasIdle) window.cancelIdleCallback(handle)
+      else window.clearTimeout(handle)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ways, profileKey, settings.steepApproachPushM, elevReady, loadedTileKeys])
 
   useEffect(() => {
@@ -214,8 +245,23 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
     // shown ways (e.g. 20% `highway=path` hiking trails) are hidden.
     const maxGradientPct = getOverlayMaxGradientPct(profileKey)
 
-    // Pass 0 — classify + filter.
-    const toRender: RenderedWay[] = []
+    // Pass 0a — classify + gate each painted candidate. Verdicts:
+    //   hidden  — the way's own gradient exceeds the ceiling, or the moat
+    //             filter isolated its component
+    //   unknown — gradient null: terrain not loaded yet, or the way is
+    //             below the noise floor (too short to grade)
+    //   shown   — graded and within the ceiling
+    // Unknown ways are NOT painted immediately: a stub below the noise
+    // floor whose whole graded context is hidden must inherit that verdict
+    // (pass 0b), or the map fills with white-halo pill confetti wherever
+    // the gates shred a hillside network — the #208→#209 revert artifact.
+    interface Candidate {
+      way: OsmWay
+      verdict: 'shown' | 'hidden' | 'unknown'
+      itemName: string | null
+      pathLevel: PathLevel
+    }
+    const candidates: Candidate[] = []
     const roughWays: OsmWay[] = []
     for (const way of ways) {
       // Traffic-control pseudo-ways (single-coordinate signal/stop nodes in
@@ -243,16 +289,34 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
       // (see useRoutePolylines in Map.tsx) so users see every segment
       // along their actual route regardless of overlay visibility.
       if (!isPreferred) continue
-      // Hide ways too steep for this mode. overlayGradientPct returns null
-      // (→ shown) when elevation isn't loaded yet or the way is too short
-      // for z=12 to resolve a grade, so this fails soft. Cache hits skip
-      // the elevation lookups on mode/zoom re-renders.
-      const gradientPct = gradientFor(way)
-      if (gradientPct != null && gradientPct > maxGradientPct) continue
-      // The gate above is local (the way's OWN gradient); the moat filter
-      // is global — hide ways whose whole component sits behind a
-      // too-steep approach, even if every way in it is individually flat.
-      if (moatIsolated.has(way.osmId)) continue
+      // Local gradient gate (the way's OWN gradient) + the global moat
+      // filter (component behind a too-steep approach). Both display-only.
+      const gradientPct = gradientFor(way, elevReady)
+      const verdict: Candidate['verdict'] =
+        moatIsolated.has(way.osmId) || (gradientPct != null && gradientPct > maxGradientPct)
+          ? 'hidden'
+          : gradientPct == null
+            ? 'unknown'
+            : 'shown'
+      candidates.push({ way, verdict, itemName, pathLevel })
+    }
+
+    // Pass 0b — stub verdict inheritance: an ungradable way (below the
+    // noise floor) whose entire graded painted adjacency is hidden inherits
+    // 'hidden'; touching any shown way, or having no graded context at all,
+    // keeps it shown. See inheritStubVerdicts in overlayReachability.ts.
+    const verdictByOsmId = new Map<string | number, Candidate['verdict']>()
+    for (const c of candidates) verdictByOsmId.set(c.way.osmId, c.verdict)
+    const stubHidden = inheritStubVerdicts(
+      candidates.map((c) => c.way),
+      (way) => verdictByOsmId.get(way.osmId) ?? 'unknown',
+    )
+
+    // Pass 0c — style the survivors.
+    const toRender: RenderedWay[] = []
+    for (const { way, verdict, itemName, pathLevel } of candidates) {
+      if (verdict === 'hidden') continue
+      if (verdict === 'unknown' && stubHidden.has(way.osmId)) continue
       const color = colorForLevel(pathLevel, settings.tiers)
       const isBikeInfraTier = pathLevel === '1a' || pathLevel === '1b' || pathLevel === '2a'
       const browsingWeight = BROWSING_WEIGHT * weightMultiplierForLevel(pathLevel, settings.tiers)
@@ -274,11 +338,7 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
       // collapses at low zoom. At z >= 16 simplifyPath returns the
       // input unchanged so taps still hit precise geometry.
       const coords = simplifyPath(way.coordinates, zoom)
-      toRender.push({ way, coords, pathLevel, color, weight, opacity, itemName, isPreferred, drawHalo })
-
-      // Reference unused locals to keep the noUnusedLocals tsc rule happy
-      // when a future tweak removes a reader. (TS ignores via void.)
-      void isPreferred
+      toRender.push({ way, coords, pathLevel, color, weight, opacity, itemName, isPreferred: true, drawHalo })
     }
 
     // Index toRender by way.id so the click handler can dispatch from

@@ -263,3 +263,93 @@ export function computeMoatIsolation(ways: OsmWay[], opts: MoatOptions): Set<str
   }
   return isolated
 }
+
+// ── Stub verdict inheritance ───────────────────────────────────────────────
+//
+// The per-way gates can't grade ways shorter than the gradient noise floor
+// (MIN_GRADED_LEN_M in elevation.ts) — their gradient is null and they
+// fail-soft SHOWN. Individually that's correct, but when the LONG ways
+// around them get hidden (local gate or moat), the surviving stubs paint a
+// white halo around a sliver of colour and the map fills with white pill
+// confetti — the #208→#209 revert artifact. The principled fix: an
+// ungradable stub inherits the verdict of its graded painted context
+// instead of defaulting to shown.
+//
+// Conservative by construction:
+//  - Verdicts only FLOW INTO unknowns from graded painted neighbours; a
+//    graded way's own verdict never changes here.
+//  - A stub group adjacent to ANY shown graded way stays shown.
+//  - A stub group with NO graded painted adjacency at all keeps the old
+//    fail-soft (shown) — standalone stubs predate the gates and hiding
+//    them would be a behaviour change with no context to justify it.
+
+export type StubVerdict = 'shown' | 'hidden' | 'unknown'
+
+/**
+ * Given the painted candidate ways and each way's gate verdict ('unknown' =
+ * gradient null, i.e. below the noise floor), return the ADDITIONAL osmIds
+ * to hide: unknown ways whose entire graded painted adjacency is hidden.
+ *
+ * Groups of unknowns are formed over shared coordIds (a chain of stubs
+ * inherits as a unit); a group is hidden iff it touches at least one graded
+ * candidate and every graded candidate it touches is hidden.
+ */
+export function inheritStubVerdicts(
+  candidates: OsmWay[],
+  verdictOf: (way: OsmWay) => StubVerdict,
+): Set<string | number> {
+  const unknowns: OsmWay[] = []
+  // coordId → graded adjacency at that node.
+  const gradedAt = new Map<string, { shown: boolean; hidden: boolean }>()
+
+  for (const way of candidates) {
+    if (way.coordinates.length < 2) continue
+    const v = verdictOf(way)
+    if (v === 'unknown') {
+      unknowns.push(way)
+      continue
+    }
+    for (const [lat, lng] of way.coordinates) {
+      const id = coordId(lat, lng)
+      const g = gradedAt.get(id) ?? { shown: false, hidden: false }
+      if (v === 'shown') g.shown = true
+      else g.hidden = true
+      gradedAt.set(id, g)
+    }
+  }
+  if (unknowns.length === 0) return new Set()
+
+  // Group unknowns over shared nodes so a chain of stubs inherits as one.
+  const uf = new UnionFind()
+  for (const way of unknowns) {
+    const first = coordId(way.coordinates[0][0], way.coordinates[0][1])
+    uf.add(first)
+    for (let i = 1; i < way.coordinates.length; i++) {
+      const id = coordId(way.coordinates[i][0], way.coordinates[i][1])
+      uf.add(id)
+      uf.union(first, id)
+    }
+  }
+
+  // Per group: does it touch any shown graded way? any hidden one?
+  const groupTouch = new Map<string, { shown: boolean; hidden: boolean }>()
+  for (const way of unknowns) {
+    const root = uf.find(coordId(way.coordinates[0][0], way.coordinates[0][1]))
+    const t = groupTouch.get(root) ?? { shown: false, hidden: false }
+    for (const [lat, lng] of way.coordinates) {
+      const g = gradedAt.get(coordId(lat, lng))
+      if (g) {
+        t.shown ||= g.shown
+        t.hidden ||= g.hidden
+      }
+    }
+    groupTouch.set(root, t)
+  }
+
+  const hidden = new Set<string | number>()
+  for (const way of unknowns) {
+    const t = groupTouch.get(uf.find(coordId(way.coordinates[0][0], way.coordinates[0][1])))!
+    if (t.hidden && !t.shown) hidden.add(way.osmId)
+  }
+  return hidden
+}
