@@ -35,19 +35,6 @@
 const TILE_ZOOM = 12
 const TILE_SIZE = 256
 
-// Coarse fallback zoom for wide viewports (e.g. the whole Bay Area at
-// browse zoom). A z=10 tile covers 16 z=12 tiles, so a bbox that would
-// blow past MAX_PREFETCH_TILES at z=12 usually fits comfortably at z=10.
-// z=10 pixels are ~4× coarser (~100-120 m at SF), so the OVERLAY consumes
-// this data with 4×-scaled noise floors (see overlayGradientPct). The
-// ROUTER never reads z=10 — lookupElevation stays z=12-only.
-const COARSE_TILE_ZOOM = 10
-
-// z=10 pixels are 2^(12-10) = 4× the size of z=12 pixels; the overlay's
-// noise floors scale by the same factor when coarse data supplied the
-// elevations.
-const COARSE_FLOOR_SCALE = 4
-
 // Upper bound on tiles a single prefetch may request. A full-screen z=12
 // viewport is ~a few dozen tiles; this caps pathological bboxes (outlier
 // OSM nodes, region-spanning unions) so prefetch can never fire a storm
@@ -227,62 +214,38 @@ export interface BBox {
   east: number
 }
 
-// Integer tile range covering `bbox` at zoom `z`, plus the tile count.
-function tileRangeForBBox(
-  bbox: BBox,
-  z: number,
-): { minX: number; maxX: number; minY: number; maxY: number; count: number } {
-  const { x: xA, y: yA } = lngLatToTile(bbox.west, bbox.north, z)
-  const { x: xB, y: yB } = lngLatToTile(bbox.east, bbox.south, z)
-  const minX = Math.min(xA, xB)
-  const maxX = Math.max(xA, xB)
-  const minY = Math.min(yA, yB)
-  const maxY = Math.max(yA, yB)
-  return { minX, maxX, minY, maxY, count: (maxX - minX + 1) * (maxY - minY + 1) }
-}
-
 /**
- * Pre-fetch the terrain-RGB tiles covering `bbox`, at zoom 12 when the
- * bbox fits under the tile cap, else at the coarse zoom 10 fallback (for
- * wide browse-map viewports like the full Bay Area, which needs ~300+
- * z=12 tiles). Called once per route request before graph construction
- * and per overlay viewport change. Awaiting this before
- * `buildRoutingGraph` lets the gradient check inside the graph builder
- * stay synchronous.
+ * Pre-fetch the terrain-RGB tiles covering `bbox` at zoom 12. Called
+ * once per route request before graph construction. Awaiting this
+ * before `buildRoutingGraph` lets the gradient check inside the graph
+ * builder stay synchronous.
  *
  * z=12 is ~24 m/pixel at Berlin latitude, ~30 m at SF — matches the SRTM
  * source resolution that the data is ultimately derived from. For a
  * typical urban corridor that's ~9–25 tiles per request; for a city-wide
  * overlay viewport ~30-50 tiles. Mapbox's free tier (200K tile reads/
  * month) covers a personal-scale deployment with room to spare.
- *
- * Only the overlay path (`lookupElevationOverlay` / `overlayGradientPct`)
- * ever reads z=10 data; the router's `lookupElevation` stays z=12-only,
- * so a coarse prefetch degrades routing to "no elevation" fail-soft
- * exactly as an over-cap skip did before.
  */
 export async function prefetchElevation(bbox: BBox): Promise<void> {
-  let zoom = TILE_ZOOM
-  let range = tileRangeForBBox(bbox, zoom)
-  if (range.count > MAX_PREFETCH_TILES) {
-    // Too wide for z=12 — retry the same bbox at the coarse zoom (16×
-    // fewer tiles).
-    zoom = COARSE_TILE_ZOOM
-    range = tileRangeForBBox(bbox, zoom)
-  }
-  // Backstop: a viewport-sized bbox is a few dozen tiles even at z=12.
-  // Past the cap at BOTH zooms means the caller passed a pathological
-  // bbox (an outlier node, a bbox spanning regions) — skip rather than
-  // fire thousands of fetches and hang the page. The gradient gate fails
-  // soft (null → shown).
-  if (range.count > MAX_PREFETCH_TILES) {
-    console.warn(`[elevation] prefetch bbox spans ${range.count} tiles at z=${zoom} (> ${MAX_PREFETCH_TILES}) — skipping to avoid a request storm`)
+  const { x: xA, y: yA } = lngLatToTile(bbox.west, bbox.north, TILE_ZOOM)
+  const { x: xB, y: yB } = lngLatToTile(bbox.east, bbox.south, TILE_ZOOM)
+  const minX = Math.min(xA, xB)
+  const maxX = Math.max(xA, xB)
+  const minY = Math.min(yA, yB)
+  const maxY = Math.max(yA, yB)
+  // Backstop: a viewport-sized bbox is a few dozen tiles. Anything past
+  // this means the caller passed a pathological bbox (an outlier node, a
+  // bbox spanning regions) — skip rather than fire thousands of fetches
+  // and hang the page. The gradient gate fails soft (null → shown).
+  const tileCount = (maxX - minX + 1) * (maxY - minY + 1)
+  if (tileCount > MAX_PREFETCH_TILES) {
+    console.warn(`[elevation] prefetch bbox spans ${tileCount} tiles (> ${MAX_PREFETCH_TILES}) — skipping to avoid a request storm`)
     return
   }
   const tasks: Promise<void>[] = []
-  for (let x = range.minX; x <= range.maxX; x++) {
-    for (let y = range.minY; y <= range.maxY; y++) {
-      tasks.push(fetchTile(zoom, x, y))
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      tasks.push(fetchTile(TILE_ZOOM, x, y))
     }
   }
   await Promise.all(tasks)
@@ -301,38 +264,8 @@ export async function prefetchElevation(bbox: BBox): Promise<void> {
  * has to come from the way-length floor in the router, not the lookup.
  */
 export function lookupElevation(lat: number, lng: number): number | null {
-  return lookupElevationAtZoom(lat, lng, TILE_ZOOM)
-}
-
-/**
- * Overlay-only elevation lookup (metres): prefers the z=12 tile, falls
- * back to the z=10 coarse tile when a wide-viewport prefetch supplied
- * only coarse data, else null.
- *
- * The ROUTER must keep using `lookupElevation` — it is deliberately
- * z=12-only so a coarse browse-map prefetch can never change routing
- * cost (the router-isolation guarantee: routing results are identical
- * whether or not z=10 tiles happen to be cached).
- */
-export function lookupElevationOverlay(lat: number, lng: number): number | null {
-  const fine = lookupElevationAtZoom(lat, lng, TILE_ZOOM)
-  if (fine != null) return fine
-  return lookupElevationAtZoom(lat, lng, COARSE_TILE_ZOOM)
-}
-
-/**
- * Whether fine (z=12) elevation data covers this point. Lets overlay
- * callers that cache gradient results tell a fine-derived value (stable
- * for the session) from a coarse z=10-derived one that should be
- * recomputed once a later prefetch loads the covering z=12 tile.
- */
-export function hasFineElevationAt(lat: number, lng: number): boolean {
-  return hasTileData(lat, lng, TILE_ZOOM)
-}
-
-function lookupElevationAtZoom(lat: number, lng: number, z: number): number | null {
-  const { tx, ty, fpx, fpy } = lngLatToTileSubPixel(lng, lat, z)
-  const data = tileCache.get(tileKey(z, tx, ty))
+  const { tx, ty, fpx, fpy } = lngLatToTileSubPixel(lng, lat, TILE_ZOOM)
+  const data = tileCache.get(tileKey(TILE_ZOOM, tx, ty))
   if (!data) return null
   const px = Math.min(TILE_SIZE - 1, Math.max(0, Math.floor(fpx)))
   const py = Math.min(TILE_SIZE - 1, Math.max(0, Math.floor(fpy)))
@@ -375,10 +308,6 @@ export function wayAscentMeters(
 // register a phantom grade. The 40 m length floor reflects the z=12 pixel
 // size (~24-30 m): below ~1.5 pixels a "gradient" is just two adjacent
 // noisy samples, so we report null (unknown) rather than gate on noise.
-// When z=10 coarse data supplied the elevations, both floors scale by
-// COARSE_FLOOR_SCALE (40→160 m, 2→8 m) — same reasoning at 4× the pixel
-// size. Coarse data must not invent phantom grades on short ways; short
-// ways at wide zoom simply stay ungated (null) until finer data loads.
 const OVERLAY_GRADIENT_CUTOFF_M = 2
 const MIN_GRADED_LEN_M = 40
 
@@ -393,44 +322,25 @@ function segMeters(lat1: number, lng1: number, lat2: number, lng2: number): numb
   return Math.sqrt(dLat * dLat + x * x) * R
 }
 
-// True when tileCache holds decoded pixel data (not a fetched-and-failed
-// null) for the tile covering (lat, lng) at zoom z.
-function hasTileData(lat: number, lng: number, z: number): boolean {
-  const { x, y } = lngLatToTile(lng, lat, z)
-  return tileCache.get(tileKey(z, x, y)) != null
-}
-
 /**
  * Gross gradient (%) for overlay display: the steeper of the two
  * traversal climbs over the way's horizontal length, minus the noise
- * cutoff. Returns null when the way is shorter than the resolution
+ * cutoff. Returns null when the way is shorter than the z=12 resolution
  * floor or no covering elevation tile is loaded — callers treat null as
  * "unknown, show it" (fail-soft, matching the router's gradient handling).
- *
- * Elevation defaults to `lookupElevationOverlay` (z=12 preferred, z=10
- * coarse fallback). When the z=12 tile covering the way's midpoint is
- * absent and a z=10 tile supplied the elevations, the noise floors scale
- * ×4 so coarse pixels can't fake gradients on short ways.
  */
 export function overlayGradientPct(
   coords: Array<[number, number]>,
-  elevationFn: (lat: number, lng: number) => number | null = lookupElevationOverlay,
+  elevationFn: (lat: number, lng: number) => number | null = lookupElevation,
 ): number | null {
   let lengthM = 0
   for (let i = 1; i < coords.length; i++) {
     lengthM += segMeters(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1])
   }
-  // Coarse-data detection at the way's midpoint: z=12 data absent there
-  // AND z=10 data present ⇒ the coarse tile is what fed the elevations.
-  // (Custom elevationFns with nothing cached keep the fine floors.)
-  const [midLat, midLng] = coords[Math.floor(coords.length / 2)] ?? [0, 0]
-  const coarse =
-    !hasTileData(midLat, midLng, TILE_ZOOM) && hasTileData(midLat, midLng, COARSE_TILE_ZOOM)
-  const floorScale = coarse ? COARSE_FLOOR_SCALE : 1
-  if (lengthM < MIN_GRADED_LEN_M * floorScale) return null
+  if (lengthM < MIN_GRADED_LEN_M) return null
   const { forwardM, reverseM, elevations } = wayAscentMeters(coords, elevationFn)
   if (elevations.every((e) => e == null)) return null
-  const gross = Math.max(0, Math.max(forwardM, reverseM) - OVERLAY_GRADIENT_CUTOFF_M * floorScale)
+  const gross = Math.max(0, Math.max(forwardM, reverseM) - OVERLAY_GRADIENT_CUTOFF_M)
   return (gross / lengthM) * 100
 }
 
@@ -445,12 +355,4 @@ export function _resetElevationCache(): void {
 /** Test-only — seed a tile directly without going through fetch/decode. */
 export function _seedTile(z: number, x: number, y: number, data: Uint8ClampedArray | null): void {
   tileCache.set(tileKey(z, x, y), data)
-}
-
-/**
- * Test-only — whether the cache has ANY entry (data or fetched-and-failed
- * null) for a tile. Lets tests observe which zoom a prefetch targeted.
- */
-export function _hasTileEntry(z: number, x: number, y: number): boolean {
-  return tileCache.has(tileKey(z, x, y))
 }
