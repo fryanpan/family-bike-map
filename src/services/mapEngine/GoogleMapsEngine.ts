@@ -135,6 +135,15 @@ export class GoogleMapsEngine implements MapEngine {
   private deckLayers = new Map<number, import('@deck.gl/layers').PathLayer>()
   private pathLayerHandlers = new Map<number, PathLayerHandlers>()
   private pathLayerFeatures = new Map<number, PathLayerFeature[]>()
+  // Tombstones for the add/remove race: addPathLayer registers its deck
+  // layer asynchronously (after the deck.gl dynamic import resolves), so a
+  // removePathLayer that arrives first would find nothing to delete — and
+  // the pending add would then land a layer nobody can ever remove. The
+  // leak was visible as double-plotted overlay geometry at stale zoom
+  // simplifications (worst during initial chunk load, when many React
+  // effect cycles run before the first `.then` fires). A removed-first id
+  // is recorded here and the pending add skips it.
+  private removedPathLayerIds = new Set<number>()
 
   async mount(container: HTMLElement, options: MapInitOptions): Promise<void> {
     if (this.map) throw new Error('GoogleMapsEngine already mounted')
@@ -416,6 +425,7 @@ export class GoogleMapsEngine implements MapEngine {
     const layerId = makeId()
     void this.ensureDeckOverlay(map).then(({ GoogleMapsOverlay, PathLayer }) => {
       if (!this.map) return // unmounted while loading
+      if (this.removedPathLayerIds.delete(layerId)) return // removed before the add landed
       if (!this.deckOverlay) {
         this.deckOverlay = new GoogleMapsOverlay({ layers: [] })
         this.deckOverlay.setMap(this.map)
@@ -430,7 +440,11 @@ export class GoogleMapsEngine implements MapEngine {
   }
 
   removePathLayer(handle: PathLayerHandle): void {
-    if (!this.deckLayers.has(handle.id)) return
+    if (!this.deckLayers.has(handle.id)) {
+      // The async add hasn't landed yet — tombstone it so it never does.
+      this.removedPathLayerIds.add(handle.id)
+      return
+    }
     this.deckLayers.delete(handle.id)
     this.pathLayerHandlers.delete(handle.id)
     this.pathLayerFeatures.delete(handle.id)
