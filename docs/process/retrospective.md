@@ -155,3 +155,11 @@ And from prior sessions (BC-242), I had already *celebrated* consolidating 6→4
 | Rule covers post-fix validation but not diagnosing the cause; led to a build/revert cycle | Update rule | Added "Diagnosing a reported regression" section to `.claude/rules/routing-changes.md` — ablate to isolate the cost term before fixing |
 | Reusable lesson (ablation + walking-ascent loophole + carFreeBonus rationale) | Update learnings | Already shipped in PR #204 (`docs/process/learnings.md` "Diagnosing routing regressions") |
 | Codex reviewer non-functional in this env | No action | Environment issue (exit 137 / OOM), not a systemic process gap; Claude review covered it |
+
+## 2026-07-02 - Steep-moat filter shipped and reverted same day
+
+**What worked:** Design discussion produced a sound data-layer algorithm (review caught + fixed a real monotonicity bug and a fail-hide bug pre-merge; the diag numbers were correct). Once Bryan reported symptoms, systematic debugging root-caused all three within the hour: local repro → baseline commit comparison → click-the-artifact identification → halo ablation confirmation. Revert shipped and verified on prod the same night.
+
+**What didn't:** All three prod regressions (white-halo stub confetti, leaked deck.gl layers double-plotting, tile-arrival jank) shipped despite tests, benchmark, code review, AND a browser verification pass — because every check verified the feature's intended effect and none asked "what looks new and wrong?" The white pills are visible in the shipped verification screenshots; I attributed them to base-map styling without clicking one. Local dev's inability to load terrain (referer-locked token) meant the gates were never exercised end-to-end before prod.
+
+**Action:** Learnings updated (overlay-rendering section: stub confetti, engine layer leak, hot-path constraint, falsification rule). Re-land blocked on: (1) engine race fix, (2) component-level verdict for sub-noise-floor stubs, (3) off-hot-path moat computation — each verified against its failure mode on prod-like data before merge.
