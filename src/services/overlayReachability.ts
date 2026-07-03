@@ -286,6 +286,47 @@ export function computeMoatIsolation(ways: OsmWay[], opts: MoatOptions): Set<str
 export type StubVerdict = 'shown' | 'hidden' | 'unknown'
 
 /**
+ * Floating-fragment suppression for the overview map: given the ways that
+ * SURVIVED all visibility gates, return the osmIds whose connected painted
+ * component totals less than `minLenM` of length. These are the "floating
+ * short segments" that read as noise at city-overview zooms — real routing
+ * connectors, but not worth advertising as infrastructure. Display-only;
+ * the caller zoom-gates this (fragments show again at street-detail zooms)
+ * and routing never consults it. Superseded by the enriched-tile
+ * `componentPaintedLenM` field once the pipeline lands (see
+ * docs/product/plans/enriched-tiles-plan.md).
+ */
+export function smallFragmentIds(ways: OsmWay[], minLenM: number): Set<string | number> {
+  const uf = new UnionFind()
+  const lengths = new Map<string | number, number>()
+  for (const way of ways) {
+    if (way.coordinates.length < 2) continue
+    lengths.set(way.osmId, wayLengthM(way.coordinates))
+    const first = coordId(way.coordinates[0][0], way.coordinates[0][1])
+    uf.add(first)
+    for (let i = 1; i < way.coordinates.length; i++) {
+      const id = coordId(way.coordinates[i][0], way.coordinates[i][1])
+      uf.add(id)
+      uf.union(first, id)
+    }
+  }
+  const componentLenM = new Map<string, number>()
+  for (const way of ways) {
+    const len = lengths.get(way.osmId)
+    if (len === undefined) continue
+    const root = uf.find(coordId(way.coordinates[0][0], way.coordinates[0][1]))
+    componentLenM.set(root, (componentLenM.get(root) ?? 0) + len)
+  }
+  const small = new Set<string | number>()
+  for (const way of ways) {
+    if (lengths.get(way.osmId) === undefined) continue
+    const root = uf.find(coordId(way.coordinates[0][0], way.coordinates[0][1]))
+    if ((componentLenM.get(root) ?? 0) < minLenM) small.add(way.osmId)
+  }
+  return small
+}
+
+/**
  * Given the painted candidate ways and each way's gate verdict ('unknown' =
  * gradient null, i.e. below the noise floor), return the ADDITIONAL osmIds
  * to hide: unknown ways whose entire graded painted adjacency is hidden.

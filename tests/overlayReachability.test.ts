@@ -333,3 +333,64 @@ describe('inheritStubVerdicts', () => {
     expect(hidden.has(10)).toBe(false)
   })
 })
+
+// ── smallFragmentIds ────────────────────────────────────────────────────────
+//
+// Floating-fragment floor: surviving painted components shorter than the
+// threshold (total length) are display-hidden at overview zooms.
+
+import { smallFragmentIds } from '../src/services/overlayReachability'
+
+// ~55 m stub, standalone.
+const LONE_STUB = way(20, [
+  [52.5600, 13.4500],
+  [52.5605, 13.4500],
+])
+// Two ~55 m stubs sharing an endpoint → ~111 m component.
+const CHAIN_A = way(21, [
+  [52.5700, 13.4500],
+  [52.5705, 13.4500],
+])
+const CHAIN_B = way(22, [
+  [52.5705, 13.4500],
+  [52.5710, 13.4500],
+])
+// ~555 m long way with a ~55 m spur attached.
+const LONG_WAY = way(23, [
+  [52.5800, 13.4500],
+  [52.5850, 13.4500],
+])
+const SPUR = way(24, [
+  [52.5850, 13.4500],
+  [52.5855, 13.4500],
+])
+
+describe('smallFragmentIds', () => {
+  test('standalone short fragment is flagged', () => {
+    const small = smallFragmentIds([LONE_STUB], 100)
+    expect(small.has(20)).toBe(true)
+  })
+
+  test('chained fragments summing over the floor are kept', () => {
+    const small = smallFragmentIds([CHAIN_A, CHAIN_B], 100)
+    expect(small.size).toBe(0)
+  })
+
+  test('short spur attached to a long way is kept (component length counts)', () => {
+    const small = smallFragmentIds([LONG_WAY, SPUR], 100)
+    expect(small.size).toBe(0)
+  })
+
+  test('threshold is strict less-than', () => {
+    // CHAIN_A alone is ~55 m — under a 56 m floor, over a 55 m floor.
+    expect(smallFragmentIds([CHAIN_A], 56).has(21)).toBe(true)
+    expect(smallFragmentIds([CHAIN_A], 40).has(21)).toBe(false)
+  })
+
+  test('mixed input flags only the small component', () => {
+    const small = smallFragmentIds([LONE_STUB, LONG_WAY, SPUR], 100)
+    expect(small.has(20)).toBe(true)
+    expect(small.has(23)).toBe(false)
+    expect(small.has(24)).toBe(false)
+  })
+})
