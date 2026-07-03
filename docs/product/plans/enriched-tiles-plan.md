@@ -146,3 +146,81 @@ Risks:
 - Benchmark: client-only, both cities, identical (Phase 1 touches no routing files).
 - Prod: falsification pass protocol from learnings (what looks NEW and wrong, multiple zooms, click odd artifacts).
 - Rollout: enriched tileset behind a manifest switch; rollback = point manifest at previous version (no deploy needed).
+
+## Scope update (2026-07-03, Bryan): pull Phases 2 and 4 into the build
+
+1. **Daily OSM update feeds** — confirmed in scope (Phase 1's diff updater).
+2. **Open-DEM swap now, router included** — the bake AND the runtime router
+   move to AWS Terrain Tiles (terrarium). This IS a routing change: the full
+   routing-changes.md gate applies (benchmark both cities before/after, save
+   results doc, commit with the change). Kills the referer-locked Mapbox
+   token and the local-dev terrain blackout as side effects. Mapbox decode
+   path kept during transition, deleted once benchmark passes.
+3. **Server-side routing** — `server/route-server.ts`: a bun HTTP service
+   running THE SAME routing code (clientRouter/modes/lts — no parallel
+   implementations) over enriched tiles held in memory. Contract:
+   `POST /route {start, end, travelMode}` → same shape as clientRoute.
+   **Client configurability preserved**: mode/preferences remain client-side
+   concepts sent per request; an admin setting `routingBackend: 'client' |
+   <url>` selects the backend, DEFAULT 'client' until benchmarks justify a
+   flip. Dockerfile included; production deployment target (Fly/Hetzner/CF
+   container) is a separate decision AFTER latency data exists.
+4. **Phone benchmark** — instrument route timing (graph-build ms + A* ms +
+   total) via performance marks surfaced in the audit tab; bench script
+   measures server latency for the same OD pairs. Deliverable: comparison doc
+   (desktop numbers automated; phone numbers gathered on Bryan's device via
+   the instrumented prod build — manual step, documented protocol).
+
+## Test plan (unit + end-to-end)
+
+### Unit (bun test, CI-gated)
+- **Pipeline**: PBF ingest on a small fixture extract (checked-in .osm.pbf,
+  built once with osmium) → expected way set; terrarium decode against a
+  checked-in tile with known elevations; gradient parity — pipeline gradient
+  == overlayGradientPct on identical coords+DEM inputs; minimax access on the
+  island/ramp/mainland fixtures (reused from overlayReachability tests);
+  componentPaintedLenM; tile schema round-trip; deterministic output (two
+  runs byte-identical).
+- **Diff updater**: synthetic .osc → exact dirty way/tile/component set;
+  sequence-mismatch refusal; provenance stamping.
+- **Route server**: contract tests over fixture tiles — 200 happy path per
+  mode, identical geometry to a direct clientRoute call on the same data
+  (same-code invariant, tolerance ZERO), 4xx on malformed input, unknown
+  mode, out-of-region points.
+- **Client**: enriched-field arithmetic gate (gradient/access/fragment floor,
+  monotone across mode ceilings); fallback to runtime path when fields
+  absent; routingBackend setting plumbing (client default; server URL used
+  when set; graceful fallback to client on server error).
+
+### Parity & integration (scripted, run before merge + in review)
+- **Bake-vs-runtime parity diag**: run production classify + gradient on N
+  real NorCal tiles vs baked values — >99% way-level agreement, every
+  divergence explained (DEM source differences are the expected class).
+- **DEM swap ascent comparison**: per-way gradient distribution Mapbox vs
+  terrarium over SF + Berlin sample; flag ways shifting across any mode
+  ceiling (6/8/10/15%).
+- **Server-vs-client route parity**: benchmark OD pairs routed through both
+  backends on identical tile data → identical routes required.
+
+### Routing quality gate (same-or-better, per routing-changes.md)
+- `bun scripts/benchmark-routing.ts` both cities, before/after the DEM swap
+  AND via the server backend. Routes-found must not drop; avg preferred-%
+  within ~3pp (improvements welcome); previously-passing pairs must not FAIL.
+  Results file committed with the change. Any regression stops the line.
+
+### End-to-end happy paths (scripted where possible + browser falsification pass)
+1. Browse SF at metro + street zoom (enriched): overlay renders, no
+   paint-then-vanish, no white pills, no fragments at overview, popup opens
+   with correct item/LTS.
+2. Mode switch: shown set changes monotonically (starting-out ⊆ confident ⊆
+   traffic-savvy on the same viewport).
+3. Route A→B in SF per mode, client backend — route renders, quality bar and
+   ETA populate.
+4. Same routes via server backend (admin toggle) — identical geometry.
+5. Berlin (non-enriched until its bake): overlay + routing work via the
+   Overpass fallback path.
+6. Daily-diff cycle on fixtures: edit → diff → re-enrich → tile updates,
+   provenance seq advances.
+7. Prod falsification pass per learnings (multiple zooms, zoom cycling,
+   click odd artifacts, before/after screenshots) — the check that gates
+   "done".
