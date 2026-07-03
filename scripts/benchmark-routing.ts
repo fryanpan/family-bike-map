@@ -499,10 +499,12 @@ async function main() {
   // once, up-front. The module-level tile cache in elevation.ts is
   // reused across every mode's graph build, so this single fetch
   // exercises the gradient gate for all 5 modes' route searches.
-  // The default source (terrarium, open data) needs no token, so
-  // elevation is always exercised there; only the mapbox comparison
-  // source still gates on VITE_MAPBOX_TOKEN (missing token soft-nulls
-  // and skips the gate, same as pre-2026-05-25 benchmark behavior).
+  // The runtime default is mapbox-terrain-rgb (the 2026-07-03 terrarium
+  // flip FAILED the SF carrying-kid gate and was reverted — see
+  // docs/research/2026-07-03-routing-benchmark-results.md). If a future
+  // run switches to terrarium (open data, no token) elevation is always
+  // exercised; the mapbox source gates on VITE_MAPBOX_TOKEN (missing
+  // token soft-nulls and skips the gate, same as pre-2026-05-25).
   const elevationEnabled =
     getElevationSource() === 'terrarium' ||
     process.argv.includes('--elevation') ||

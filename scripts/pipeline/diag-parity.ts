@@ -122,9 +122,10 @@ async function main(): Promise<void> {
   // Non-browser mapbox setup — same pattern as scripts/benchmark-routing.ts:
   // pngjs decoder (no OffscreenCanvas in Bun) + prod Referer for the
   // URL-restricted token. Source is pinned to mapbox-terrain-rgb EXPLICITLY:
-  // this diag's whole point is baked-terrarium vs the Mapbox DEM, and the
-  // module default became terrarium on 2026-07-03 — relying on the default
-  // would silently compare terrarium against itself.
+  // this diag's whole point is baked-terrarium vs the Mapbox DEM. The pin
+  // is deliberate regardless of the module default (which remains mapbox
+  // after the reverted 2026-07-03 terrarium flip) — relying on any default
+  // risks silently comparing terrarium against itself.
   setElevationSource('mapbox-terrain-rgb')
   setElevationDecoder((bytes) => {
     try {
