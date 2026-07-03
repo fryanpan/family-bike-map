@@ -1,0 +1,172 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+  Hand-written pipeline fixture (see tests/pipeline/enrich.test.ts).
+  Converted to enrich-fixture.osm.pbf with `osmium cat` (checked in; the test
+  regenerates it if missing). Geography: a small SF-ish patch, all inside
+  0.1-degree tile row=377,col=-1225 except way 207, which crosses lat 37.8
+  into row=378 to exercise multi-tile bucketing.
+
+  Contents:
+    ways 201-203  residential grid (Alpha/Beta/Gamma)      -> included
+    way  204      cycleway                                 -> included
+    way  205      steep path, bicycle=yes, incline=15%     -> included
+    way  206      isolated short cycleway stub             -> included
+    way  207      residential crossing the 37.8 tile edge  -> included, 2 tiles
+    way  208      primary, no bike infra                   -> EXCLUDED
+    way  209      residential with bicycle=no              -> EXCLUDED
+    way  210      footway without bicycle tag              -> EXCLUDED
+    way  211      secondary with cycleway:right=lane       -> included
+    way  212      footway bicycle=designated               -> included
+    way  213      pedestrian bicycle=yes                   -> included
+    way  214      pedestrian without bicycle tag           -> EXCLUDED
+    way  215      track (no bicycle tag)                   -> included
+    way  216      living_street                            -> included
+    way  217      residential + bicycle_road=yes           -> included
+    node 301      highway=traffic_signals                  -> control pseudo-way
+    node 302      highway=stop                             -> control pseudo-way
+    node 303      highway=crossing                         -> EXCLUDED
+-->
+<osm version="0.6" generator="hand-written fixture">
+  <node id="101" version="1" lat="37.7620" lon="-122.4520"/>
+  <node id="102" version="1" lat="37.7620" lon="-122.4510"/>
+  <node id="103" version="1" lat="37.7620" lon="-122.4500"/>
+  <node id="104" version="1" lat="37.7630" lon="-122.4520"/>
+  <node id="105" version="1" lat="37.7630" lon="-122.4510"/>
+  <node id="106" version="1" lat="37.7630" lon="-122.4500"/>
+  <node id="107" version="1" lat="37.7640" lon="-122.4520"/>
+  <node id="108" version="1" lat="37.7640" lon="-122.4500"/>
+  <node id="109" version="1" lat="37.7650" lon="-122.4520"/>
+  <node id="110" version="1" lat="37.7655" lon="-122.4510"/>
+  <node id="111" version="1" lat="37.7660" lon="-122.4400"/>
+  <node id="112" version="1" lat="37.7661" lon="-122.4399"/>
+  <node id="113" version="1" lat="37.7990" lon="-122.4510"/>
+  <node id="114" version="1" lat="37.8010" lon="-122.4510"/>
+  <node id="115" version="1" lat="37.7625" lon="-122.4530"/>
+  <node id="116" version="1" lat="37.7635" lon="-122.4530"/>
+  <node id="117" version="1" lat="37.7615" lon="-122.4520"/>
+  <node id="118" version="1" lat="37.7615" lon="-122.4510"/>
+  <node id="119" version="1" lat="37.7610" lon="-122.4500"/>
+  <node id="120" version="1" lat="37.7610" lon="-122.4490"/>
+  <node id="121" version="1" lat="37.7645" lon="-122.4530"/>
+  <node id="122" version="1" lat="37.7655" lon="-122.4530"/>
+  <node id="123" version="1" lat="37.7605" lon="-122.4520"/>
+  <node id="124" version="1" lat="37.7605" lon="-122.4510"/>
+  <node id="125" version="1" lat="37.7600" lon="-122.4520"/>
+  <node id="126" version="1" lat="37.7600" lon="-122.4510"/>
+  <node id="127" version="1" lat="37.7670" lon="-122.4520"/>
+  <node id="128" version="1" lat="37.7670" lon="-122.4510"/>
+  <node id="129" version="1" lat="37.7680" lon="-122.4520"/>
+  <node id="130" version="1" lat="37.7680" lon="-122.4510"/>
+  <node id="131" version="1" lat="37.7690" lon="-122.4520"/>
+  <node id="132" version="1" lat="37.7690" lon="-122.4510"/>
+  <node id="301" version="1" lat="37.7621" lon="-122.4511">
+    <tag k="highway" v="traffic_signals"/>
+  </node>
+  <node id="302" version="1" lat="37.7631" lon="-122.4511">
+    <tag k="highway" v="stop"/>
+  </node>
+  <node id="303" version="1" lat="37.7622" lon="-122.4505">
+    <tag k="highway" v="crossing"/>
+  </node>
+  <way id="201" version="1">
+    <nd ref="101"/>
+    <nd ref="102"/>
+    <nd ref="103"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Alpha Street"/>
+  </way>
+  <way id="202" version="1">
+    <nd ref="104"/>
+    <nd ref="105"/>
+    <nd ref="106"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Beta Street"/>
+  </way>
+  <way id="203" version="1">
+    <nd ref="102"/>
+    <nd ref="105"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Gamma Street"/>
+  </way>
+  <way id="204" version="1">
+    <nd ref="107"/>
+    <nd ref="108"/>
+    <tag k="highway" v="cycleway"/>
+    <tag k="name" v="Panhandle Path"/>
+  </way>
+  <way id="205" version="1">
+    <nd ref="109"/>
+    <nd ref="110"/>
+    <tag k="highway" v="path"/>
+    <tag k="bicycle" v="yes"/>
+    <tag k="incline" v="15%"/>
+  </way>
+  <way id="206" version="1">
+    <nd ref="111"/>
+    <nd ref="112"/>
+    <tag k="highway" v="cycleway"/>
+    <tag k="name" v="Isolated Stub"/>
+  </way>
+  <way id="207" version="1">
+    <nd ref="113"/>
+    <nd ref="114"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Boundary Road"/>
+  </way>
+  <way id="208" version="1">
+    <nd ref="115"/>
+    <nd ref="116"/>
+    <tag k="highway" v="primary"/>
+    <tag k="name" v="Busy Avenue"/>
+  </way>
+  <way id="209" version="1">
+    <nd ref="117"/>
+    <nd ref="118"/>
+    <tag k="highway" v="residential"/>
+    <tag k="bicycle" v="no"/>
+  </way>
+  <way id="210" version="1">
+    <nd ref="119"/>
+    <nd ref="120"/>
+    <tag k="highway" v="footway"/>
+  </way>
+  <way id="211" version="1">
+    <nd ref="121"/>
+    <nd ref="122"/>
+    <tag k="highway" v="secondary"/>
+    <tag k="cycleway:right" v="lane"/>
+  </way>
+  <way id="212" version="1">
+    <nd ref="123"/>
+    <nd ref="124"/>
+    <tag k="highway" v="footway"/>
+    <tag k="bicycle" v="designated"/>
+  </way>
+  <way id="213" version="1">
+    <nd ref="125"/>
+    <nd ref="126"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="bicycle" v="yes"/>
+  </way>
+  <way id="214" version="1">
+    <nd ref="125"/>
+    <nd ref="126"/>
+    <tag k="highway" v="pedestrian"/>
+  </way>
+  <way id="215" version="1">
+    <nd ref="127"/>
+    <nd ref="128"/>
+    <tag k="highway" v="track"/>
+  </way>
+  <way id="216" version="1">
+    <nd ref="129"/>
+    <nd ref="130"/>
+    <tag k="highway" v="living_street"/>
+  </way>
+  <way id="217" version="1">
+    <nd ref="131"/>
+    <nd ref="132"/>
+    <tag k="highway" v="residential"/>
+    <tag k="bicycle_road" v="yes"/>
+  </way>
+</osm>

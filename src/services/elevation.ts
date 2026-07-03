@@ -1,10 +1,26 @@
 /**
- * Elevation lookup via Mapbox terrain-RGB tiles.
+ * Elevation lookup via encoded-elevation PNG tiles (pluggable DEM source).
+ *
+ * Two DEM sources are supported (see `setElevationSource`):
+ *
+ * - `'mapbox-terrain-rgb'` (DEFAULT): Mapbox terrain-RGB v1 via the
+ *   Raster Tiles API. Requires `VITE_MAPBOX_TOKEN`; the production token
+ *   is URL-restricted, so non-browser callers must also register a
+ *   Referer via `setElevationReferer`.
+ *   Reference: https://docs.mapbox.com/data/tilesets/reference/mapbox-terrain-rgb-v1/
+ *     height (m) = -10000 + ((R*256*256 + G*256 + B) * 0.1)
+ *
+ * - `'terrarium'`: AWS Terrain Tiles (Mapzen terrarium encoding) on S3.
+ *   Free open data — no token, no Referer.
+ *   Reference: https://github.com/tilezen/joerd/blob/master/docs/formats.md
+ *     height (m) = (R * 256 + G + B / 256) - 32768
  *
  * Tiles are fetched once per session and cached in memory as decoded
- * pixel arrays. `prefetchElevation(bbox)` is awaited up-front by the
- * router before graph construction; `lookupElevation(lat, lng)` is then
- * a synchronous nearest-pixel read inside the graph builder.
+ * pixel arrays (keyed per source, so switching sources can never decode
+ * one encoding with the other's formula). `prefetchElevation(bbox)` is
+ * awaited up-front by the router before graph construction;
+ * `lookupElevation(lat, lng)` is then a synchronous nearest-pixel read
+ * inside the graph builder.
  *
  * Fails soft: if the Mapbox token is missing, or a tile 404s, the
  * lookup returns null for any coord it can't resolve. Callers (the
@@ -12,14 +28,14 @@
  * so the absence of elevation degrades gracefully to "no gradient
  * filter" rather than blocking routes.
  *
- * Reference: https://docs.mapbox.com/data/tilesets/reference/mapbox-terrain-rgb-v1/
- *   height (m) = -10000 + ((R*256*256 + G*256 + B) * 0.1)
- *
  * History: started on MapTiler terrain-rgb at z=12, swapped to Mapbox
  * 2026-05-26 because MapTiler caps at z=12 and the ±10 m inter-pixel
  * noise faked 12% gradients on flat Berlin streets. Mapbox supports
  * up to z=15 (~5 m/pixel at equator), which gives smoother interpolation
- * between SRTM samples and less spurious-gradient noise.
+ * between SRTM samples and less spurious-gradient noise. Terrarium
+ * support added 2026-07-03 for the enriched-tiles pipeline bake; the
+ * runtime default flips to terrarium only behind the routing benchmark
+ * gate (enriched-tiles plan, scope item 2).
  */
 
 // z=12 = ~24 m/pixel at Berlin latitude, ~30 m at SF. This matches the
@@ -84,8 +100,12 @@ function getMapboxToken(): string | undefined {
   return undefined
 }
 
+// Cache keys embed the active DEM source so that pixel data encoded one
+// way is never decoded with the other formula: switching sources simply
+// makes the old source's tiles invisible (lookup → null, fail-soft)
+// until a fresh prefetch fills the new source's cache.
 function tileKey(z: number, x: number, y: number): string {
-  return `${z}/${x}/${y}`
+  return `${elevationSource}:${z}/${x}/${y}`
 }
 
 // Web-Mercator tile coords (integer) for a lat/lng at zoom z.
@@ -118,9 +138,57 @@ function lngLatToTileSubPixel(
   return { tx, ty, fpx, fpy }
 }
 
-/** terrain-RGB pixel → metres above sea level. */
+/** Mapbox terrain-RGB pixel → metres above sea level. */
 export function decodeTerrainRgb(r: number, g: number, b: number): number {
   return -10000 + (r * 65536 + g * 256 + b) * 0.1
+}
+
+/**
+ * Terrarium pixel → metres above sea level (Mapzen / AWS Terrain Tiles).
+ * Spec: https://github.com/tilezen/joerd/blob/master/docs/formats.md
+ *   height = (R * 256 + G + B / 256) - 32768
+ * Vertical resolution is 1/256 m (B carries the fraction), vs the 0.1 m
+ * steps of Mapbox terrain-RGB.
+ */
+export function decodeTerrarium(r: number, g: number, b: number): number {
+  return r * 256 + g + b / 256 - 32768
+}
+
+/**
+ * DEM sources the module can read. Both serve 256×256 encoded-elevation
+ * PNGs over the same Web-Mercator z/x/y scheme; they differ in URL,
+ * auth, and per-pixel decode formula.
+ */
+export type ElevationSourceKind = 'mapbox-terrain-rgb' | 'terrarium'
+
+const DEFAULT_ELEVATION_SOURCE: ElevationSourceKind = 'mapbox-terrain-rgb'
+
+let elevationSource: ElevationSourceKind = DEFAULT_ELEVATION_SOURCE
+
+/**
+ * Switch the module's DEM source. The DEFAULT is 'mapbox-terrain-rgb'
+ * (the router's current runtime source); the enriched-tiles pipeline
+ * sets 'terrarium' for the offline bake. Flipping the runtime default
+ * to terrarium is a routing change gated on the benchmark
+ * (enriched-tiles plan, scope item 2) — do not change the default here
+ * without that gate.
+ *
+ * Cached tiles are keyed per source, so switching never mixes encodings;
+ * lookups against the new source miss (null, fail-soft) until its tiles
+ * are prefetched.
+ */
+export function setElevationSource(kind: ElevationSourceKind): void {
+  elevationSource = kind
+}
+
+/** The currently active DEM source. */
+export function getElevationSource(): ElevationSourceKind {
+  return elevationSource
+}
+
+/** Decode a pixel of the ACTIVE source's encoding. */
+function decodePixel(r: number, g: number, b: number): number {
+  return elevationSource === 'terrarium' ? decodeTerrarium(r, g, b) : decodeTerrainRgb(r, g, b)
 }
 
 // Pluggable PNG decoder. The browser path uses OffscreenCanvas +
@@ -182,26 +250,48 @@ async function decodeImageBlob(blob: Blob): Promise<Uint8ClampedArray | null> {
   return null
 }
 
+/**
+ * Tile URL for the given source, or null when the source can't be
+ * fetched in this runtime (missing Mapbox token, or no PNG decoder
+ * available — no point burning bandwidth on tiles we'd discard).
+ */
+function tileUrl(kind: ElevationSourceKind, z: number, x: number, y: number): string | null {
+  if (kind === 'terrarium') {
+    // AWS Terrain Tiles: open data, no token, no Referer requirement.
+    if (!canDecodeTiles()) return null
+    return `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
+  }
+  // Mapbox Raster Tiles API. `pngraw` returns a non-color-managed PNG
+  // so the RGB values are the encoded elevation bytes — required for
+  // accurate decode. The standard `.png` variant goes through Mapbox's
+  // sRGB pipeline and shifts the bytes.
+  const apiKey = getMapboxToken()
+  if (!apiKey) return null
+  return `https://api.mapbox.com/v4/mapbox.terrain-rgb/${z}/${x}/${y}.pngraw?access_token=${apiKey}`
+}
+
 async function fetchTile(z: number, x: number, y: number): Promise<void> {
+  const source = elevationSource
   const key = tileKey(z, x, y)
   if (tileCache.has(key)) return
   const existing = inflight.get(key)
   if (existing) return existing
 
-  const apiKey = getMapboxToken()
-  if (!apiKey) {
+  const url = tileUrl(source, z, x, y)
+  if (!url) {
     tileCache.set(key, null)
     return
   }
 
   const p = (async () => {
     try {
-      // Mapbox Raster Tiles API. `pngraw` returns a non-color-managed PNG
-      // so the RGB values are the encoded elevation bytes — required for
-      // accurate decode. The standard `.png` variant goes through Mapbox's
-      // sRGB pipeline and shifts the bytes.
-      const url = `https://api.mapbox.com/v4/mapbox.terrain-rgb/${z}/${x}/${y}.pngraw?access_token=${apiKey}`
-      const init: RequestInit = fetchReferer ? { headers: { Referer: fetchReferer } } : {}
+      // The Referer exists only to satisfy Mapbox's URL-restricted token
+      // (see setElevationReferer); terrarium is unauthenticated, so its
+      // requests go out bare.
+      const init: RequestInit =
+        source === 'mapbox-terrain-rgb' && fetchReferer
+          ? { headers: { Referer: fetchReferer } }
+          : {}
       const res = await fetch(url, init)
       if (!res.ok) {
         tileCache.set(key, null)
@@ -337,7 +427,7 @@ function lookupElevationAtZoom(lat: number, lng: number, z: number): number | nu
   const px = Math.min(TILE_SIZE - 1, Math.max(0, Math.floor(fpx)))
   const py = Math.min(TILE_SIZE - 1, Math.max(0, Math.floor(fpy)))
   const i = (py * TILE_SIZE + px) * 4
-  return decodeTerrainRgb(data[i], data[i + 1], data[i + 2])
+  return decodePixel(data[i], data[i + 1], data[i + 2])
 }
 
 /**
@@ -416,10 +506,6 @@ export function overlayGradientPct(
   coords: Array<[number, number]>,
   elevationFn: (lat: number, lng: number) => number | null = lookupElevationOverlay,
 ): number | null {
-  let lengthM = 0
-  for (let i = 1; i < coords.length; i++) {
-    lengthM += segMeters(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1])
-  }
   // Coarse-data detection at the way's midpoint: z=12 data absent there
   // AND z=10 data present ⇒ the coarse tile is what fed the elevations.
   // (Custom elevationFns with nothing cached keep the fine floors.)
@@ -427,6 +513,31 @@ export function overlayGradientPct(
   const coarse =
     !hasTileData(midLat, midLng, TILE_ZOOM) && hasTileData(midLat, midLng, COARSE_TILE_ZOOM)
   const floorScale = coarse ? COARSE_FLOOR_SCALE : 1
+  return computeWayGradientPct(coords, elevationFn, floorScale)
+}
+
+/**
+ * The pure per-way gradient formula — the SINGLE implementation behind
+ * `overlayGradientPct` (which adds only the coarse-tile floorScale
+ * detection) and the enriched-tiles pipeline bake (which passes its own
+ * DEM-backed elevationFn and the fine floorScale of 1). Pure over its
+ * arguments: no tile-cache reads, no module state.
+ *
+ * Gross gradient (%): the steeper of the two traversal climbs over the
+ * way's horizontal length, minus the noise cutoff. Returns null when the
+ * way is shorter than the resolution floor (scaled by `floorScale`) or
+ * every vertex elevation is null — callers treat null as "unknown, show
+ * it" (fail-soft, matching the router's gradient handling).
+ */
+export function computeWayGradientPct(
+  coords: Array<[number, number]>,
+  elevationFn: (lat: number, lng: number) => number | null,
+  floorScale = 1,
+): number | null {
+  let lengthM = 0
+  for (let i = 1; i < coords.length; i++) {
+    lengthM += segMeters(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1])
+  }
   if (lengthM < MIN_GRADED_LEN_M * floorScale) return null
   const { forwardM, reverseM, elevations } = wayAscentMeters(coords, elevationFn)
   if (elevations.every((e) => e == null)) return null
@@ -440,16 +551,21 @@ export function _resetElevationCache(): void {
   inflight.clear()
   externalDecoder = null
   fetchReferer = null
+  elevationSource = DEFAULT_ELEVATION_SOURCE
 }
 
-/** Test-only — seed a tile directly without going through fetch/decode. */
+/**
+ * Test-only — seed a tile directly without going through fetch/decode.
+ * Seeds under the ACTIVE elevation source (cache keys are per-source).
+ */
 export function _seedTile(z: number, x: number, y: number, data: Uint8ClampedArray | null): void {
   tileCache.set(tileKey(z, x, y), data)
 }
 
 /**
  * Test-only — whether the cache has ANY entry (data or fetched-and-failed
- * null) for a tile. Lets tests observe which zoom a prefetch targeted.
+ * null) for a tile under the ACTIVE source. Lets tests observe which zoom
+ * a prefetch targeted.
  */
 export function _hasTileEntry(z: number, x: number, y: number): boolean {
   return tileCache.has(tileKey(z, x, y))

@@ -321,3 +321,221 @@ test('prefetchElevation — stays at z=12 for a normal viewport bbox', async () 
   expect(_hasTileEntry(TILE_ZOOM, z12.x, z12.y)).toBe(true)
   expect(_hasTileEntry(COARSE_TILE_ZOOM, z10.x, z10.y)).toBe(false)
 })
+
+// --- Pluggable DEM source (terrarium) ---------------------------------
+
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { PNG } from 'pngjs'
+import {
+  decodeTerrarium,
+  setElevationSource,
+  getElevationSource,
+  setElevationDecoder,
+  setElevationReferer,
+} from '../src/services/elevation'
+
+test('decodeTerrarium — known encodings resolve per the tilezen spec', () => {
+  // height = (R * 256 + G + B / 256) - 32768
+  expect(decodeTerrarium(128, 0, 0)).toBe(0) // sea level
+  expect(decodeTerrarium(162, 144, 0)).toBe(8848) // Everest
+  expect(decodeTerrarium(127, 224, 0)).toBe(-32) // below sea level
+  expect(decodeTerrarium(128, 100, 64)).toBe(100.25) // fractional metres in B
+})
+
+test('decodeTerrarium and decodeTerrainRgb are different formulas (no accidental aliasing)', () => {
+  // The same bytes MUST decode differently: (1,134,160) is 0 m in
+  // Mapbox terrain-RGB but 1*256+134+160/256-32768 = -32377.375 m
+  // in terrarium.
+  expect(decodeTerrainRgb(1, 134, 160)).toBeCloseTo(0, 1)
+  expect(decodeTerrarium(1, 134, 160)).toBeCloseTo(-32377.375, 3)
+})
+
+test('decodeTerrarium — checked-in PNG fixture with known elevations', () => {
+  // tests/fixtures/terrarium-known.png: 4×1 terrarium-encoded pixels
+  // written by an offline pngjs script (see fixture provenance in the
+  // PR). Proves the formula against real PNG-roundtripped bytes, not
+  // just hand-computed tuples.
+  const buf = readFileSync(join(import.meta.dir, 'fixtures', 'terrarium-known.png'))
+  const png = PNG.sync.read(buf)
+  expect(png.width).toBe(4)
+  expect(png.height).toBe(1)
+  const expected = [0, 8848, -32, 100.25]
+  for (let i = 0; i < expected.length; i++) {
+    const r = png.data[i * 4]
+    const g = png.data[i * 4 + 1]
+    const b = png.data[i * 4 + 2]
+    expect(decodeTerrarium(r, g, b)).toBeCloseTo(expected[i], 6)
+  }
+})
+
+test('elevation source — default is mapbox-terrain-rgb and reset restores it', () => {
+  expect(getElevationSource()).toBe('mapbox-terrain-rgb')
+  setElevationSource('terrarium')
+  expect(getElevationSource()).toBe('terrarium')
+  _resetElevationCache()
+  expect(getElevationSource()).toBe('mapbox-terrain-rgb')
+})
+
+// Terrarium-encoded uniform 256×256 RGBA pixel array.
+function uniformTerrariumTile(metres: number): Uint8ClampedArray {
+  const v = metres + 32768
+  const whole = Math.floor(v)
+  const r = Math.floor(whole / 256)
+  const g = whole % 256
+  const b = Math.round((v - whole) * 256)
+  const data = new Uint8ClampedArray(TILE_SIZE * TILE_SIZE * 4)
+  for (let i = 0; i < data.length; i += 4) {
+    data[i + 0] = r
+    data[i + 1] = g
+    data[i + 2] = b
+    data[i + 3] = 255
+  }
+  return data
+}
+
+test('lookupElevation — decodes with the ACTIVE source formula (terrarium)', () => {
+  setElevationSource('terrarium')
+  seedAt(37.76, -122.42, TILE_ZOOM, uniformTerrariumTile(123.5))
+  expect(lookupElevation(37.76, -122.42)).toBeCloseTo(123.5, 3)
+})
+
+test('elevation source — caches are keyed per source (no cross-decode on switch)', () => {
+  // Seed under the DEFAULT (mapbox) source…
+  seedAt(37.76, -122.42, TILE_ZOOM, uniformTile(100))
+  expect(lookupElevation(37.76, -122.42)).toBeCloseTo(100, 0)
+  // …switch to terrarium: the mapbox tile must be INVISIBLE (null,
+  // fail-soft), never decoded with the terrarium formula.
+  setElevationSource('terrarium')
+  expect(lookupElevation(37.76, -122.42)).toBeNull()
+  // Switching back restores the original data untouched.
+  setElevationSource('mapbox-terrain-rgb')
+  expect(lookupElevation(37.76, -122.42)).toBeCloseTo(100, 0)
+})
+
+test('router default unchanged — lookupElevation reads mapbox data unless switched', () => {
+  // No setElevationSource call in this test: the module default must
+  // serve mapbox-encoded tiles (chunk C2 flips the default behind the
+  // benchmark gate — not here).
+  seedAt(52.52, 13.405, TILE_ZOOM, uniformTile(34))
+  expect(lookupElevation(52.52, 13.405)).toBeCloseTo(34, 0)
+})
+
+// In-memory 256×256 PNG (terrarium- or mapbox-encoded uniform value).
+function pngTileBuffer(pixels: Uint8ClampedArray): Buffer {
+  const png = new PNG({ width: TILE_SIZE, height: TILE_SIZE })
+  png.data = Buffer.from(pixels.buffer, pixels.byteOffset, pixels.length)
+  return PNG.sync.write(png)
+}
+
+function registerPngjsDecoder(): void {
+  setElevationDecoder((bytes) => {
+    const png = PNG.sync.read(Buffer.from(bytes))
+    return new Uint8ClampedArray(png.data.buffer, png.data.byteOffset, png.data.length)
+  })
+}
+
+interface CapturedRequest {
+  url: string
+  referer: string | null
+}
+
+function mockFetch(body: Buffer, captured: CapturedRequest[]): () => void {
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers)
+    captured.push({ url: String(input), referer: headers.get('Referer') })
+    return new Response(new Uint8Array(body), { status: 200 })
+  }) as typeof fetch
+  return () => {
+    globalThis.fetch = orig
+  }
+}
+
+test('terrarium fetch — S3 URL, no token, no Referer; full prefetch→lookup path', async () => {
+  const captured: CapturedRequest[] = []
+  const restore = mockFetch(pngTileBuffer(uniformTerrariumTile(250.5)), captured)
+  // Bun auto-loads .env, so a real token may be ambient — remove it for
+  // this test to prove terrarium needs NO token to fetch.
+  const savedToken = process.env.VITE_MAPBOX_TOKEN
+  delete process.env.VITE_MAPBOX_TOKEN
+  try {
+    setElevationSource('terrarium')
+    registerPngjsDecoder()
+    // A registered Referer must NOT leak onto terrarium requests — it
+    // exists solely for the URL-restricted Mapbox token.
+    setElevationReferer('https://bike-map.fryanpan.com/')
+
+    await prefetchElevation({ south: 37.75, west: -122.43, north: 37.76, east: -122.42 })
+
+    expect(captured.length).toBeGreaterThan(0)
+    for (const req of captured) {
+      expect(req.url).toMatch(
+        /^https:\/\/s3\.amazonaws\.com\/elevation-tiles-prod\/terrarium\/12\/\d+\/\d+\.png$/,
+      )
+      expect(req.url).not.toContain('access_token')
+      expect(req.referer).toBeNull()
+    }
+    expect(lookupElevation(37.755, -122.425)).toBeCloseTo(250.5, 3)
+  } finally {
+    if (savedToken !== undefined) process.env.VITE_MAPBOX_TOKEN = savedToken
+    restore()
+  }
+})
+
+test('mapbox fetch path untouched — pngraw URL with access_token and Referer', async () => {
+  const captured: CapturedRequest[] = []
+  const restore = mockFetch(pngTileBuffer(uniformTile(75)), captured)
+  const savedToken = process.env.VITE_MAPBOX_TOKEN
+  process.env.VITE_MAPBOX_TOKEN = 'pk.test-token'
+  try {
+    // Default source — no setElevationSource call.
+    registerPngjsDecoder()
+    setElevationReferer('https://bike-map.fryanpan.com/')
+
+    await prefetchElevation({ south: 37.75, west: -122.43, north: 37.76, east: -122.42 })
+
+    expect(captured.length).toBeGreaterThan(0)
+    for (const req of captured) {
+      expect(req.url).toMatch(
+        /^https:\/\/api\.mapbox\.com\/v4\/mapbox\.terrain-rgb\/12\/\d+\/\d+\.pngraw\?access_token=pk\.test-token$/,
+      )
+      expect(req.referer).toBe('https://bike-map.fryanpan.com/')
+    }
+    expect(lookupElevation(37.755, -122.425)).toBeCloseTo(75, 0)
+  } finally {
+    if (savedToken !== undefined) process.env.VITE_MAPBOX_TOKEN = savedToken
+    else delete process.env.VITE_MAPBOX_TOKEN
+    restore()
+  }
+})
+
+// --- computeWayGradientPct (shared pipeline/overlay formula) -----------
+
+import { computeWayGradientPct } from '../src/services/elevation'
+
+test('computeWayGradientPct — pure helper matches overlayGradientPct on the same inputs', () => {
+  // ~111 m run, linear 20 m climb (same setup as the overlayGradientPct
+  // steep-way test). With nothing cached, overlayGradientPct uses
+  // floorScale 1 — the two MUST agree exactly (same implementation).
+  const coords: Array<[number, number]> = [[37.75, -122.43], [37.751, -122.43]]
+  const fn = (lat: number) => (lat - 37.75) * 20000
+  expect(computeWayGradientPct(coords, fn, 1)).toBe(overlayGradientPct(coords, fn))
+  expect(computeWayGradientPct(coords, () => 42, 1)).toBe(0)
+  expect(computeWayGradientPct(coords, () => null, 1)).toBeNull()
+})
+
+test('computeWayGradientPct — floorScale scales the length floor and noise cutoff', () => {
+  // 111 m way: graded at floorScale 1 (40 m floor), ungraded at
+  // floorScale 4 (160 m floor).
+  const coords: Array<[number, number]> = [[37.75, -122.43], [37.751, -122.43]]
+  const fn = (lat: number) => (lat - 37.75) * 20000
+  expect(computeWayGradientPct(coords, fn, 1)).not.toBeNull()
+  expect(computeWayGradientPct(coords, fn, 4)).toBeNull()
+  // ~445 m way with a 5 m climb: above the 2 m fine cutoff, below the
+  // 8 m coarse cutoff.
+  const longCoords: Array<[number, number]> = [[37.75, -122.43], [37.754, -122.43]]
+  const gentle = (lat: number) => (lat - 37.75) * 1250 // 5 m over 0.004°
+  expect(computeWayGradientPct(longCoords, gentle, 1)!).toBeGreaterThan(0)
+  expect(computeWayGradientPct(longCoords, gentle, 4)).toBe(0)
+})
