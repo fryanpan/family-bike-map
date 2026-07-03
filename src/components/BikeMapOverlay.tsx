@@ -5,7 +5,7 @@ import {
 } from '../services/overpass'
 import { getDisplayPathLevel, getOverlayMaxGradientPct } from '../utils/classify'
 import { prefetchElevation, overlayGradientPct, hasFineElevationAt } from '../services/elevation'
-import { computeMoatIsolation, inheritStubVerdicts } from '../services/overlayReachability'
+import { computeMoatIsolation, inheritStubVerdicts, smallFragmentIds } from '../services/overlayReachability'
 import { classifyEdge, PATH_LEVEL_LABELS } from '../utils/lts'
 import type { PathLevel } from '../utils/lts'
 import { colorForLevel, weightMultiplierForLevel } from './SimpleLegend'
@@ -32,6 +32,10 @@ const HIT_POLYLINE_WEIGHT = 24
 // surface indicator becomes useful (the user is close enough to care
 // which side street is paved smoothly vs. cobbled).
 const COBBLE_MARKER_MIN_ZOOM = 16
+// Floating-fragment floor: painted components shorter than this (total
+// length) are hidden from the overview map below FRAGMENT_SHOW_MIN_ZOOM.
+const FRAGMENT_MIN_LEN_M = 100
+const FRAGMENT_SHOW_MIN_ZOOM = 15
 
 // ── Tooltip HTML helpers (unchanged) ──────────────────────────────────────
 
@@ -313,10 +317,23 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
     )
 
     // Pass 0c — style the survivors.
+    // Pass 0b2 — floating-fragment floor. Surviving painted components whose
+    // total length is under FRAGMENT_MIN_LEN_M read as noise at overview
+    // zooms ("floating short segments" — Bryan, 2026-07-03): real routing
+    // connectors, but not advertisable infrastructure. Hidden below
+    // FRAGMENT_SHOW_MIN_ZOOM only; street-detail zooms show everything.
+    // Display-only; superseded by the enriched-tile componentPaintedLenM
+    // field (docs/product/plans/enriched-tiles-plan.md).
+    const survivors = candidates.filter(
+      (c) => c.verdict !== 'hidden' && !(c.verdict === 'unknown' && stubHidden.has(c.way.osmId)),
+    )
+    const smallFragments = zoom < FRAGMENT_SHOW_MIN_ZOOM
+      ? smallFragmentIds(survivors.map((c) => c.way), FRAGMENT_MIN_LEN_M)
+      : new Set<string | number>()
+
     const toRender: RenderedWay[] = []
-    for (const { way, verdict, itemName, pathLevel } of candidates) {
-      if (verdict === 'hidden') continue
-      if (verdict === 'unknown' && stubHidden.has(way.osmId)) continue
+    for (const { way, itemName, pathLevel } of survivors) {
+      if (smallFragments.has(way.osmId)) continue
       const color = colorForLevel(pathLevel, settings.tiers)
       const isBikeInfraTier = pathLevel === '1a' || pathLevel === '1b' || pathLevel === '2a'
       const browsingWeight = BROWSING_WEIGHT * weightMultiplierForLevel(pathLevel, settings.tiers)
