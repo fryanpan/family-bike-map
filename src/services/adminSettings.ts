@@ -69,6 +69,14 @@ export interface AdminSettings {
   /** Per-mode routing parameters. Merge with compiled defaults from
    *  MODE_RULES — user-edited values win. */
   modeRouting: Partial<Record<RideMode, Partial<ModeRoutingParams>>>
+  /** Routing backend. Empty string (default) = routes compute in the
+   *  browser via clientRoute. A URL (e.g. 'http://localhost:8787') =
+   *  POST <url>/route on the bun route server (server/route-server.ts),
+   *  which runs THE SAME routing code server-side. Any server error
+   *  falls back to in-browser routing (see services/routeBackend.ts).
+   *  Default stays client until benchmarks justify a flip (enriched-tiles
+   *  plan, scope update item 3). */
+  routingBackend: string
   /** Active location-search engine. 'nominatim' (default, no key
    *  required) or 'google' (requires VITE_GOOGLE_MAPS_KEY at build
    *  time — falls back to nominatim if absent). See
@@ -115,6 +123,7 @@ export const DEFAULT_SETTINGS: AdminSettings = {
   showExternalRouterLinks: false,
   showStartNavigation: false,
   modeRouting: {},
+  routingBackend: '',
   geocoderEngine: 'google',
   mapEngine: 'google-maps',
   mapStyle: '',

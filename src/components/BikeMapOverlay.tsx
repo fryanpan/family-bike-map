@@ -14,7 +14,7 @@ import { resolveStreetImagery } from '../services/streetImagery'
 import { useMapEngine } from '../services/mapEngine/context'
 import type { MapEngine, PolylineHandle, PopupHandle, PathLayerHandle, PathLayerFeature } from '../services/mapEngine'
 import type { ClassificationRule } from '../services/rules'
-import type { OsmWay } from '../utils/types'
+import { isEnrichedWay, type OsmWay } from '../utils/types'
 import { simplifyPath } from '../utils/simplifyPath'
 
 // Max tiles allowed in viewport. Beyond this the map is too zoomed out
@@ -34,8 +34,91 @@ const HIT_POLYLINE_WEIGHT = 24
 const COBBLE_MARKER_MIN_ZOOM = 16
 // Floating-fragment floor: painted components shorter than this (total
 // length) are hidden from the overview map below FRAGMENT_SHOW_MIN_ZOOM.
-const FRAGMENT_MIN_LEN_M = 100
-const FRAGMENT_SHOW_MIN_ZOOM = 15
+export const FRAGMENT_MIN_LEN_M = 100
+export const FRAGMENT_SHOW_MIN_ZOOM = 15
+
+// ── Visibility verdicts ─────────────────────────────────────────────────────
+//
+// Two code paths compute a way's overlay verdict, dispatched per way by
+// overlayWayVerdict below:
+//
+//  * ENRICHED ways (baked fields present — see isEnrichedWay in types.ts):
+//    pure arithmetic over the baked numbers. No elevation lookups, no
+//    union-find, no moat pass, no stub inheritance — the verdict ships
+//    with the geometry, which is the entire point of the enriched-tiles
+//    pipeline (docs/product/plans/enriched-tiles-plan.md).
+//  * RAW Overpass ways: the existing runtime path (gradient cache + idle
+//    moat pass + stub inheritance + fragment union-find), unchanged. It is
+//    kept until enriched coverage is global, then deleted.
+//
+// Mixed viewports run both, each strictly over its own partition.
+
+export type OverlayVerdict = 'shown' | 'hidden' | 'unknown'
+
+export interface EnrichedGateOptions {
+  /** Mode's overlay gradient ceiling (%) — getOverlayMaxGradientPct. */
+  maxGradientPct: number
+  /** Admin steep-approach push budget (m). The baked accessGradientPct is a
+   *  strict (budget-0) minimax and carries no bottleneck-length info, so a
+   *  positive budget cannot be applied per approach way like the runtime
+   *  moat does. Any budget > 0 therefore disables the baked access gate
+   *  entirely — fail-soft toward SHOWN, and monotone in the budget (raising
+   *  it only ever shows more), matching the runtime knob's direction.
+   *  Default budget is 0, where baked and runtime semantics agree. */
+  steepApproachPushM: number
+  /** True below FRAGMENT_SHOW_MIN_ZOOM — the overview zooms where
+   *  sub-FRAGMENT_MIN_LEN_M components are suppressed. */
+  fragmentFloorActive: boolean
+}
+
+/**
+ * Pure-arithmetic verdict for an enriched way. Never 'unknown': a null
+ * baked field means the bake couldn't grade it (DEM void) and fail-softs
+ * to shown — there is no "terrain still loading" state to wait on, so
+ * enriched ways can never paint-then-vanish and never need stub
+ * inheritance (the bake gave sub-noise-floor stubs their component's
+ * context by construction).
+ */
+export function enrichedWayVerdict(way: OsmWay, opts: EnrichedGateOptions): 'shown' | 'hidden' {
+  if (way.gradientPct != null && way.gradientPct > opts.maxGradientPct) return 'hidden'
+  if (
+    way.accessGradientPct != null &&
+    way.accessGradientPct > opts.maxGradientPct &&
+    opts.steepApproachPushM <= 0
+  ) return 'hidden'
+  if (
+    opts.fragmentFloorActive &&
+    way.componentPaintedLenM != null &&
+    way.componentPaintedLenM < FRAGMENT_MIN_LEN_M
+  ) return 'hidden'
+  return 'shown'
+}
+
+export interface RuntimeGateInputs {
+  /** The runtime per-way gradient accessor (cached overlayGradientPct). */
+  gradientPct: (way: OsmWay) => number | null
+  /** Result of the idle-scheduled computeMoatIsolation pass. */
+  moatIsolated: Set<string | number>
+}
+
+/**
+ * Per-way verdict dispatcher. Enriched ways take the arithmetic gate and
+ * MUST NOT touch the runtime inputs (no gradientPct call, no moat lookup);
+ * raw ways take the pre-existing runtime path unchanged.
+ */
+export function overlayWayVerdict(
+  way: OsmWay,
+  opts: EnrichedGateOptions & RuntimeGateInputs,
+): OverlayVerdict {
+  if (isEnrichedWay(way)) return enrichedWayVerdict(way, opts)
+  // Runtime path — identical logic to the pre-enrichment gate: local
+  // gradient ceiling + global moat verdict; null gradient = unknown.
+  const gradientPct = opts.gradientPct(way)
+  if (opts.moatIsolated.has(way.osmId) || (gradientPct != null && gradientPct > opts.maxGradientPct)) {
+    return 'hidden'
+  }
+  return gradientPct == null ? 'unknown' : 'shown'
+}
 
 // ── Tooltip HTML helpers (unchanged) ──────────────────────────────────────
 
@@ -125,6 +208,13 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
 }) {
   const settings = useAdminSettings()
   const [zoom, setZoom] = useState<number>(() => engine.getZoom())
+  // Partition: enriched ways (baked verdict inputs) never participate in
+  // the runtime elevation/moat machinery below. When EVERY way is enriched
+  // the runtime passes are skipped outright — zero elevation lookups, zero
+  // union-find (measurable outcome 1 of the enriched-tiles plan). When no
+  // way is enriched this array === ways contents and behaviour is
+  // unchanged from the pre-enrichment overlay.
+  const nonEnrichedWays = useMemo(() => ways.filter((w) => !isEnrichedWay(w)), [ways])
   // Bumped once the terrain-RGB tiles covering the loaded ways have been
   // fetched, so the render effect re-runs and the steepness gate can read
   // real elevations. Until then overlayGradientPct returns null and every
@@ -180,9 +270,12 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
   // The viewport is always small (≤ MAX_VISIBLE_TILES). Off-screen ways
   // fail soft (null gradient → shown) until the user pans to them.
   // Re-runs when ways change (i.e. a pan loaded new tiles). Tiles are
-  // cached in-memory and shared with the router.
+  // cached in-memory and shared with the router. Enriched ways carry their
+  // gradient baked-in, so terrain is only fetched when at least one RAW way
+  // needs runtime grading — a fully-enriched viewport does zero elevation
+  // work here.
   useEffect(() => {
-    if (ways.length === 0) return
+    if (nonEnrichedWays.length === 0) return
     const [sw, ne] = engine.getBounds()
     const bbox = { south: sw[0], west: sw[1], north: ne[0], east: ne[1] }
     if (![bbox.south, bbox.west, bbox.north, bbox.east].every(Number.isFinite)) return
@@ -190,7 +283,7 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
     void prefetchElevation(bbox)
       .then(() => { if (!cancelled) setElevReady((v) => v + 1) })
     return () => { cancelled = true }
-  }, [ways, engine])
+  }, [nonEnrichedWays, engine])
 
   // Moat-isolated way ids: painted ways whose connected component is
   // reachable only via a too-steep climb (a "steep moat" — e.g. a flat
@@ -208,12 +301,25 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
   // Idle-scheduled instead; until the result lands the set is empty, which
   // fail-softs to SHOWN — steep networks pop out a beat later, matching the
   // elevReady behaviour above.
+  // Runs ONLY over non-enriched ways: enriched ways carry accessGradientPct
+  // (the baked minimax replacement for the moat verdict) and never consult
+  // this set. A fully-enriched viewport skips the pass entirely — no idle
+  // work, no union-find. Mixed viewports lose the enriched ways as
+  // connectors for the RAW ways' moat graph; that's fail-soft in the
+  // showing direction (fewer connections can only be rescued by the
+  // no-steep-border-evidence rule and the edge fail-soft, both of which
+  // bias toward SHOWN), and mixed viewports only occur at the boundary of
+  // enriched coverage where the edge fail-soft already applies.
   const [moatIsolated, setMoatIsolated] = useState<Set<string | number>>(() => new Set())
   useEffect(() => {
+    if (nonEnrichedWays.length === 0) {
+      setMoatIsolated((prev) => (prev.size === 0 ? prev : new Set()))
+      return
+    }
     let cancelled = false
     const run = () => {
       if (cancelled) return
-      const result = computeMoatIsolation(ways, {
+      const result = computeMoatIsolation(nonEnrichedWays, {
         maxGradientPct: getOverlayMaxGradientPct(profileKey),
         pushBudgetM: settings.steepApproachPushM,
         // Same per-way gradient accessor as pass 0 below — the two
@@ -236,7 +342,7 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
       else window.clearTimeout(handle)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ways, profileKey, settings.steepApproachPushM, elevReady, loadedTileKeys])
+  }, [nonEnrichedWays, profileKey, settings.steepApproachPushM, elevReady, loadedTileKeys])
 
   useEffect(() => {
     const polylineHandles: PolylineHandle[] = []
@@ -251,19 +357,31 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
 
     // Pass 0a — classify + gate each painted candidate. Verdicts:
     //   hidden  — the way's own gradient exceeds the ceiling, or the moat
-    //             filter isolated its component
-    //   unknown — gradient null: terrain not loaded yet, or the way is
-    //             below the noise floor (too short to grade)
+    //             filter / baked access gradient isolated it, or (enriched)
+    //             its baked component length is under the fragment floor
+    //   unknown — RAW ways only — gradient null: terrain not loaded yet,
+    //             or the way is below the noise floor (too short to grade)
     //   shown   — graded and within the ceiling
-    // Unknown ways are NOT painted immediately: a stub below the noise
-    // floor whose whole graded context is hidden must inherit that verdict
-    // (pass 0b), or the map fills with white-halo pill confetti wherever
-    // the gates shred a hillside network — the #208→#209 revert artifact.
+    // Enriched ways get their verdict from pure arithmetic over the baked
+    // fields (enrichedWayVerdict) and are never 'unknown'. Unknown RAW ways
+    // are NOT painted immediately: a stub below the noise floor whose whole
+    // graded context is hidden must inherit that verdict (pass 0b), or the
+    // map fills with white-halo pill confetti wherever the gates shred a
+    // hillside network — the #208→#209 revert artifact.
     interface Candidate {
       way: OsmWay
-      verdict: 'shown' | 'hidden' | 'unknown'
+      verdict: OverlayVerdict
       itemName: string | null
       pathLevel: PathLevel
+      /** True = arithmetic gate; false = runtime moat/stub/fragment path. */
+      enriched: boolean
+    }
+    const gateOptions: EnrichedGateOptions & RuntimeGateInputs = {
+      maxGradientPct,
+      steepApproachPushM: settings.steepApproachPushM,
+      fragmentFloorActive: zoom < FRAGMENT_SHOW_MIN_ZOOM,
+      gradientPct: (w) => gradientFor(w, elevReady),
+      moatIsolated,
     }
     const candidates: Candidate[] = []
     const roughWays: OsmWay[] = []
@@ -293,42 +411,46 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
       // (see useRoutePolylines in Map.tsx) so users see every segment
       // along their actual route regardless of overlay visibility.
       if (!isPreferred) continue
-      // Local gradient gate (the way's OWN gradient) + the global moat
-      // filter (component behind a too-steep approach). Both display-only.
-      const gradientPct = gradientFor(way, elevReady)
-      const verdict: Candidate['verdict'] =
-        moatIsolated.has(way.osmId) || (gradientPct != null && gradientPct > maxGradientPct)
-          ? 'hidden'
-          : gradientPct == null
-            ? 'unknown'
-            : 'shown'
-      candidates.push({ way, verdict, itemName, pathLevel })
+      // Visibility gate — dispatched per way: enriched ways use the baked
+      // arithmetic gate (own gradient + minimax access + component fragment
+      // floor); RAW ways use the runtime local-gradient + moat path. All
+      // display-only.
+      const verdict = overlayWayVerdict(way, gateOptions)
+      candidates.push({ way, verdict, itemName, pathLevel, enriched: isEnrichedWay(way) })
     }
 
-    // Pass 0b — stub verdict inheritance: an ungradable way (below the
-    // noise floor) whose entire graded painted adjacency is hidden inherits
-    // 'hidden'; touching any shown way, or having no graded context at all,
-    // keeps it shown. See inheritStubVerdicts in overlayReachability.ts.
+    // Pass 0b — stub verdict inheritance, RAW ways only: an ungradable way
+    // (below the noise floor) whose entire graded painted adjacency is
+    // hidden inherits 'hidden'; touching any shown way, or having no graded
+    // context at all, keeps it shown. See inheritStubVerdicts in
+    // overlayReachability.ts. Enriched ways never participate — their
+    // verdict is definite (never 'unknown') and the bake already gave
+    // sub-noise-floor stubs their component's context.
+    const runtimeCandidates = candidates.filter((c) => !c.enriched)
     const verdictByOsmId = new Map<string | number, Candidate['verdict']>()
-    for (const c of candidates) verdictByOsmId.set(c.way.osmId, c.verdict)
+    for (const c of runtimeCandidates) verdictByOsmId.set(c.way.osmId, c.verdict)
     const stubHidden = inheritStubVerdicts(
-      candidates.map((c) => c.way),
+      runtimeCandidates.map((c) => c.way),
       (way) => verdictByOsmId.get(way.osmId) ?? 'unknown',
     )
 
     // Pass 0c — style the survivors.
-    // Pass 0b2 — floating-fragment floor. Surviving painted components whose
-    // total length is under FRAGMENT_MIN_LEN_M read as noise at overview
-    // zooms ("floating short segments" — Bryan, 2026-07-03): real routing
-    // connectors, but not advertisable infrastructure. Hidden below
-    // FRAGMENT_SHOW_MIN_ZOOM only; street-detail zooms show everything.
-    // Display-only; superseded by the enriched-tile componentPaintedLenM
-    // field (docs/product/plans/enriched-tiles-plan.md).
+    // Pass 0b2 — floating-fragment floor, RAW ways only. Surviving painted
+    // components whose total length is under FRAGMENT_MIN_LEN_M read as
+    // noise at overview zooms ("floating short segments" — Bryan,
+    // 2026-07-03): real routing connectors, but not advertisable
+    // infrastructure. Hidden below FRAGMENT_SHOW_MIN_ZOOM only;
+    // street-detail zooms show everything. Display-only. Enriched ways are
+    // already fragment-gated arithmetically via componentPaintedLenM inside
+    // enrichedWayVerdict (the baked field sees the whole region's
+    // component, not just the loaded viewport), so they skip this
+    // viewport-local union-find.
     const survivors = candidates.filter(
       (c) => c.verdict !== 'hidden' && !(c.verdict === 'unknown' && stubHidden.has(c.way.osmId)),
     )
+    const runtimeSurvivors = survivors.filter((c) => !c.enriched)
     const smallFragments = zoom < FRAGMENT_SHOW_MIN_ZOOM
-      ? smallFragmentIds(survivors.map((c) => c.way), FRAGMENT_MIN_LEN_M)
+      ? smallFragmentIds(runtimeSurvivors.map((c) => c.way), FRAGMENT_MIN_LEN_M)
       : new Set<string | number>()
 
     const toRender: RenderedWay[] = []

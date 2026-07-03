@@ -1,8 +1,9 @@
-import { beforeAll, describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { PNG } from 'pngjs'
 import { enrichRegion } from '../../scripts/pipeline/enrich-region'
 import {
   bucketIntoTiles,
@@ -10,6 +11,8 @@ import {
   type EnrichedTile,
   type PipelineWay,
 } from '../../scripts/pipeline/lib/tiles'
+import { wayLengthM } from '../../scripts/pipeline/lib/graph'
+import { _resetElevationCache } from '../../src/services/elevation'
 
 const FIXTURE_OSM = path.join(import.meta.dir, '../fixtures/enrich-fixture.osm')
 const FIXTURE_PBF = path.join(import.meta.dir, '../fixtures/enrich-fixture.osm.pbf')
@@ -97,23 +100,70 @@ describe('enrichRegion on the fixture extract', () => {
     expect(north.ways.map((w) => w.osmId)).toEqual([207])
   })
 
-  test('schema: meta populated, enrichment values staged as null (chunk B1 fills them)', () => {
+  test('schema: meta populated; without a DEM only gradientPct stays null', () => {
     for (const name of [MAIN_TILE, NORTH_TILE]) {
       const tile = readTile(outDir, name)
       expect(tile.meta).toEqual({
         builtFromSeq: SEQ,
         builtAt: BUILT_AT,
         pipelineVersion: '1',
-        demSource: null,
+        demSource: null, // no opts.dem → no gradient bake
       })
       for (const w of tile.ways) {
         expect(w.itemName).toBeNull()
-        expect(w.gradientPct).toBeNull()
-        expect(w.accessGradientPct).toBeNull()
-        expect(w.componentPaintedLenM).toBeNull()
+        expect(w.gradientPct).toBeNull() // DEM pass skipped
         expect(typeof w.osmId).toBe('number')
         expect(w.coordinates.length).toBeGreaterThan(0)
       }
+    }
+  })
+
+  test('accessGradientPct: 0 on the mainland seed component, null on disconnected islands', () => {
+    const tile = readTile(outDir, MAIN_TILE)
+    const accessOf = (id: number) => tile.ways.find((w) => w.osmId === id)!.accessGradientPct
+    // The Alpha/Beta/Gamma grid (201+202+203, ~463 m) is the largest
+    // connected component → mainland seed → access 0.
+    expect(accessOf(201)).toBe(0)
+    expect(accessOf(202)).toBe(0)
+    expect(accessOf(203)).toBe(0)
+    // Every other fixture way shares no node with the grid: topologically
+    // disconnected → null (fail-soft unknown, not a moat verdict).
+    for (const id of [204, 205, 206, 207, 211, 212, 213, 215, 216, 217]) {
+      expect(accessOf(id)).toBeNull()
+    }
+  })
+
+  test('componentPaintedLenM: connected grid shares one total; isolated ways carry their own length', () => {
+    const tile = readTile(outDir, MAIN_TILE)
+    const byId = new Map(tile.ways.map((w) => [w.osmId, w]))
+    const round1 = (v: number) => Math.round(v * 10) / 10
+    const lenOf = (id: number) =>
+      round1(wayLengthM(byId.get(id)!.coordinates as [number, number][]))
+    const gridTotal = round1(
+      [201, 202, 203].reduce(
+        (sum, id) => sum + wayLengthM(byId.get(id)!.coordinates as [number, number][]),
+        0,
+      ),
+    )
+    for (const id of [201, 202, 203]) {
+      expect(byId.get(id)!.componentPaintedLenM).toBeCloseTo(gridTotal, 1)
+    }
+    // Isolated painted candidates (every other included way is one — the
+    // fixture graph is deliberately mostly disconnected): own length only.
+    for (const id of [204, 205, 206, 207, 211, 212, 213, 215, 216, 217]) {
+      expect(byId.get(id)!.componentPaintedLenM).toBeCloseTo(lenOf(id), 1)
+    }
+    // The ~14 m Isolated Stub is exactly the fragment class the field
+    // exists to suppress at overview zooms.
+    expect(byId.get(206)!.componentPaintedLenM!).toBeLessThan(20)
+  })
+
+  test('control-node pseudo-ways never carry enrichment values', () => {
+    const tile = readTile(outDir, MAIN_TILE)
+    for (const w of tile.ways.filter((x) => x.coordinates.length === 1)) {
+      expect(w.gradientPct).toBeNull()
+      expect(w.accessGradientPct).toBeNull()
+      expect(w.componentPaintedLenM).toBeNull()
     }
   })
 
@@ -163,6 +213,111 @@ describe('enrichRegion on the fixture extract', () => {
     expect(names).toEqual([MAIN_TILE, NORTH_TILE])
     for (const name of names) {
       expect(readTile(outDir3, name).ways.map((w) => w.osmId)).toEqual([207])
+    }
+  })
+})
+
+describe('enrichRegion with the DEM pass', () => {
+  // The bake seeds the production elevation module; don't leak terrarium
+  // state into other test files.
+  afterAll(() => _resetElevationCache())
+
+  const TILE_SIZE = 256
+
+  function terrariumPng(metres: number): Buffer {
+    const png = new PNG({ width: TILE_SIZE, height: TILE_SIZE })
+    const v = metres + 32768
+    for (let i = 0; i < TILE_SIZE * TILE_SIZE * 4; i += 4) {
+      png.data[i + 0] = Math.floor(v / 256)
+      png.data[i + 1] = v % 256
+      png.data[i + 2] = 0
+      png.data[i + 3] = 255
+    }
+    return PNG.sync.write(png)
+  }
+
+  function servePng(body: Buffer | null): typeof fetch {
+    return (async () =>
+      body
+        ? new Response(new Uint8Array(body), { status: 200 })
+        : new Response('not found', { status: 404 })) as unknown as typeof fetch
+  }
+
+  test('bakes gradients: 0 on flat DEM for graded-length ways, null below the noise floor; demSource stamped', async () => {
+    _resetElevationCache()
+    const outDir = mkOutDir('dem')
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'enrich-dem-cache-'))
+    await enrichRegion({
+      pbf: FIXTURE_PBF,
+      out: outDir,
+      builtAt: BUILT_AT,
+      seq: SEQ,
+      dem: { cacheDir, fetchImpl: servePng(terrariumPng(100)) },
+    })
+    const tile = readTile(outDir, MAIN_TILE)
+    expect(tile.meta.demSource).toBe('terrarium-v1')
+    const byId = new Map(tile.ways.map((w) => [w.osmId, w]))
+    // Flat DEM → exactly 0 for every way longer than the 40 m noise floor…
+    for (const id of [201, 202, 203, 204, 207]) {
+      expect(byId.get(id)!.gradientPct).toBe(0)
+    }
+    // …and null for the ~14 m Isolated Stub (below the floor — production
+    // overlayGradientPct semantics, not a DEM void).
+    expect(byId.get(206)!.gradientPct).toBeNull()
+    // Access/component passes ran too (unchanged by a flat DEM).
+    expect(byId.get(201)!.accessGradientPct).toBe(0)
+    expect(byId.get(204)!.accessGradientPct).toBeNull()
+  })
+
+  test('DEM voids (404 everywhere): gradientPct null for all ways, fail-soft', async () => {
+    _resetElevationCache()
+    const outDir = mkOutDir('dem-void')
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'enrich-dem-void-'))
+    await enrichRegion({
+      pbf: FIXTURE_PBF,
+      out: outDir,
+      builtAt: BUILT_AT,
+      seq: SEQ,
+      dem: { cacheDir, fetchImpl: servePng(null) },
+    })
+    const tile = readTile(outDir, MAIN_TILE)
+    expect(tile.meta.demSource).toBe('terrarium-v1')
+    for (const w of tile.ways) expect(w.gradientPct).toBeNull()
+    // The graph passes still bake (null gradients are fail-soft passable).
+    expect(tile.ways.find((w) => w.osmId === 201)!.accessGradientPct).toBe(0)
+    expect(tile.ways.find((w) => w.osmId === 201)!.componentPaintedLenM).not.toBeNull()
+  })
+
+  test('deterministic with a DEM: a second run (served from the disk cache) is byte-identical', async () => {
+    _resetElevationCache()
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'enrich-dem-det-'))
+    const outA = mkOutDir('dem-a')
+    await enrichRegion({
+      pbf: FIXTURE_PBF,
+      out: outA,
+      builtAt: BUILT_AT,
+      seq: SEQ,
+      dem: { cacheDir, fetchImpl: servePng(terrariumPng(100)) },
+    })
+    // Second run: network dead — every tile must come from the disk cache.
+    _resetElevationCache()
+    const outB = mkOutDir('dem-b')
+    const deadFetch = (async () => {
+      throw new Error('network disabled')
+    }) as unknown as typeof fetch
+    await enrichRegion({
+      pbf: FIXTURE_PBF,
+      out: outB,
+      builtAt: BUILT_AT,
+      seq: SEQ,
+      dem: { cacheDir, fetchImpl: deadFetch },
+    })
+    const names = fs.readdirSync(outA).sort()
+    expect(fs.readdirSync(outB).sort()).toEqual(names)
+    for (const name of names) {
+      expect(
+        fs.readFileSync(path.join(outA, name)).equals(fs.readFileSync(path.join(outB, name))),
+      ).toBe(true)
     }
   })
 })

@@ -1,7 +1,8 @@
-// Enrichment pipeline — region bake (chunk A2: skeleton, geometry + schema).
+// Enrichment pipeline — region bake.
 //
 //   bun scripts/pipeline/enrich-region.ts --pbf data/norcal.osm.pbf --out data/tiles \
-//       [--bbox south,west,north,east] [--built-at ISO] [--seq N]
+//       [--bbox south,west,north,east] [--built-at ISO] [--seq N] \
+//       [--dem-cache data/dem-cache] [--no-dem]
 //
 // Reads a Geofabrik-style .osm.pbf, filters to EXACTLY the bike-relevant way
 // set the client fetches from Overpass (lib/filter.ts mirrors
@@ -9,17 +10,20 @@
 // 0.1-degree tiles (grid imported from src/services/overpass.ts), and emits
 // one enriched tile JSON per tile (schema: lib/tiles.ts).
 //
-// In this chunk gradientPct / accessGradientPct / componentPaintedLenM are
-// emitted as null — chunk B1 fills them (DEM + minimax access + component
-// pass). The schema is complete so downstream chunks (Worker serving, client
-// consumption) can build against it now.
+// Chunk B1 bakes the numbers, all via production functions (no parallel
+// implementations — see lib/dem.ts and lib/graph.ts headers):
+//   - gradientPct           computeWayGradientPct over the terrarium DEM
+//                           (HTTP + on-disk cache under data/dem-cache/)
+//   - accessGradientPct     minimax Dijkstra from the mainland seed
+//   - componentPaintedLenM  per-component painted-candidate length
 //
-// Determinism: given the same PBF and the same --built-at / --seq, two runs
-// are byte-identical (stable way order, sorted tag keys, sorted tile emit
-// order). Pass --built-at for reproducible builds when the PBF has no
-// replication timestamp header.
+// Determinism: given the same PBF, the same --built-at / --seq, and the
+// same DEM tiles (the on-disk cache pins them), two runs are byte-identical
+// (stable way order, sorted tag keys, sorted tile emit order, deterministic
+// graph passes). Pass --built-at for reproducible builds when the PBF has
+// no replication timestamp header.
 //
-// Large source PBFs live under data/ (gitignored).
+// Large downloads (source PBFs, DEM tiles) live under data/ (gitignored).
 
 import * as fs from 'node:fs'
 import * as os from 'node:os'
@@ -45,7 +49,15 @@ import {
   tileFileName,
   type EnrichedTileMeta,
   type PipelineWay,
+  type WayEnrichment,
 } from './lib/tiles'
+import {
+  DEM_SOURCE_ID,
+  bakeWayGradients,
+  createTerrariumDem,
+  type TerrariumDemOptions,
+} from './lib/dem'
+import { computeAccessGradientPct, computeComponentPaintedLenM } from './lib/graph'
 
 export interface EnrichRegionOptions {
   pbf: string
@@ -56,6 +68,14 @@ export interface EnrichRegionOptions {
   builtAt?: string
   /** Overrides meta.builtFromSeq (default: PBF replication header, else null). */
   seq?: number
+  /**
+   * Terrarium DEM configuration for the gradient bake. Omit to skip the DEM
+   * pass entirely (gradientPct null everywhere, meta.demSource null) — the
+   * access + component passes still run, with null gradients fail-soft
+   * passable. The CLI defaults this ON (cache under data/dem-cache);
+   * programmatic callers (tests) opt in explicitly so the bake stays hermetic.
+   */
+  dem?: TerrariumDemOptions
 }
 
 export interface EnrichRegionResult {
@@ -126,7 +146,7 @@ async function parseOplFile(oplPath: string): Promise<ParsedRegion> {
   }
 }
 
-function resolveMeta(pbf: string, opts: EnrichRegionOptions): EnrichedTileMeta {
+function resolveMeta(pbf: string, opts: EnrichRegionOptions, demSource: string | null): EnrichedTileMeta {
   let builtFromSeq: number | null = null
   if (opts.seq != null) {
     builtFromSeq = opts.seq
@@ -151,9 +171,20 @@ function resolveMeta(pbf: string, opts: EnrichRegionOptions): EnrichedTileMeta {
     builtFromSeq,
     builtAt,
     pipelineVersion: PIPELINE_VERSION,
-    // Chunk B1 sets this to the actual DEM id (e.g. "terrarium-v1").
-    demSource: null,
+    demSource,
   }
+}
+
+// Emit-time rounding: baked scalars are gate inputs (compared against mode
+// ceilings / the display floor), not survey data — 2 decimals of gradient
+// and 0.1 m of length keep tile JSONs compact without moving any way
+// across a ceiling in practice.
+function round2(v: number | null): number | null {
+  return v == null ? null : Math.round(v * 100) / 100
+}
+
+function round1(v: number | null): number | null {
+  return v == null ? null : Math.round(v * 10) / 10
 }
 
 export async function enrichRegion(opts: EnrichRegionOptions): Promise<EnrichRegionResult> {
@@ -180,13 +211,38 @@ export async function enrichRegion(opts: EnrichRegionOptions): Promise<EnrichReg
     const region = await parseOplFile(opl)
     const buckets = bucketIntoTiles(region.ways)
 
-    // 5. Emit tiles. Provenance meta comes from the ORIGINAL pbf (the clip
+    // 5. Bake the numbers (chunk B1) — all through production functions.
+    // 5a. Per-way gross gradient over the terrarium DEM (skipped without
+    //     opts.dem: gradients stay null, which every downstream pass treats
+    //     as fail-soft unknown).
+    let gradients = new Map<number, number | null>()
+    let demSource: string | null = null
+    if (opts.dem) {
+      const dem = createTerrariumDem(opts.dem)
+      gradients = await bakeWayGradients(region.ways, dem)
+      demSource = DEM_SOURCE_ID
+      console.log(
+        `[enrich-region] DEM: ${dem.stats.httpFetches} fetched, ` +
+        `${dem.stats.diskHits} from disk cache, ${dem.stats.failures} voids`,
+      )
+    }
+    const gradientOf = (osmId: number): number | null => gradients.get(osmId) ?? null
+    // 5b. Minimax access from the mainland seed; 5c. painted component length.
+    const accessGradients = computeAccessGradientPct(region.ways, gradientOf)
+    const paintedLenM = computeComponentPaintedLenM(region.ways)
+    const enrichment: WayEnrichment = {
+      gradientPct: (osmId) => round2(gradientOf(osmId)),
+      accessGradientPct: (osmId) => round2(accessGradients.get(osmId) ?? null),
+      componentPaintedLenM: (osmId) => round1(paintedLenM.get(osmId) ?? null),
+    }
+
+    // 6. Emit tiles. Provenance meta comes from the ORIGINAL pbf (the clip
     // inherits its header, but read the source of truth directly).
-    const meta = resolveMeta(opts.pbf, opts)
+    const meta = resolveMeta(opts.pbf, opts, demSource)
     fs.mkdirSync(opts.out, { recursive: true })
     const tilesWritten: string[] = []
     for (const bucket of sortedBuckets(buckets)) {
-      const tile = buildEnrichedTile(meta, bucket)
+      const tile = buildEnrichedTile(meta, bucket, enrichment)
       const name = tileFileName(bucket.row, bucket.col)
       fs.writeFileSync(path.join(opts.out, name), serializeEnrichedTile(tile))
       tilesWritten.push(name)
@@ -223,12 +279,15 @@ async function main(): Promise<void> {
       bbox: { type: 'string' },
       'built-at': { type: 'string' },
       seq: { type: 'string' },
+      'dem-cache': { type: 'string' },
+      'no-dem': { type: 'boolean' },
     },
   })
   if (!values.pbf || !values.out) {
     console.error(
       'Usage: bun scripts/pipeline/enrich-region.ts --pbf <file.osm.pbf> --out <dir> ' +
-      '[--bbox south,west,north,east] [--built-at ISO] [--seq N]',
+      '[--bbox south,west,north,east] [--built-at ISO] [--seq N] ' +
+      '[--dem-cache data/dem-cache] [--no-dem]',
     )
     process.exit(1)
   }
@@ -240,6 +299,10 @@ async function main(): Promise<void> {
     bbox: values.bbox ? parseBbox(values.bbox) : undefined,
     builtAt: values['built-at'],
     seq: values.seq != null ? Number(values.seq) : undefined,
+    // DEM defaults ON for CLI runs; --no-dem skips the gradient bake
+    // (e.g. offline smoke runs). The cache dir lives under data/
+    // (gitignored) unless overridden.
+    dem: values['no-dem'] ? undefined : { cacheDir: values['dem-cache'] ?? 'data/dem-cache' },
   })
   console.log(
     `[enrich-region] ${result.tilesWritten.length} tiles, ${result.wayCount} ways, ` +

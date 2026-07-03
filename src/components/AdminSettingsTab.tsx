@@ -391,9 +391,23 @@ export default function AdminSettingsTab() {
         </div>
       </section>
 
-      {/* ── Routing: rough-surface multiplier + per-mode params ────── */}
+      {/* ── Routing: backend + rough-surface multiplier + per-mode params ── */}
       <section className="admin-section">
         <h3>Routing</h3>
+        <label className="admin-num-field">
+          Routing backend URL
+          <input type="text" className="admin-input"
+            value={settings.routingBackend}
+            onChange={(e) => update('routingBackend', e.target.value)}
+            placeholder="(empty = in-browser routing)"
+            style={{ width: 280 }} />
+          <span className="admin-hint">
+            Empty (default): routes compute in the browser. Set a route-server URL
+            (e.g. <code>http://localhost:8787</code>) to <code>POST /route</code> there
+            instead — same routing code, run server-side (<code>server/route-server.ts</code>).
+            Falls back to in-browser routing on any server error.
+          </span>
+        </label>
         <label className="admin-num-field">
           Rough-surface multiplier (global)
           <input type="number" min="1" step="0.1" className="admin-input"

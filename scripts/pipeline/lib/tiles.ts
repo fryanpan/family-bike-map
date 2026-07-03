@@ -20,8 +20,20 @@ export interface EnrichedTileMeta {
   /** ISO 8601 build timestamp. Deterministic inputs (--built-at or the PBF replication timestamp) keep output byte-reproducible. */
   builtAt: string
   pipelineVersion: string
-  /** DEM identifier for the baked gradients, e.g. "terrarium-v1". Null until chunk B1 wires the DEM pass. */
+  /** DEM identifier for the baked gradients ("terrarium-v1"). Null when the bake ran without a DEM (--no-dem) — gradientPct is then null everywhere. */
   demSource: string | null
+}
+
+/**
+ * Per-way baked values, keyed by osmId. Lookups return null for ways a
+ * pass didn't grade (DEM void, sub-noise-floor length, disconnected from
+ * the mainland, not a painted candidate) — null is always fail-soft
+ * "unknown, show it" on the client.
+ */
+export interface WayEnrichment {
+  gradientPct(osmId: number): number | null
+  accessGradientPct(osmId: number): number | null
+  componentPaintedLenM(osmId: number): number | null
 }
 
 export interface EnrichedWay {
@@ -120,16 +132,23 @@ function sortTags(tags: Record<string, string>): Record<string, string> {
 }
 
 /** Assemble the tile payload with canonical field order (determinism). */
-export function buildEnrichedTile(meta: EnrichedTileMeta, bucket: TileBucket): EnrichedTile {
+export function buildEnrichedTile(
+  meta: EnrichedTileMeta,
+  bucket: TileBucket,
+  enrichment?: WayEnrichment,
+): EnrichedTile {
+  // Control-node pseudo-ways never carry enrichment: they aren't graded by
+  // any pass, and OSM node ids share a number space with nothing — a node
+  // id could collide with a WAY id, so looking one up would silently steal
+  // a way's values.
   const toEnriched = (w: PipelineWay): EnrichedWay => ({
     osmId: w.osmId,
     itemName: null,
     tags: sortTags(w.tags),
     coordinates: w.coordinates,
-    // Staged for chunk B1 (gradient + minimax access + component length).
-    gradientPct: null,
-    accessGradientPct: null,
-    componentPaintedLenM: null,
+    gradientPct: !w.isControlNode && enrichment ? enrichment.gradientPct(w.osmId) : null,
+    accessGradientPct: !w.isControlNode && enrichment ? enrichment.accessGradientPct(w.osmId) : null,
+    componentPaintedLenM: !w.isControlNode && enrichment ? enrichment.componentPaintedLenM(w.osmId) : null,
   })
   return {
     meta: {
