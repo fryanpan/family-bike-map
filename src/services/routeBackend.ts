@@ -10,9 +10,15 @@
 //
 // Contract with the server (see server/route-server.ts):
 //   POST <url>/route  {start:{lat,lng}, end:{lat,lng}, travelMode,
-//                      preferredItemNames: string[]}
+//                      preferredItemNames: string[],
+//                      avoidedWayIds?: number[]}
 //     → 200 with the exact clientRoute result: a Route JSON, or `null`
 //       when no path exists.
+//
+// EVERY per-request clientRoute input the browser passes must be mirrored
+// into RouteLegRequest and this wire format, or the server backend silently
+// diverges from in-browser routing (e.g. "reroute around this" no-oping
+// because avoidedWayIds never reached the server).
 //
 // Fallback policy: ANY transport or protocol error (network failure,
 // non-2xx status, unparseable or malformed payload) falls back to the
@@ -31,6 +37,9 @@ export interface RouteLegRequest {
    *  sent per request (enriched-tiles plan, scope update item 3). */
   travelMode: string
   preferredItemNames: Set<string>
+  /** Session "reroute around this" avoid list — same OSM way ids App.tsx
+   *  passes to the in-browser clientRoute closure. Optional/empty = none. */
+  avoidedWayIds?: Set<number> | null
 }
 
 /** The subset of `fetch` this module uses — injectable in tests without
@@ -64,6 +73,11 @@ export async function serverRoute(
       end: req.end,
       travelMode: req.travelMode,
       preferredItemNames: [...req.preferredItemNames],
+      // Only on the wire when non-empty — the server treats absent and
+      // empty identically (no avoids).
+      ...(req.avoidedWayIds && req.avoidedWayIds.size > 0
+        ? { avoidedWayIds: [...req.avoidedWayIds] }
+        : {}),
     }),
   })
   if (!res.ok) {

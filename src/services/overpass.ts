@@ -334,6 +334,66 @@ interface OverpassElement {
   lon?: number
 }
 
+// ── Enriched tile payloads ──────────────────────────────────────────────────
+// The Worker serves TWO shapes on /api/overpass: the raw Overpass
+// `{elements: […]}` proxy response, and — for tiles present in the active R2
+// tileset — the enriched pipeline shape `{meta, ways}` (written by
+// scripts/pipeline/lib/tiles.ts → serializeEnrichedTile, served by
+// src/workerEnrichedTiles.ts). Both arrive on the same route, so the client
+// detects the shape per response. Enriched `ways` are already OsmWay-shaped
+// (osmId/tags/coordinates, control nodes as single-coordinate pseudo-ways)
+// plus the baked gradientPct / accessGradientPct / componentPaintedLenM.
+
+interface EnrichedTilePayload {
+  /** Provenance block (builtFromSeq, demSource, …). Unused by the client. */
+  meta?: Record<string, unknown>
+  ways: unknown[]
+}
+
+export function isEnrichedTilePayload(data: unknown): data is EnrichedTilePayload {
+  return (
+    data != null &&
+    typeof data === 'object' &&
+    Array.isArray((data as { ways?: unknown }).ways) &&
+    !Array.isArray((data as { elements?: unknown }).elements)
+  )
+}
+
+/**
+ * Parse an enriched R2 tile payload into OsmWay[]. The baked fields are kept
+ * PRESENT on every way (null when the bake couldn't compute them) — that's
+ * what flips isEnrichedWay() to the arithmetic verdict gate; dropping them to
+ * undefined would silently fall back to the runtime moat/gradient path.
+ * Malformed entries are skipped (fail-soft, mirroring the route server's
+ * loader) rather than failing the whole tile.
+ */
+export function parseEnrichedTileResponse(data: EnrichedTilePayload): OsmWay[] {
+  const ways: OsmWay[] = []
+  for (const raw of data.ways) {
+    if (raw == null || typeof raw !== 'object') continue
+    const w = raw as Partial<OsmWay>
+    if (
+      typeof w.osmId !== 'number' ||
+      !Array.isArray(w.coordinates) ||
+      !w.coordinates.every(
+        (c) => Array.isArray(c) && typeof c[0] === 'number' && typeof c[1] === 'number',
+      )
+    ) {
+      continue
+    }
+    ways.push({
+      itemName: null,
+      osmId: w.osmId,
+      coordinates: w.coordinates,
+      tags: w.tags ?? {},
+      gradientPct: w.gradientPct ?? null,
+      accessGradientPct: w.accessGradientPct ?? null,
+      componentPaintedLenM: w.componentPaintedLenM ?? null,
+    })
+  }
+  return ways
+}
+
 /**
  * Traffic-control pseudo-way: a single-coordinate OsmWay carrying a
  * `highway=traffic_signals` or `highway=stop` node. Stored in the same tile
@@ -401,21 +461,25 @@ function parseOverpassResponse(data: { elements: OverpassElement[] }): OsmWay[] 
   return ways
 }
 
+/** Either shape the /api/overpass route can return for a tile. */
+type TilePayload = { elements: OverpassElement[]; remark?: string } | EnrichedTilePayload
+
 /**
- * Read an OK Overpass response body, streaming it so the tile-load indicator can
- * show byte progress (SF's central tile is several MB). Reports progress + done
- * to the tile-load store. Falls back to response.json() when no readable stream
- * exists (mocked fetch in tests). Decodes the complete buffer once, so a
- * multi-byte UTF-8 sequence split across chunks is decoded correctly.
+ * Read an OK tile response body (raw Overpass or enriched R2 shape), streaming
+ * it so the tile-load indicator can show byte progress (SF's central tile is
+ * several MB). Reports progress + done to the tile-load store. Falls back to
+ * response.json() when no readable stream exists (mocked fetch in tests).
+ * Decodes the complete buffer once, so a multi-byte UTF-8 sequence split
+ * across chunks is decoded correctly.
  */
 async function readTileBody(
   response: Response,
   row: number,
   col: number,
-): Promise<{ elements: OverpassElement[]; remark?: string }> {
+): Promise<TilePayload> {
   const reader = response.body?.getReader?.()
   if (!reader) {
-    const json = (await response.json()) as { elements: OverpassElement[]; remark?: string }
+    const json = (await response.json()) as TilePayload
     tileDone(row, col, 0)
     return json
   }
@@ -436,7 +500,7 @@ async function readTileBody(
   let offset = 0
   for (const c of chunks) { buf.set(c, offset); offset += c.length }
   tileDone(row, col, received)
-  return JSON.parse(new TextDecoder().decode(buf)) as { elements: OverpassElement[]; remark?: string }
+  return JSON.parse(new TextDecoder().decode(buf)) as TilePayload
 }
 
 /**
@@ -522,14 +586,23 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
   // available (e.g. mocked fetch in tests). Bytes are decoded once, after the
   // full buffer arrives, so multi-byte UTF-8 split across chunks is safe.
   const data = await readTileBody(response, row, col)
-  if (data.remark) {
-    // Overpass sometimes returns 200 with partial results and a remark (e.g. query timeout)
-    console.warn(`[Overpass] Tile ${row}:${col} remark:`, data.remark)
-    Sentry.captureMessage(`Overpass remark: ${data.remark}`, { level: 'warning', extra: tileCtx })
-  }
   const cacheStatus = response.headers.get('X-Cache') ?? 'N/A'
-  console.debug(`[Overpass] Tile ${row}:${col} → ${data.elements.length} elements (server cache: ${cacheStatus})`)
-  const result = parseOverpassResponse(data)
+  let result: OsmWay[]
+  if (isEnrichedTilePayload(data)) {
+    // Enriched pipeline tile served from R2 (X-Tile-Source: enriched).
+    // Ways arrive with baked gradient/access/component fields; classification
+    // still happens at render time exactly like raw tiles.
+    result = parseEnrichedTileResponse(data)
+    console.debug(`[Overpass] Tile ${row}:${col} → ${result.length} enriched ways (server cache: ${cacheStatus})`)
+  } else {
+    if (data.remark) {
+      // Overpass sometimes returns 200 with partial results and a remark (e.g. query timeout)
+      console.warn(`[Overpass] Tile ${row}:${col} remark:`, data.remark)
+      Sentry.captureMessage(`Overpass remark: ${data.remark}`, { level: 'warning', extra: tileCtx })
+    }
+    console.debug(`[Overpass] Tile ${row}:${col} → ${data.elements.length} elements (server cache: ${cacheStatus})`)
+    result = parseOverpassResponse(data)
+  }
   _tileCache.set(key, result)
   // Fire-and-forget write to IndexedDB for future sessions. Failures are
   // non-critical — the in-memory cache still has the data for this session.

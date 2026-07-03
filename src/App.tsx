@@ -384,6 +384,10 @@ export default function App() {
             end: { lat: b.lat, lng: b.lng },
             travelMode: profileKey,
             preferredItemNames,
+            // Mirrors the `avoids` argument of the clientRoute fallback
+            // below — the server backend must honor "reroute around this"
+            // identically to in-browser routing.
+            avoidedWayIds: avoids,
           },
           () => clientRoute(
             a.lat, a.lng, b.lat, b.lng,

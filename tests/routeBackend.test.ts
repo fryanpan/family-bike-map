@@ -86,6 +86,28 @@ describe('serverRoute', () => {
     })
   })
 
+  test('sends avoidedWayIds on the wire when the avoid set is non-empty', async () => {
+    // "Reroute around this" must reach the server — App.tsx passes the same
+    // set to the clientRoute fallback, and the server mirrors it into its
+    // own clientRoute call (identical-behavior contract).
+    const { fn, calls } = fetchStub(() => jsonResponse(ROUTE))
+    await serverRoute(
+      'http://localhost:8787',
+      { ...REQ, avoidedWayIds: new Set([42, 7]) },
+      fn,
+    )
+    const body = JSON.parse(String(calls[0].init?.body))
+    expect(body.avoidedWayIds).toEqual([42, 7])
+  })
+
+  test('omits avoidedWayIds from the wire when empty or absent', async () => {
+    const { fn, calls } = fetchStub(() => jsonResponse(ROUTE))
+    await serverRoute('http://x', { ...REQ, avoidedWayIds: new Set() }, fn)
+    await serverRoute('http://x', REQ, fn)
+    expect('avoidedWayIds' in JSON.parse(String(calls[0].init?.body))).toBe(false)
+    expect('avoidedWayIds' in JSON.parse(String(calls[1].init?.body))).toBe(false)
+  })
+
   test('strips trailing slashes from the backend URL', async () => {
     const { fn, calls } = fetchStub(() => jsonResponse(ROUTE))
     await serverRoute('http://localhost:8787///', REQ, fn)

@@ -174,6 +174,50 @@ describe('POST /route — happy path', () => {
     expect(serverRoute).toEqual(JSON.parse(JSON.stringify(direct)))
   })
 
+  test('avoidedWayIds are honored ("reroute around this" reaches the server router)', async () => {
+    // Way 2 is the only connector between the two cycleway legs: without
+    // avoids the route crosses it; with it avoided the router must not —
+    // and the answer must match a direct clientRoute call with the same
+    // avoid set (same-code invariant). The pre-fix bug: the server dropped
+    // avoidedWayIds and returned the unavoided route unchanged.
+    const unavoided = await postRoute({ start: START, end: END, travelMode: 'kid-confident' })
+    expect(unavoided.status).toBe(200)
+    const unavoidedRoute = (await unavoided.json()) as Route | null
+    expect(unavoidedRoute).not.toBeNull()
+    expect(unavoidedRoute!.segments!.some((s) => s.wayIds?.includes(2))).toBe(true)
+
+    const res = await postRoute({
+      start: START, end: END, travelMode: 'kid-confident', avoidedWayIds: [2],
+    })
+    expect(res.status).toBe(200)
+    const avoidedRoute = (await res.json()) as Route | null
+
+    const direct = await clientRoute(
+      START.lat, START.lng, END.lat, END.lng,
+      'kid-confident', getDefaultPreferredItems('kid-confident'),
+      undefined, undefined, new Set([2]),
+    )
+    expect(avoidedRoute).toEqual(direct === null ? null : JSON.parse(JSON.stringify(direct)))
+    // With way 2 severed, the end-snap falls back to the directed-reachable
+    // set (way 1 only) — whatever the router does, way 2 must be absent.
+    expect(avoidedRoute).not.toBeNull()
+    expect(avoidedRoute!.segments!.every((s) => !(s.wayIds ?? []).includes(2))).toBe(true)
+    expect(avoidedRoute!.coordinates).not.toEqual(unavoidedRoute!.coordinates)
+  })
+
+  test('empty avoidedWayIds behaves exactly like no avoidedWayIds', async () => {
+    const res = await postRoute({
+      start: START, end: END, travelMode: 'kid-confident', avoidedWayIds: [],
+    })
+    expect(res.status).toBe(200)
+    const route = await res.json()
+    const direct = await clientRoute(
+      START.lat, START.lng, END.lat, END.lng,
+      'kid-confident', getDefaultPreferredItems('kid-confident'),
+    )
+    expect(route).toEqual(JSON.parse(JSON.stringify(direct)))
+  })
+
   test('unroutable pair inside the region returns 200 null (clientRoute semantics)', async () => {
     // (52.595, 13.495) is inside loaded tile 525:134 but >1 km from any
     // way, so the nearest-node snap fails and clientRoute returns null.
@@ -228,6 +272,21 @@ describe('POST /route — malformed input', () => {
   test('preferredItemNames with non-strings → 400', async () => {
     const res = await postRoute({
       start: START, end: END, travelMode: 'kid-confident', preferredItemNames: [42],
+    })
+    expect(res.status).toBe(400)
+  })
+
+  test('avoidedWayIds with non-numbers → 400', async () => {
+    const res = await postRoute({
+      start: START, end: END, travelMode: 'kid-confident', avoidedWayIds: ['2'],
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toContain('avoidedWayIds')
+  })
+
+  test('non-array avoidedWayIds → 400', async () => {
+    const res = await postRoute({
+      start: START, end: END, travelMode: 'kid-confident', avoidedWayIds: 2,
     })
     expect(res.status).toBe(400)
   })

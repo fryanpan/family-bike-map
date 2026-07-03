@@ -13,7 +13,7 @@
  *
  * Contract:
  *   POST /route  {start:{lat,lng}, end:{lat,lng}, travelMode,
- *                 preferredItemNames?: string[]}
+ *                 preferredItemNames?: string[], avoidedWayIds?: number[]}
  *     → 200 with the exact `clientRoute` result (Route JSON, or `null`
  *       when no path exists — same semantics as the in-browser call)
  *     → 400 malformed body / unknown travelMode
@@ -253,11 +253,12 @@ async function handleRouteRequest(req: Request, tiles: LoadedTiles): Promise<Res
   if (body == null || typeof body !== 'object') {
     return json({ error: 'request body must be a JSON object' }, 400)
   }
-  const { start, end, travelMode, preferredItemNames } = body as {
+  const { start, end, travelMode, preferredItemNames, avoidedWayIds } = body as {
     start?: unknown
     end?: unknown
     travelMode?: unknown
     preferredItemNames?: unknown
+    avoidedWayIds?: unknown
   }
   if (!isLatLngLike(start)) return json({ error: 'start must be {lat, lng} with finite coordinates' }, 400)
   if (!isLatLngLike(end)) return json({ error: 'end must be {lat, lng} with finite coordinates' }, 400)
@@ -269,6 +270,13 @@ async function handleRouteRequest(req: Request, tiles: LoadedTiles): Promise<Res
     (!Array.isArray(preferredItemNames) || preferredItemNames.some((n) => typeof n !== 'string'))
   ) {
     return json({ error: 'preferredItemNames must be an array of strings when present' }, 400)
+  }
+  if (
+    avoidedWayIds !== undefined &&
+    (!Array.isArray(avoidedWayIds) ||
+      avoidedWayIds.some((id) => typeof id !== 'number' || !Number.isFinite(id)))
+  ) {
+    return json({ error: 'avoidedWayIds must be an array of numbers when present' }, 400)
   }
 
   // Region check against tiles that came from actual files (padding tiles
@@ -289,10 +297,21 @@ async function handleRouteRequest(req: Request, tiles: LoadedTiles): Promise<Res
     ? new Set(preferredItemNames as string[])
     : getDefaultPreferredItems(travelMode)
 
+  // "Reroute around this" avoid list — same per-request concept as mode/
+  // preferences; must reach clientRoute exactly as the browser passes it or
+  // the server backend silently ignores the user's reroute taps.
+  const avoided = avoidedWayIds !== undefined && (avoidedWayIds as number[]).length > 0
+    ? new Set(avoidedWayIds as number[])
+    : null
+
   // THE production router — identical code path to the browser. Returns
   // null when no path exists; we pass that through as JSON `null` so the
-  // response is byte-for-byte the clientRoute result.
-  const route = await clientRoute(start.lat, start.lng, end.lat, end.lng, travelMode, preferred)
+  // response is byte-for-byte the clientRoute result. regionRules /
+  // regionProfile are undefined on both backends (App.tsx passes [] / null).
+  const route = await clientRoute(
+    start.lat, start.lng, end.lat, end.lng, travelMode, preferred,
+    undefined, undefined, avoided,
+  )
   return json(route ?? null, 200)
 }
 
