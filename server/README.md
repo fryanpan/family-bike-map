@@ -92,9 +92,73 @@ See the header of `server/Dockerfile`. Build from the repo root (the image
 needs `src/`), mount the tiles dir at `/tiles`. Not deployed anywhere —
 the production target is a separate decision after latency data exists.
 
+## Latency benchmark (desktop half)
+
+`scripts/bench-route-latency.ts` fires N OD pairs per mode at a running
+route server and prints p50/p95 wall-clock latency as a markdown table;
+`--client-tiles` additionally runs the SAME pairs through the in-process
+production `clientRoute` (over the same tile files) so the client-vs-server
+comparison comes from one run:
+
+```sh
+# terminal 1 — the server under test
+bun server/route-server.ts --tiles data/tiles --port 8787
+
+# terminal 2 — the benchmark
+bun scripts/bench-route-latency.ts --url http://localhost:8787 \
+    --bbox 37.72,-122.51,37.81,-122.38 --n 20 --seed 1 \
+    --client-tiles data/tiles
+```
+
+- OD pairs are deterministic (`--seed`) inside `--bbox`, or supplied
+  explicitly via `--pairs pairs.json`
+  (`[{"start":{"lat":…,"lng":…},"end":{…}}, …]`). Keep the bbox inside
+  the served region — out-of-region pairs count as `rejected` (422) and
+  are excluded from the percentiles.
+- Client rows include the mean graph-build / A* phase breakdown, read
+  from the production `routeTiming.ts` instrumentation — the same numbers
+  the browser records.
+- Paste both tables into the comparison doc
+  (`docs/research/<date>-route-latency-comparison.md`) next to the phone
+  numbers gathered per the protocol below.
+
+## Phone measurement protocol (Bryan, manual)
+
+The client half of the comparison has to come from a real phone — desktop
+numbers flatter the in-browser router. The instrumented prod build records
+every route computation (phase breakdown for client routes, HTTP
+round-trip for server routes) in a session ring buffer shown in the admin
+panel.
+
+1. **Client backend:** on the phone, open the prod app
+   (`https://bike-map.fryanpan.com/`) in a fresh tab (fresh tab = cold
+   tile/elevation caches, the realistic first-route case). Plan each
+   standard OD pair (the same pairs the desktop bench used — keep a
+   `pairs.json` next to the comparison doc), once per mode under test.
+2. Open **Admin → Benchmarks → "Recent route timings"** and hit Refresh.
+   Each planned route is one row: tile-load / graph-build / A* / total ms.
+   Transcribe (or screenshot) the rows into the comparison doc. Note
+   which routes were first-in-session (cold) vs repeats (warm) — both are
+   interesting, label them.
+3. **Server backend:** in **Admin → Settings**, set `routingBackend` to
+   the deployed route-server URL, then repeat step 1. Rows now show
+   backend `server` with the HTTP round-trip total (the breakdown for
+   those lives in the server's own logs). Transcribe those too.
+4. Reset `routingBackend` to empty (client default) when done.
+5. Land everything in `docs/research/<date>-route-latency-comparison.md`:
+   desktop tables (from the bench script), phone tables (steps 2–3),
+   device + network noted (e.g. "iPhone 15, LTE"), and the
+   interpretation — this is the measured-latency evidence the Phase 4
+   "flip the default backend?" decision waits on.
+
 ## Tests
 
 `bun test tests/routeServer.test.ts` — contract tests over synthetic
 fixture tiles, including the same-code invariant: the server's route must
 be **identical (tolerance zero)** to a direct `clientRoute` call on the
 same tile data.
+
+`bun test tests/e2e/` — scripted end-to-end: per-mode routes over
+pipeline-baked fixture tiles, the same routes through a spawned
+route-server process (identical-geometry assertion), the bare-tile
+fallback path, and the daily-diff cycle.

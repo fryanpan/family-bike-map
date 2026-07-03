@@ -72,10 +72,76 @@ Run the updater with the **same DEM settings** as the original bake
 (default `--dem-cache data/dem-cache`; a `--no-dem` update of a
 DEM-baked dir would re-grade every way to null and rewrite everything).
 
+## Serving: R2 upload, manifest cutover, rollback
+
+Baked tiles are served by the production Worker from the
+`bike-map-enriched-tiles` R2 bucket (binding `ENRICHED_TILES` in
+`wrangler.toml`, logic in `src/workerEnrichedTiles.ts`). On a tile
+request (`/api/overpass?row=&col=`) the Worker first looks for
+`<version>/<row>_<col>.json` in R2; on any miss — no manifest, no
+object, R2 error — it falls through to the Overpass proxy unchanged,
+so non-enriched regions (Berlin until its bake) keep working.
+
+Bucket layout:
+
+```
+manifest.json                       ← names the ACTIVE version ({"version": "..."})
+2026-07-03-seq2776/377_-1223.json   ← one tileset per version prefix
+2026-07-03-seq2776/…
+```
+
+### Upload (atomic cutover)
+
+```sh
+bun scripts/pipeline/upload-tiles.ts --tiles data/tiles/bayarea-core
+```
+
+Uploads every tile under a NEW version prefix (default
+`<date>-seq<builtFromSeq>`; override with `--version`), then writes
+`manifest.json` LAST — readers only ever see a complete tileset, and a
+failed run aborts *before* the manifest so the previously active
+version stays live (re-run to resume; puts are idempotent). Flags:
+`--dry-run` (print the plan), `--concurrency N` (default 4),
+`--bucket` (default `bike-map-enriched-tiles`).
+
+The Worker caches the manifest in isolate memory for 60s
+(`MANIFEST_TTL_MS`), so a cutover propagates within about a minute.
+Tile bodies are deliberately not edge-cached — that would stretch the
+rollback window past the manifest TTL.
+
+### Rollback
+
+Point the manifest back at the previous, still-uploaded prefix — no
+deploy, no re-upload:
+
+```sh
+bun scripts/pipeline/upload-tiles.ts --rollback-to 2026-07-02-seq2740
+```
+
+Old version prefixes are kept until you prune them manually (they ARE
+the rollback targets). Prune with `wrangler r2 object` once a version
+is no longer a plausible rollback target.
+
+### Local dev
+
+`wrangler dev --local` uses miniflare's local R2 (`.wrangler/state`).
+Seed it with `--local`:
+
+```sh
+bun scripts/pipeline/upload-tiles.ts --tiles data/tiles/bayarea-core --local
+bunx wrangler dev --port 8791 --local
+curl -s -D - -X POST 'http://localhost:8791/api/overpass?row=377&col=-1223' --data 'data='
+# → 200 with X-Tile-Source: enriched, X-Enriched-Version: <version>
+```
+
+Without seeded local objects every request takes the Overpass proxy
+path, same as before enriched tiles existed.
+
 ## Tests
 
 ```sh
-bun test tests/pipeline/
+bun test tests/pipeline/                    # bake + diff + upload planning
+bun test tests/workerEnrichedTiles.test.ts  # Worker-side R2 serving logic
 ```
 
 Fixtures are hermetic: a hand-written `.osm` extract (converted with

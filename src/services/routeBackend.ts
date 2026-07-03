@@ -22,6 +22,7 @@
 // same data, and passes through unchanged.
 
 import type { Route } from '../utils/types'
+import { recordRouteTiming } from './routeTiming'
 
 export interface RouteLegRequest {
   start: { lat: number; lng: number }
@@ -92,8 +93,18 @@ export async function routeLegViaBackend(
 ): Promise<Route | null> {
   const url = backendUrl.trim()
   if (!url) return clientRouteFn()
+  const startedAt = performance.now()
   try {
-    return await serverRoute(url, req, fetchFn)
+    const route = await serverRoute(url, req, fetchFn)
+    // Server entries only know the HTTP round-trip; the phase breakdown
+    // (graph/A*) is recorded by the server process's own clientRoute.
+    recordRouteTiming({
+      backend: 'server', mode: req.travelMode, startedAt,
+      tileLoadMs: null, graphBuildMs: null, astarMs: null,
+      totalMs: performance.now() - startedAt,
+      graphNodes: null, graphEdges: null, found: route != null,
+    })
+    return route
   } catch (err) {
     console.warn('[routeBackend] server routing failed — falling back to client routing:', err)
     return clientRouteFn()
