@@ -49,6 +49,19 @@ self.addEventListener('install', (_event) => {
   self.skipWaiting()
 })
 
+// Explicit self-update path (src/services/swUpdate.ts). On a normal repeat
+// visit `install`'s skipWaiting() above already handles this — but once a
+// tab/pinned app is *currently open* with an old SW controlling it, a newly
+// installed SW sits in `waiting` until every controlled client closes. The
+// UI shows an "Update available" toast and posts this message when the
+// user taps Reload, so the new SW can take over without the user having to
+// fully quit and relaunch a pinned iOS app.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting()
+  }
+})
+
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     // Drop old caches that don't match the current version constants.
