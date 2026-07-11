@@ -70,3 +70,4 @@ See `docs/product/architecture.md` for full technical architecture.
 
 @docs/process/learnings.md
 @.claude/rules/routing-changes.md
+@.claude/rules/rendering-changes.md
