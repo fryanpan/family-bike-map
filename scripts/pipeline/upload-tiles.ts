@@ -137,7 +137,27 @@ export function planUploadOps(
 
 // ── Runner ────────────────────────────────────────────────────────────────
 
-function wranglerPut(bucket: string, op: PutOp, local: boolean): Promise<void> {
+const PUT_MAX_ATTEMPTS = 5
+
+/** One wrangler put, retried with exponential backoff on transient failures. */
+async function wranglerPut(bucket: string, op: PutOp, local: boolean): Promise<void> {
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= PUT_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await wranglerPutOnce(bucket, op, local)
+    } catch (err) {
+      lastErr = err
+      if (attempt < PUT_MAX_ATTEMPTS) {
+        const backoffMs = 500 * 2 ** (attempt - 1) // 0.5s, 1s, 2s, 4s
+        console.warn(`  retry ${attempt}/${PUT_MAX_ATTEMPTS - 1} for ${op.key} after ${backoffMs}ms: ${String(err).split('\n')[0]}`)
+        await new Promise((r) => setTimeout(r, backoffMs))
+      }
+    }
+  }
+  throw lastErr
+}
+
+function wranglerPutOnce(bucket: string, op: PutOp, local: boolean): Promise<void> {
   return new Promise((resolve, reject) => {
     let file = op.file
     let tmp: string | null = null
