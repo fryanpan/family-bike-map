@@ -163,3 +163,42 @@ And from prior sessions (BC-242), I had already *celebrated* consolidating 6→4
 **What didn't:** All three prod regressions (white-halo stub confetti, leaked deck.gl layers double-plotting, tile-arrival jank) shipped despite tests, benchmark, code review, AND a browser verification pass — because every check verified the feature's intended effect and none asked "what looks new and wrong?" The white pills are visible in the shipped verification screenshots; I attributed them to base-map styling without clicking one. Local dev's inability to load terrain (referer-locked token) meant the gates were never exercised end-to-end before prod.
 
 **Action:** Learnings updated (overlay-rendering section: stub confetti, engine layer leak, hot-path constraint, falsification rule). Re-land blocked on: (1) engine race fix, (2) component-level verdict for sub-noise-floor stubs, (3) off-hot-path moat computation — each verified against its failure mode on prod-like data before merge.
+
+## 2026-07-11 - Enriched-tiles arc: re-land → architecture pivot → build → activation
+
+### Time Breakdown
+| Started | Phase | 👤 Hands-On Time | 🤖 Agent Time | Problems |
+|---------|-------|-----------------|---------------|----------|
+| Jul 2 4:00pm | Re-land steep-moat (#211) + prod verify | █ 10m | ████ 40m | |
+| Jul 3 9:10am | Architecture pivot → enriched-tiles plan (#212) + scope expansion | ███ 30m | ███ 30m | |
+| Jul 3 2:10pm | 17-agent workflow build: pipeline, route server, DEM, 630 tests, #213/#214 | █ 15m | ██████████ 100m | ⚠ workflow agent died backgrounding a script; ⚠ DEM flip failed benchmark gate, auto-reverted |
+| Jul 3 4:45pm | #213 merge + fragment-floor verify; #214 CI fix (osmium) | █ 5m | ███ 25m | ⚠ CI runner lacked osmium |
+| Jul 10 11:20pm | Activation: merge #214 → deploy → R2 upload → falsification → route test → docs | ▏2m | ███ 30m | ⚠ mid-zoom sparseness scare (settled by manifest-rollback A/B); ⚠ manual deploy clobbered CI's APP_VERSION |
+
+### Metrics
+| Metric | Duration |
+|--------|----------|
+| Total wall-clock (active periods) | ~4.8 hours across 3 days |
+| Hands-on | ~1.0 hour (21%) |
+| Automated agent time | ~3.8 hours (79%) |
+| Retro analysis time | ~10 min |
+
+### Key Observations
+- Activation ran on ~2 minutes of Bryan's time ("Merge it") because #214 decoupled activation from deploy (manifest = switch) and shipped the rollback lever in the same PR — aggressive verification was safe because undo was 60 seconds away.
+- The manifest-rollback prod A/B settled a suspected regression (mid-zoom overlay sparseness) empirically in ~5 minutes — the falsification doctrine working as intended.
+- The agent captured evidence of time-varying overlay paint (screenshots 10 s apart differing) and misread it as progressive loading — the escaping bug class is time-dependent rendering behavior, invisible to static screenshots.
+- Two pre-merge catches showed the gates working: review critical (client couldn't parse the R2 payload) and the DEM benchmark-gate failure (SF carrying-kid −7pp → auto-reverted).
+
+### Feedback
+**What worked:** "Felt mostly pretty autonomous."
+**What didn't:** "Performance still seems bad — we should have a test for that. And the edges that disappear a few seconds after loading are back. My challenge is the regressions that aren't being caught." → On investigation, both symptoms traced to Bryan's iOS Home-Screen bookmark pinning an earlier app version (fresh web loads show neither). The systemic gap (no rendering gate, no perf budget, no client-version visibility) is real regardless.
+
+### Actions Taken
+| Issue | Action Type | Change |
+|-------|-------------|--------|
+| Rendering changes have no gate (routing does — asymmetry is why routing regressions get caught) | New rule file | `.claude/rules/rendering-changes.md`: t0-vs-t+15s stability check, falsification pass, manual perf check, version-check-before-believing-a-repro, rollback lever; @-included from CLAUDE.md |
+| Time-varying paint misread as loading | Doc (learnings) | "Two screenshots that differ over time ARE a finding" + designed fail-soft exception documented |
+| Manual deploy clobbered CI's APP_VERSION | Doc (learnings) + fixed | Never `bun run deploy` for mainline; CI deploy rerun restored version stamping same night |
+| Stale iOS Home-Screen version indistinguishable from live regression | Ticket | `docs/product/plans/2026-07-11-retro-tickets.md` Ticket 1: in-UI version + stale-detection/update prompt |
+| No automated overlay perf budget | Ticket | Same file, Ticket 2: `bench-overlay-paint.ts` CI budget |
+| Verification viewports not reproducible (click-replay approximation) | Feature (approved) | Shareable URLs for all map state (pan/zoom, search location, route) — implementation starting |

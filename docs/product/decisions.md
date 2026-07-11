@@ -1,5 +1,22 @@
 # Architecture & Product Decisions
 
+## 2026-07-11: Enriched tiles expanded from SF Bay to statewide California
+
+**Context**: The enriched-tiles activation (2026-07-11, SF Bay core, `2026-07-11-seq2776`) covered rows 371–386 only — Marin was in, Santa Cruz/SLO/Sacramento/LA/San Diego/Tahoe were not, so most of the state fell to the slower runtime overlay path. Bryan asked to extend coverage to the whole state, capped at <$5.
+
+**Decision**: Bake all of California (Geofabrik `california-latest.osm.pbf`, ~1.2 GB) and cut the manifest over to the statewide tileset.
+
+- **Cost**: effectively $0 — DEM is open AWS Terrain Tiles, R2 storage (997 MB / 4,397 tiles) and put ops are within the free tier. Only cost is local Mac-mini compute (~9 min per half + ~4 min upload). Well under the $5 cap.
+- **Two-half bake (memory constraint)**: `enrich-region.ts` holds every bike-relevant node coordinate for the whole input PBF in one in-memory `Map`; a single-pass statewide bake OOMs the ~4 GB JS heap. Bake in two latitude halves split at the lat-35.0 tile-row boundary (north 35.0–42.05, south 32.4–35.0), then merge by row seam with the new `merge-tile-halves.ts` (row ≥ 350 → north, else south; complete-ways spillover taken from the authoritative side only). Merge reported `spillover-fallback 0` — clean seam, no gaps or double-counts.
+- **Upload resilience**: added 5× exponential-backoff retry per put to `upload-tiles.ts` — a single transient `wrangler` "fetch failed" among 4,397 puts previously aborted the whole batch before cutover. Manifest still written strictly last (atomic cutover preserved).
+- **Verification**: HTTP falsification pass on prod — San Diego, LA, SLO, Santa Cruz, Fresno, Sacramento, Truckee, CA-side South Lake Tahoe, Redding, and Marin all serve enriched geometry (HTTP 200 from R2); the lon −120.0 Nevada-line tile correctly falls open (no CA ways there); Berlin still fails open to the Overpass proxy.
+
+**Live version**: `2026-07-11-seq4844`. Rollback: `bun scripts/pipeline/upload-tiles.ts --rollback-to 2026-07-11-seq2776` (previous SF-Bay tileset), within the Worker's 60 s manifest cache TTL.
+
+**Follow-up**: The daily-diff updater (`update-region.sh`) still points at a NorCal PBF and rebuilds dirty tiles from a single file. It needs repointing at `data/california.osm.pbf`; incremental diffs are per-tile and fine, but any full-rebuild path must use the two-half split above to avoid the OOM.
+
+---
+
 ## 2026-07-11: Render-check harness serves via `wrangler dev`, not `vite preview`
 
 **Context**: The render-check harness (`scripts/render-checks/`, the automated counterpart of `.claude/rules/rendering-changes.md`) needs to serve the built app locally for Playwright to drive. `vite preview` serves `dist/` but has no `/api/*` proxy — the bike-infra overlay under test would have zero real data to paint, making every check trivially pass/fail on an empty map regardless of the actual change being verified.
@@ -12,13 +29,13 @@
 
 ---
 
-## 2026-07-11: ALWAYS-VISIBLE check targets Outer Sunset, not downtown SF
+## 2026-07-11: ALWAYS-VISIBLE check uses a non-empty floor at Outer Sunset
 
-**Context**: The ALWAYS-VISIBLE render check needs a viewport where a "the overlay must paint at least N px at citywide zoom" guarantee is actually meaningful. Downtown SF (Market/Valencia/JFK Promenade corridor) has enough dense preferred (1a/1b) infrastructure that it paints comfortably at z11-z12 on current `main` even with no such guarantee coded anywhere — testing there would make the check pass today for the wrong reason and mask exactly the regression class `feat/always-visible-overlay` is meant to fix.
+**Context**: The ALWAYS-VISIBLE render check needs a viewport where "the overlay paints something at citywide zoom" is a meaningful guarantee. Downtown SF (Market/Valencia/JFK Promenade corridor) has enough dense preferred (1a/1b) infrastructure that it paints comfortably at z11-z12 even with no such guarantee coded anywhere — testing there would pass for the wrong reason.
 
-**Decision**: Target Outer Sunset (37.7520, -122.4950, z12) instead — an ordinary residential SF neighborhood with sparse preferred infra. Calibrated cold-cache measurement (2026-07-11): ~360 painted px, under the check's 500px floor. This fails today (listed in `scripts/render-checks/known-fails.ts`) and is expected to pass once the sibling PR lands, which is the actual point of the check: a neighborhood with no standout bike infrastructure should still show *something* at citywide zoom, not read as a dead zone.
+**Decision**: Target Outer Sunset (37.7520, -122.4950, z12) — an ordinary residential SF neighborhood with sparse preferred infra — and assert a **non-empty floor of 150 painted px**, not an absolute density target. The check's job is only "the overlay is non-empty at citywide zoom, so a plain neighborhood doesn't read as a dead zone." History-independence — the actual guarantee `feat/always-visible-overlay` provides — is verified separately by the DETERMINISM check. An earlier draft used a 500px floor recorded as a known-fail expected to flip when the overlay PR landed; that was wrong: the overlay paints native density (~360px cold) at z12 Outer Sunset by design (it fetches at every zoom now, but applies overview simplification only below z12), so 500px conflated "non-empty" with "dense" and would never flip there. Recalibrated to 150px (well under the ~360px real density, so it isn't viewport-fragile) and removed the `known-fails.ts` entry.
 
-**Status**: Implemented as a known-fail. Delete the `known-fails.ts` entry once `feat/always-visible-overlay` merges.
+**Status**: Implemented; ships passing (not a known-fail).
 
 ---
 
@@ -581,3 +598,35 @@ Evidence: `docs/research/2026-06-26-routing-benchmark-results.md`. SF + Berlin,
 all 34 mode×pair routes still found, preferred-% up or flat (only −1pp dips,
 within the ~3pp band). **Status: Shipped.** Follow-up: `carFreeBonus` has no
 admin-override wiring yet (same gap as the turn-cost fields).
+
+## 2026-07-11: Enriched tiles activated in prod (SF Bay core)
+
+**Context**: PR #214 merged the full enriched-tiles stack (offline pipeline, daily OSM
+diff support, route server, pluggable DEM) with activation deliberately decoupled from
+deploy: the Worker serves baked tiles only when the R2 bucket's `manifest.json` names an
+active tileset version.
+
+**Decision / actions** (all same-day, in order):
+1. Deployed merged main (Worker version `690b82ab`) — verified zero behavior change
+   (no manifest yet → every tile falls through to the Overpass proxy).
+2. Uploaded the SF Bay core bake (`data/tiles/bayarea-core`, 213 tiles, 203,501 ways,
+   built from OSM replication seq 2776, terrarium DEM) via `upload-tiles.ts` →
+   manifest cutover to version **`2026-07-11-seq2776`**.
+3. Prod falsification pass (multiple zooms, kid-confident): enriched tile serving
+   confirmed end-to-end (`server cache: R2` client logs), Berlin fail-open to Overpass
+   confirmed, no white pills / double plotting / console errors. Mid-zoom overlay
+   sparseness in the Mission initially looked suspicious — settled by a **manifest
+   rollback A/B** (see learnings): identical pre-cutover, i.e. pre-existing display
+   behavior, not an enrichment regression.
+4. End-to-end route on enriched tiles (client backend, Mission → Conservatory of
+   Flowers): found, correct corridor (Wiggle → Page → Panhandle → JFK), tier colors
+   consistent with quality bar. New timing telemetry: 2.1 s total = 1.6 s tile fetch +
+   0.4 s graph build + 0.1 s A* (97.5k nodes / 186.5k edges).
+
+**Rollback**: `bun scripts/pipeline/upload-tiles.ts --rollback-to <prev-version>`
+(manifest-only rewrite, live within the Worker's 60 s manifest cache TTL). Rolling back
+to a nonexistent version forces full fail-open to Overpass — the pre-#214 behavior.
+
+**Status**: Live. Follow-ups: full-NorCal bake (current bbox is SF Bay core),
+daily diff cron, phone-latency protocol (`server/README.md`) → server-backend decision,
+DEM-swap retry behind the benchmark gate.
