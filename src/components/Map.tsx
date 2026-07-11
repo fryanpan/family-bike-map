@@ -738,7 +738,18 @@ export default function Map(props: Props) {
       googleMapsKey: env.googleMapsKey,
       googleShowLandmarks: settings.googleShowLandmarks,
     }).then(() => {
-      if (mounted) setEngine(eng)
+      if (mounted) {
+        setEngine(eng)
+        // scripts/render-checks/ hook: exposes the engine-agnostic MapEngine
+        // (setView/getCenter/getZoom/getBounds) so Playwright can drive the
+        // map programmatically as a fallback when URL-driven view state
+        // isn't available. Strictly opt-in — window.__RENDER_CHECK__ is only
+        // ever set by the harness via page.addInitScript before navigation,
+        // so this is a no-op in every real user session.
+        if ((window as unknown as { __RENDER_CHECK__?: boolean }).__RENDER_CHECK__) {
+          (window as unknown as { __mapEngine?: MapEngine }).__mapEngine = eng
+        }
+      }
     }).catch((err) => {
       console.error('[Map] engine mount failed:', err)
     })
@@ -782,7 +793,11 @@ export default function Map(props: Props) {
           mutate that container's DOM and React's reconciliation can
           fight with them. */}
       <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-        <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+        {/* data-testid is a stable, engine-agnostic hook for
+            scripts/render-checks/ to screenshot only the map canvas
+            (rather than the full page, which includes chrome that isn't
+            part of what these checks assert on). */}
+        <div ref={containerRef} data-testid="map-canvas" style={{ width: '100%', height: '100%' }} />
 
         {/* React overlays (siblings, absolutely positioned over the
             engine's container). pointer-events: none on the wrapper so
