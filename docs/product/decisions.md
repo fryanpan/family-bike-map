@@ -559,3 +559,35 @@ Evidence: `docs/research/2026-06-26-routing-benchmark-results.md`. SF + Berlin,
 all 34 mode×pair routes still found, preferred-% up or flat (only −1pp dips,
 within the ~3pp band). **Status: Shipped.** Follow-up: `carFreeBonus` has no
 admin-override wiring yet (same gap as the turn-cost fields).
+
+## 2026-07-11: Enriched tiles activated in prod (SF Bay core)
+
+**Context**: PR #214 merged the full enriched-tiles stack (offline pipeline, daily OSM
+diff support, route server, pluggable DEM) with activation deliberately decoupled from
+deploy: the Worker serves baked tiles only when the R2 bucket's `manifest.json` names an
+active tileset version.
+
+**Decision / actions** (all same-day, in order):
+1. Deployed merged main (Worker version `690b82ab`) — verified zero behavior change
+   (no manifest yet → every tile falls through to the Overpass proxy).
+2. Uploaded the SF Bay core bake (`data/tiles/bayarea-core`, 213 tiles, 203,501 ways,
+   built from OSM replication seq 2776, terrarium DEM) via `upload-tiles.ts` →
+   manifest cutover to version **`2026-07-11-seq2776`**.
+3. Prod falsification pass (multiple zooms, kid-confident): enriched tile serving
+   confirmed end-to-end (`server cache: R2` client logs), Berlin fail-open to Overpass
+   confirmed, no white pills / double plotting / console errors. Mid-zoom overlay
+   sparseness in the Mission initially looked suspicious — settled by a **manifest
+   rollback A/B** (see learnings): identical pre-cutover, i.e. pre-existing display
+   behavior, not an enrichment regression.
+4. End-to-end route on enriched tiles (client backend, Mission → Conservatory of
+   Flowers): found, correct corridor (Wiggle → Page → Panhandle → JFK), tier colors
+   consistent with quality bar. New timing telemetry: 2.1 s total = 1.6 s tile fetch +
+   0.4 s graph build + 0.1 s A* (97.5k nodes / 186.5k edges).
+
+**Rollback**: `bun scripts/pipeline/upload-tiles.ts --rollback-to <prev-version>`
+(manifest-only rewrite, live within the Worker's 60 s manifest cache TTL). Rolling back
+to a nonexistent version forces full fail-open to Overpass — the pre-#214 behavior.
+
+**Status**: Live. Follow-ups: full-NorCal bake (current bbox is SF Bay core),
+daily diff cron, phone-latency protocol (`server/README.md`) → server-backend decision,
+DEM-swap retry behind the benchmark gate.
