@@ -30,8 +30,6 @@ export const MAX_FETCH_TILES = 64
 export const OVERVIEW_MAX_ZOOM = 12
 
 export interface OverviewStyle {
-  /** True below OVERVIEW_MAX_ZOOM — the city-overview band. */
-  simplified: boolean
   /** Draw the white halo under bike-infra tiers? Off at overview zoom
    *  (halos fatten the whole grid into blobs and cost a second deck layer). */
   drawHalo: boolean
@@ -52,9 +50,9 @@ export interface OverviewStyle {
  */
 export function overviewStyle(zoom: number): OverviewStyle {
   if (zoom >= OVERVIEW_MAX_ZOOM) {
-    return { simplified: false, drawHalo: true, interactive: true, strokeScale: 1 }
+    return { drawHalo: true, interactive: true, strokeScale: 1 }
   }
-  return { simplified: true, drawHalo: false, interactive: false, strokeScale: 0.6 }
+  return { drawHalo: false, interactive: false, strokeScale: 0.6 }
 }
 
 /**
@@ -76,12 +74,17 @@ export function selectFetchTiles(
 ): Tile[] {
   if (tiles.length <= max) return tiles
   const [clat, clng] = center
+  // Longitude degrees shrink toward the poles; scale dlng by cos(lat) so
+  // "nearest to centre" is true geographic distance, not an oblong that
+  // over-favours same-latitude tiles (at SF's 37.8° a lng degree is ~0.79×
+  // a lat degree). Deterministic — depends only on the viewport centre.
+  const cosLat = Math.cos((clat * Math.PI) / 180)
   // Tile centre in the same 0.1° grid units used by latLngToTile.
   const dist2 = (t: Tile): number => {
     const tlat = (t.row + 0.5) * 0.1
     const tlng = (t.col + 0.5) * 0.1
     const dlat = tlat - clat
-    const dlng = tlng - clng
+    const dlng = (tlng - clng) * cosLat
     return dlat * dlat + dlng * dlng
   }
   return [...tiles]

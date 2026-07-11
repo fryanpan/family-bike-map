@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 import { classifyOverlayWay } from '../src/components/BikeMapOverlay'
 import type { OsmWay } from '../src/utils/types'
+import type { ClassificationRule } from '../src/services/rules'
 
 function way(tags: Record<string, string>): OsmWay {
   return { itemName: null, osmId: 1, tags, coordinates: [[37.77, -122.43], [37.771, -122.431]] }
@@ -43,14 +44,19 @@ describe('classifyOverlayWay', () => {
   })
 
   it('honours a region rule override before the hardcoded path', () => {
-    const rules = [{ match: { name: 'Some Bike Blvd' }, classification: 'Fahrradstraße' }]
+    const rules: ClassificationRule[] = [
+      { match: { name: 'Some Bike Blvd' }, classification: 'Fahrradstraße', travelModes: {} },
+    ]
     const cls = classifyOverlayWay(
       way({ highway: 'residential', name: 'Some Bike Blvd' }),
       profile,
       rules,
     )
-    // Whatever the profile's display level for that item, the itemName must
-    // come from the rule, proving regionRules is threaded through.
+    // Assert candidate FIRST so a regression that drops the way to
+    // skip/hiddenSurface fails loudly instead of passing vacuously.
+    expect(cls.kind).toBe('candidate')
+    // The itemName must come from the rule, proving regionRules is threaded
+    // through (whatever the profile's display level for that item).
     if (cls.kind === 'candidate') expect(cls.itemName).toBe('Fahrradstraße')
   })
 })

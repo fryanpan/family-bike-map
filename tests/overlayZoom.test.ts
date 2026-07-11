@@ -11,7 +11,6 @@ describe('overviewStyle', () => {
   it('is the identity style at and above the overview cutoff', () => {
     for (const zoom of [OVERVIEW_MAX_ZOOM, 13, 14, 15, 16, 18]) {
       expect(overviewStyle(zoom)).toEqual({
-        simplified: false,
         drawHalo: true,
         interactive: true,
         strokeScale: 1,
@@ -22,7 +21,6 @@ describe('overviewStyle', () => {
   it('strips halo + interactivity and thins strokes below the cutoff', () => {
     for (const zoom of [OVERVIEW_MAX_ZOOM - 1, 10, 9, 5]) {
       const s = overviewStyle(zoom)
-      expect(s.simplified).toBe(true)
       expect(s.drawHalo).toBe(false)
       expect(s.interactive).toBe(false)
       expect(s.strokeScale).toBeLessThan(1)
@@ -32,10 +30,10 @@ describe('overviewStyle', () => {
 
   it('is a pure function of zoom (no z14+ regression boundary)', () => {
     // The boundary must sit strictly below the metro zooms that already
-    // worked, so z12/z13/z14 are untouched.
-    expect(overviewStyle(11).simplified).toBe(true)
-    expect(overviewStyle(12).simplified).toBe(false)
-    expect(overviewStyle(14).simplified).toBe(false)
+    // worked, so z12/z13/z14 are untouched (full halo + interactivity).
+    expect(overviewStyle(11).drawHalo).toBe(false)
+    expect(overviewStyle(12).drawHalo).toBe(true)
+    expect(overviewStyle(14).drawHalo).toBe(true)
   })
 })
 
