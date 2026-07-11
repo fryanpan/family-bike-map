@@ -17,6 +17,28 @@
 
 ---
 
+## 2026-07-11: Render-check harness serves via `wrangler dev`, not `vite preview`
+
+**Context**: The render-check harness (`scripts/render-checks/`, the automated counterpart of `.claude/rules/rendering-changes.md`) needs to serve the built app locally for Playwright to drive. `vite preview` serves `dist/` but has no `/api/*` proxy — the bike-infra overlay under test would have zero real data to paint, making every check trivially pass/fail on an empty map regardless of the actual change being verified.
+
+**Decision**: Serve via `bun run build` then `wrangler dev`. `wrangler.toml`'s `[assets]` block already points at `./dist` with SPA fallback, so a single `wrangler dev` process serves the built app AND the live Worker `/api/*` routes (the Overpass proxy) on one port — the closest local approximation to production topology, and the only option where the overlay actually has real data. Falls back to `vite dev` + a separate `wrangler dev --port 8791` (matching `vite.config.ts`'s existing documented local-dev pattern) only if `bun run build` fails on an environment-only issue.
+
+**Side findings that shaped the harness** (see `docs/process/learnings.md` "Render-check harness" for detail): `wrangler dev` persists R2/D1/cache state to `.wrangler/state/` across restarts, so budgets must be calibrated against a deliberately-cleared cold cache, not whatever a repeatedly-poked local server reports; this machine runs other local services on wrangler's conventional default port (8787), so the harness verifies response *content*, not just "got an HTTP response," and defaults to port 8793 instead.
+
+**Status**: Implemented, PR adding `scripts/render-checks/`.
+
+---
+
+## 2026-07-11: ALWAYS-VISIBLE check uses a non-empty floor at Outer Sunset
+
+**Context**: The ALWAYS-VISIBLE render check needs a viewport where "the overlay paints something at citywide zoom" is a meaningful guarantee. Downtown SF (Market/Valencia/JFK Promenade corridor) has enough dense preferred (1a/1b) infrastructure that it paints comfortably at z11-z12 even with no such guarantee coded anywhere — testing there would pass for the wrong reason.
+
+**Decision**: Target Outer Sunset (37.7520, -122.4950, z12) — an ordinary residential SF neighborhood with sparse preferred infra — and assert a **non-empty floor of 150 painted px**, not an absolute density target. The check's job is only "the overlay is non-empty at citywide zoom, so a plain neighborhood doesn't read as a dead zone." History-independence — the actual guarantee `feat/always-visible-overlay` provides — is verified separately by the DETERMINISM check. An earlier draft used a 500px floor recorded as a known-fail expected to flip when the overlay PR landed; that was wrong: the overlay paints native density (~360px cold) at z12 Outer Sunset by design (it fetches at every zoom now, but applies overview simplification only below z12), so 500px conflated "non-empty" with "dense" and would never flip there. Recalibrated to 150px (well under the ~360px real density, so it isn't viewport-fragile) and removed the `known-fails.ts` entry.
+
+**Status**: Implemented; ships passing (not a known-fail).
+
+---
+
 ## 2026-05-25: Split "Protected bike lane on major road" from "Elevated sidewalk path"
 
 **Context**: SF streets like 17th and Folsom (curb-separated cycle tracks on tertiary/secondary roads) were being labelled "Elevated sidewalk path" — same legend item as a separated track on a quiet residential street. In OSM both share `cycleway=track` / `cycleway:right=track` tags, so `classifyOsmTagsToItem` lumped them together. The lived experience is different: a separated track next to a 50 km/h secondary road is loud, fume-y, and stressful for younger kids, while the same tagging on a residential street is genuinely calm. Bryan's framing: *not appropriate for kid-confident, but fine for kid-traffic-savvy.*

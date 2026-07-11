@@ -7,7 +7,8 @@
     "dev": "wrangler dev",
     "build": "vite build",
     "deploy": "vite build && wrangler deploy",
-    "test": "bun test"
+    "test": "bun test",
+    "render-check": "bun scripts/render-checks/run-all.ts"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.2",
@@ -34,6 +35,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "playwright": "1.61.1",
     "pngjs": "^7.0.0",
     "typescript": "^5.4.5",
     "vite": "^8.0.5",
