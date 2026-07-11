@@ -4,6 +4,7 @@ const Map = lazy(() => import('./components/Map'))
 const AdminPanel = lazy(() => import('./components/AdminPanel'))
 import SimpleLegend from './components/SimpleLegend'
 import { TileLoadIndicator } from './components/TileLoadIndicator'
+import { UpdateBanner } from './components/UpdateBanner'
 import SearchBar from './components/SearchBar'
 import type { QuickOption } from './components/SearchBar'
 import PlaceCard from './components/PlaceCard'
@@ -685,6 +686,7 @@ export default function App() {
 
   return (
     <div className={`app ui-${uiState}`}>
+      <UpdateBanner />
       <div className="map-wrap">
         <Suspense fallback={<div className="map-loading" />}>
           <Map

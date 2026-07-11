@@ -399,6 +399,27 @@ const handler = {
       })
     }
 
+    // ── App version (self-update check) ───────────────────────────────
+    // Foregrounded PWAs (src/services/swUpdate.ts) poll this to detect a
+    // new deploy faster/cheaper than waiting on a full SW byte-compare +
+    // install cycle. no-store: a stale cached answer here would defeat
+    // the entire point of the check.
+    //
+    // NOT the same thing as the static /version.json emitted by
+    // vite.config.ts — that file is baked into the JS bundle at build
+    // time and, being a plain .json GET, is cache-first per sw.js's
+    // `isAppShell()`. It's fine for its actual use (benchmark scripts
+    // labeling result folders) but useless for staleness detection: a
+    // stale client would just read back its own stale answer. This
+    // route reads `env.APP_VERSION`, injected fresh by CI on every
+    // Worker deploy, so it always reflects what's *actually* live.
+    if (path === '/version') {
+      return Response.json(
+        { version: env.APP_VERSION ?? '0.0.0-unknown' },
+        { headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
+
     // ── Route logging (D1) ───────────────────────────────────────────
     if (path === '/api/route-log' && request.method === 'POST') {
       try {
