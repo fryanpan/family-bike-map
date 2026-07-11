@@ -108,6 +108,7 @@ These conventions modify how superpowers plugin skills behave in this project:
 ## Verification
 
 - After implementing UI changes or bug fixes, verify the result before reporting done. Never mark a UI task complete based solely on code being written — state what verification you performed and what you could not verify.
+- For map/overlay rendering changes, follow `.claude/rules/rendering-changes.md` — including the same-viewport t0 vs t+15s stability check. A single static screenshot is never sufficient verification for rendering behavior.
 - At the start of any worktree session involving commits, check whether the worktree is current with its base branch. Report the result before beginning implementation.
 
 ## LLM Turn Efficiency
