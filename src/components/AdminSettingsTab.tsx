@@ -1,5 +1,6 @@
 import { useAdminSettings, DEFAULT_SETTINGS, setSettings, resetSettings } from '../services/adminSettings'
 import type { AdminSettings } from '../services/adminSettings'
+import { APP_VERSION } from '../version'
 import { PROFILE_LEGEND } from '../utils/classify'
 import { MODE_RULES } from '../data/modes'
 import type { RideMode } from '../data/modes'
@@ -139,6 +140,18 @@ export default function AdminSettingsTab() {
 
   return (
     <div className="admin-settings">
+      {/* ── App version ─────────────────────────────────────────────
+          Surfaced so a user can screenshot which build their pinned
+          home-screen app is running when reporting a "looks stale"
+          bug. Same value logged to the console at boot and used by
+          the self-update check (src/services/swUpdate.ts). */}
+      <section className="admin-section">
+        <h3>App version</h3>
+        <div className="admin-hint">
+          <code>{APP_VERSION}</code>
+        </div>
+      </section>
+
       {/* ── Map rendering engine ───────────────────────────────────── */}
       <section className="admin-section">
         <h3>Map rendering engine</h3>

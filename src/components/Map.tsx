@@ -270,13 +270,36 @@ function useFitBoundsOnRouteChange(engine: MapEngine | null, route: Route | null
 function useCenterOnFirstLocation(
   engine: MapEngine | null,
   currentLocation: { lat: number; lng: number } | null,
+  skip: boolean,
 ): void {
-  const hasCentered = useRef(false)
+  // When the view was restored from the URL, treat the map as already
+  // centered so we don't yank it to the user's GPS location — the shared
+  // URL's viewport is authoritative.
+  const hasCentered = useRef(skip)
   useEffect(() => {
     if (!engine || !currentLocation || hasCentered.current) return
     engine.setView([currentLocation.lat, currentLocation.lng], 14)
     hasCentered.current = true
   }, [engine, currentLocation])
+}
+
+/** Report the map's center + zoom to the app on every pan/zoom end, so the
+ *  URL can be kept in sync. Both `moveend` and `zoomend` are wired; the app
+ *  debounces, so the occasional double-fire is harmless. */
+function useViewChangeSync(
+  engine: MapEngine | null,
+  onViewChange?: (center: { lat: number; lng: number }, zoom: number) => void,
+): void {
+  useEffect(() => {
+    if (!engine || !onViewChange) return
+    const emit = () => {
+      const [lat, lng] = engine.getCenter()
+      onViewChange({ lat, lng }, engine.getZoom())
+    }
+    const off1 = engine.on('moveend', emit)
+    const off2 = engine.on('zoomend', emit)
+    return () => { off1(); off2() }
+  }, [engine, onViewChange])
 }
 
 function useFlyToPoint(
@@ -701,6 +724,14 @@ interface Props {
   onAddWaypoint?: (lat: number, lng: number) => void
   onRerouteAround?: (wayIds: number[]) => void
   onFlagSegment?: (seg: RouteSegment) => void
+  /** Initial map center, restored from the URL. When set, first-location
+   *  auto-centering is suppressed so the shared viewport is honored. */
+  initialCenter?: { lat: number; lng: number } | null
+  /** Initial zoom, restored from the URL. */
+  initialZoom?: number | null
+  /** Fired on pan/zoom end with the current center + zoom, so the app can
+   *  sync the URL. */
+  onViewChange?: (center: { lat: number; lng: number }, zoom: number) => void
 }
 
 export default function Map(props: Props) {
@@ -710,11 +741,17 @@ export default function Map(props: Props) {
     onOverlayStatusChange, currentLocation, currentHeading,
     preferredItemNames, flyToPlace, regionRules,
     onSelectRoute, onAddWaypoint, onRerouteAround, onFlagSegment,
+    initialCenter, initialZoom, onViewChange,
   } = props
 
   const settings = useAdminSettings()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [engine, setEngine] = useState<MapEngine | null>(null)
+
+  // Captured once at mount so the engine boots at the restored view. Read
+  // from a ref to avoid re-running the mount effect if the props churn.
+  const initialViewRef = useRef({ center: initialCenter ?? null, zoom: initialZoom ?? null })
+  const hadInitialView = initialViewRef.current.center != null
 
   // Mount the engine once on first render. The chosen kind comes from
   // admin settings; if the kind is changed by the user the page must
@@ -730,9 +767,10 @@ export default function Map(props: Props) {
     )
     const eng = createEngine(resolved.kind)
     let mounted = true
+    const iv = initialViewRef.current
     eng.mount(containerRef.current, {
-      center: [52.52, 13.405],
-      zoom: 13,
+      center: iv.center ? [iv.center.lat, iv.center.lng] : [52.52, 13.405],
+      zoom: iv.zoom ?? 13,
       baseStyle: resolved.baseStyle,
       maptilerKey: env.maptilerKey,
       googleMapsKey: env.googleMapsKey,
@@ -770,7 +808,8 @@ export default function Map(props: Props) {
 
   // Wire all the imperative draws.
   useFitBoundsOnRouteChange(engine, route)
-  useCenterOnFirstLocation(engine, currentLocation)
+  useCenterOnFirstLocation(engine, currentLocation, hadInitialView)
+  useViewChangeSync(engine, onViewChange)
   useFlyToPoint(engine, startPoint, 14, false)
   useFlyToPoint(engine, flyToPlace ?? null, 16, true)
   useStartEndMarkers(engine, startPoint, endPoint)

@@ -4,6 +4,7 @@ const Map = lazy(() => import('./components/Map'))
 const AdminPanel = lazy(() => import('./components/AdminPanel'))
 import SimpleLegend from './components/SimpleLegend'
 import { TileLoadIndicator } from './components/TileLoadIndicator'
+import { UpdateBanner } from './components/UpdateBanner'
 import SearchBar from './components/SearchBar'
 import type { QuickOption } from './components/SearchBar'
 import PlaceCard from './components/PlaceCard'
@@ -38,6 +39,11 @@ import RouteList from './components/RouteList'
 import RouteCompareLinks from './components/RouteCompareLinks'
 import { useAdminSettings } from './services/adminSettings'
 import type { Place, Route, RouteSegment, ProfileMap } from './utils/types'
+import {
+  parseMapState,
+  mergeManagedParams,
+  type MapUrlState,
+} from './utils/urlState'
 import { Sentry } from './sentry'
 import type { RideMode } from './data/modes'
 
@@ -94,28 +100,69 @@ function saveProfiles(profiles: ProfileMap): void {
   } catch { /* ignore */ }
 }
 
-/** Read initial profile from URL params, then localStorage, then default.
- *  Custom preferences (via ?preferred= URL param or CUSTOM_PREFERRED_KEY
- *  localStorage) are no longer supported — the legend UI to mutate them
- *  was removed pre-launch and the persistence path was a source of stale-
- *  state bugs across mode switches (2026-04-28). preferredItemNames is
- *  now always derived from the active profile. */
-function getInitialState(): { profileKey: string } {
-  const params = new URLSearchParams(window.location.search)
-  const modeParam = params.get('travelMode')
+/** Format a coord as a fallback label until a reverse-geocode upgrades it. */
+function coordLabel(lat: number, lng: number): string {
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+}
 
-  if (modeParam && DEFAULT_PROFILES[modeParam]) {
-    return { profileKey: modeParam }
+/** Build a Place from bare coords (restored route endpoint). The label is a
+ *  coordinate string; the restore effect reverse-geocodes it to a real name. */
+function coordPlace(c: { lat: number; lng: number }): Place {
+  const l = coordLabel(c.lat, c.lng)
+  return { lat: c.lat, lng: c.lng, label: l, shortLabel: l }
+}
+
+interface InitialAppState {
+  profileKey: string
+  /** Restored map viewport, or null if the URL carried none. */
+  view: { center: { lat: number; lng: number }; zoom: number | null } | null
+  search: Place | null
+  /** True when the search label came from the URL (skip reverse-geocode). */
+  searchLabeled: boolean
+  start: Place | null
+  end: Place | null
+  waypoints: Array<{ lat: number; lng: number }>
+  uiState: UiState
+}
+
+/** Read ALL restorable state from the URL on cold load. Profile falls back
+ *  URL → localStorage → default (custom per-item preferences are no longer
+ *  supported — removed 2026-04-28 as a stale-state-bug vector). Route and
+ *  search are reconstructed from coords; the UI state is derived from what's
+ *  present (endpoints → routing, search → place-detail, else search). Every
+ *  field fails soft — a malformed URL yields defaults, never a throw. */
+function readInitialUrlState(): InitialAppState {
+  const parsed = parseMapState(window.location.search)
+
+  let profileKey = 'kid-starting-out'
+  if (parsed.travelMode && DEFAULT_PROFILES[parsed.travelMode]) {
+    profileKey = parsed.travelMode
+  } else {
+    try {
+      const savedMode = localStorage.getItem(TRAVEL_MODE_KEY)
+      if (savedMode && DEFAULT_PROFILES[savedMode]) profileKey = savedMode
+    } catch { /* ignore */ }
   }
 
-  try {
-    const savedMode = localStorage.getItem(TRAVEL_MODE_KEY)
-    if (savedMode && DEFAULT_PROFILES[savedMode]) {
-      return { profileKey: savedMode }
-    }
-  } catch { /* ignore */ }
+  const start = parsed.start ? coordPlace(parsed.start) : null
+  const end = parsed.end ? coordPlace(parsed.end) : null
 
-  return { profileKey: 'kid-starting-out' }
+  let search: Place | null = null
+  let searchLabeled = false
+  if (parsed.search) {
+    const { lat, lng, label } = parsed.search
+    const full = label ?? coordLabel(lat, lng)
+    search = { lat, lng, label: full, shortLabel: full.split(',')[0] }
+    searchLabeled = label != null
+  }
+
+  let uiState: UiState = 'search'
+  if (start && end) uiState = 'routing'
+  else if (search) uiState = 'place-detail'
+
+  const view = parsed.center ? { center: parsed.center, zoom: parsed.zoom } : null
+
+  return { profileKey, view, search, searchLabeled, start, end, waypoints: parsed.waypoints, uiState }
 }
 
 /** Resolve the user's current location as a Place (async, returns null on failure). */
@@ -142,8 +189,10 @@ export default function App() {
   const [profiles, setProfiles] = useState<ProfileMap>(loadProfiles)
   const adminSettings = useAdminSettings()
 
-  const initialState = getInitialState()
-  const [selectedProfile, setSelectedProfile] = useState(initialState.profileKey)
+  // Read everything the URL restores exactly once (center/zoom, mode, search
+  // marker, route endpoints). useMemo([]) so it's stable across re-renders.
+  const initialUrl = useMemo(() => readInitialUrlState(), [])
+  const [selectedProfile, setSelectedProfile] = useState(initialUrl.profileKey)
   // preferredItemNames is now derived from the active profile — custom
   // per-item toggling was removed 2026-04-28 (no UX surface, persistence
   // path was a stale-state-bug vector across mode switches). Memoized so
@@ -155,12 +204,12 @@ export default function App() {
   )
 
   // --- UI state machine ---
-  const [uiState, setUiState] = useState<UiState>('search')
-  const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
+  const [uiState, setUiState] = useState<UiState>(initialUrl.uiState)
+  const [selectedPlace, setSelectedPlace] = useState<Place | null>(initialUrl.search)
 
-  const [startPoint, setStartPoint] = useState<Place | null>(null)
-  const [endPoint, setEndPoint]     = useState<Place | null>(null)
-  const [waypoints, setWaypoints]   = useState<Array<{ lat: number; lng: number }>>([])
+  const [startPoint, setStartPoint] = useState<Place | null>(initialUrl.start)
+  const [endPoint, setEndPoint]     = useState<Place | null>(initialUrl.end)
+  const [waypoints, setWaypoints]   = useState<Array<{ lat: number; lng: number }>>(initialUrl.waypoints)
 
   // Session-scoped avoid list — OSM way IDs the user has asked to reroute
   // around via the "Reroute around this" action on a route segment.
@@ -299,14 +348,9 @@ export default function App() {
     setIdbReady(true)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync URL params and localStorage on every state change
+  // Persist the travel mode to localStorage (URL sync is handled by the
+  // shareable-URL mechanism below).
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    params.set('travelMode', selectedProfile)
-    params.delete('preferred')  // legacy URL param, no longer honored
-    params.delete('showOther')  // legacy URL param, no longer honored — overlay is always preferred-only
-    window.history.replaceState({}, '', `?${params.toString()}`)
-
     try {
       localStorage.setItem(TRAVEL_MODE_KEY, selectedProfile)
       // Garbage-collect the legacy custom-prefs key from prior versions —
@@ -315,6 +359,50 @@ export default function App() {
       localStorage.removeItem('bike-route-custom-preferred')
     } catch { /* ignore */ }
   }, [selectedProfile])
+
+  // --- Shareable-URL sync ---------------------------------------------------
+  // A single canonical mechanism keeps the URL in lockstep with all
+  // restorable app state: map center/zoom, travel mode, search marker, and
+  // route (start/end/waypoints). Writes are debounced and use replaceState
+  // (never pushState) so panning doesn't spam browser history. The map's
+  // center/zoom live in the engine, not React state, so we hold the latest
+  // view in a ref (seeded from the restored URL so the first write doesn't
+  // drop it) and let the debounced writer read it.
+  const mapViewRef = useRef<{ center: { lat: number; lng: number }; zoom: number | null } | null>(
+    initialUrl.view,
+  )
+  const urlSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const scheduleUrlSync = useCallback(() => {
+    if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current)
+    urlSyncTimer.current = setTimeout(() => {
+      const view = mapViewRef.current
+      const next: MapUrlState = {
+        center: view?.center ?? null,
+        zoom: view?.zoom ?? null,
+        travelMode: selectedProfile,
+        // Only encode the search marker while it's the active surface — in
+        // routing state selectedPlace can still hold a stale value.
+        search: uiState === 'place-detail' && selectedPlace
+          ? { lat: selectedPlace.lat, lng: selectedPlace.lng, label: selectedPlace.label }
+          : null,
+        start: startPoint ? { lat: startPoint.lat, lng: startPoint.lng } : null,
+        end: endPoint ? { lat: endPoint.lat, lng: endPoint.lng } : null,
+        waypoints,
+      }
+      const query = mergeManagedParams(window.location.search, next)
+      window.history.replaceState({}, '', query ? `?${query}` : window.location.pathname)
+    }, 400)
+  }, [selectedProfile, uiState, selectedPlace, startPoint, endPoint, waypoints])
+
+  // Re-sync whenever any managed state changes.
+  useEffect(() => { scheduleUrlSync() }, [scheduleUrlSync])
+
+  // Called by <Map> on pan/zoom end. Updates the view ref and re-syncs.
+  const handleViewChange = useCallback((center: { lat: number; lng: number }, zoom: number) => {
+    mapViewRef.current = { center, zoom }
+    scheduleUrlSync()
+  }, [scheduleUrlSync])
 
   useEffect(() => {
     saveProfiles(profiles)
@@ -620,12 +708,34 @@ export default function App() {
     })
   }, [startPoint, endPoint, selectedProfile, waypoints]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // --- Cold-load restore ----------------------------------------------------
+  // If the URL carried route endpoints, kick off the route computation exactly
+  // as if the user had entered them. Route/search endpoints restore with
+  // coordinate labels; reverse-geocode upgrades them to real place names
+  // (fire-and-forget — a failure just leaves the coord label). Runs once.
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
 
+    if (initialUrl.start && initialUrl.end) {
+      void computeRoute(initialUrl.start, initialUrl.end, initialUrl.profileKey, initialUrl.waypoints)
+    }
+
+    const upgrade = (place: Place, setter: (p: Place) => void) => {
+      reverseGeocode(place.lat, place.lng)
+        .then((geo) => { if (geo) setter({ ...place, label: geo.label, shortLabel: geo.shortLabel }) })
+        .catch(() => { /* keep coordinate label */ })
+    }
+    if (initialUrl.start) upgrade(initialUrl.start, setStartPoint)
+    if (initialUrl.end) upgrade(initialUrl.end, setEndPoint)
+    if (initialUrl.search && !initialUrl.searchLabeled) upgrade(initialUrl.search, setSelectedPlace)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const overlayStatusMsg =
-    // 'loading' is handled by the richer <TileLoadIndicator> (per-tile progress);
-    // keep this line for the zoom + error states only.
-    overlayStatus === 'zoom'    ? '🔍 Zoom in to see bike infrastructure' :
+    // 'loading' is handled by the richer <TileLoadIndicator> (per-tile progress).
+    // The overlay now fetches at every zoom (no more "zoom in" prompt — see
+    // selectFetchTiles), so only the error state surfaces a message here.
     overlayStatus === 'error'   ? '⚠️ Could not load bike map — pan or zoom to retry' :
     null
 
@@ -685,6 +795,7 @@ export default function App() {
 
   return (
     <div className={`app ui-${uiState}`}>
+      <UpdateBanner />
       <div className="map-wrap">
         <Suspense fallback={<div className="map-loading" />}>
           <Map
@@ -707,6 +818,9 @@ export default function App() {
             regionRules={regionRules}
             onRerouteAround={route ? rerouteAroundSegment : undefined}
             onFlagSegment={route ? setFlagSegmentTarget : undefined}
+            initialCenter={initialUrl.view?.center ?? null}
+            initialZoom={initialUrl.view?.zoom ?? null}
+            onViewChange={handleViewChange}
           />
         </Suspense>
 

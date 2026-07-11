@@ -16,11 +16,7 @@ import type { MapEngine, PolylineHandle, PopupHandle, PathLayerHandle, PathLayer
 import type { ClassificationRule } from '../services/rules'
 import { isEnrichedWay, type OsmWay } from '../utils/types'
 import { simplifyPath } from '../utils/simplifyPath'
-
-// Max tiles allowed in viewport. Beyond this the map is too zoomed out
-// to be useful — show the "zoom in" prompt instead of firing many
-// parallel requests. 30 covers reasonable metro views.
-const MAX_VISIBLE_TILES = 30
+import { selectFetchTiles, overviewStyle, MAX_FETCH_TILES } from '../utils/overlayZoom'
 
 // Hit-area weight for the transparent tap-target polylines. Sized for
 // fingertips on mobile. The visible coloured polyline still paints on
@@ -177,6 +173,42 @@ function buildTooltipHtml(
   </div>`
 }
 
+// ── Per-way classification (cacheable) ─────────────────────────────────────
+//
+// The candidate loop's classification is a PURE function of (tags, profileKey,
+// regionRules). Tags never change for an osmId, so the outcome can be cached
+// by osmId and reused across the many render re-runs a citywide load triggers
+// (one per arriving tile). Without the cache the loop re-classifies every
+// accumulated way on every tile arrival — O(n²) across the load (measured
+// ~2.3 s cumulative main-thread for a 64-tile viewport; ~72 ms with the
+// cache). isPreferred is deliberately NOT part of this outcome: it depends on
+// preferredItemNames (the admin "show non-preferred" toggle), which can change
+// without profileKey changing, so it's recomputed cheaply per render from the
+// cached itemName.
+type WayClassification =
+  | { kind: 'skip' }                                         // control node / LTS4 / crossing
+  | { kind: 'hiddenSurface'; rough: boolean }                // hidden surface (rough → cobble pass)
+  | { kind: 'candidate'; itemName: string | null; pathLevel: PathLevel }
+
+export function classifyOverlayWay(
+  way: OsmWay,
+  profileKey: string,
+  regionRules?: ClassificationRule[],
+): WayClassification {
+  const { pathLevel: routingPathLevel } = classifyEdge(way.tags)
+  // Motorway/trunk-class edges (LTS 4) are never browse-overlay candidates.
+  if (routingPathLevel === '4') return { kind: 'skip' }
+  // Crossing / traffic-island stubs are routing connectors but render as
+  // disconnected confetti on the browse overlay — drop them.
+  if (isOverlayCrossing(way.tags)) return { kind: 'skip' }
+  if (isOverlayHiddenSurface(way.tags)) {
+    return { kind: 'hiddenSurface', rough: isRoughSurface(way.tags) }
+  }
+  const itemName = classifyOsmTagsToItem(way.tags, profileKey, regionRules)
+  const pathLevel = getDisplayPathLevel(itemName, profileKey, routingPathLevel)
+  return { kind: 'candidate', itemName, pathLevel }
+}
+
 // ── Renderer ───────────────────────────────────────────────────────────────
 
 interface RenderedWay {
@@ -233,6 +265,13 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
   // data that clears it.
   const gradientCache = useRef<Map<string | number, { pct: number | null; coarse: boolean; gen: number }>>(new Map())
 
+  // Per-way classification cache (see classifyOverlayWay). Keyed by osmId;
+  // cleared whenever the inputs that change the outcome (profileKey /
+  // regionRules) change. Turns the candidate loop's per-tile-arrival cost
+  // from O(n²) to O(n) across a citywide load.
+  const classifyCache = useRef<Map<string | number, WayClassification>>(new Map())
+  const classifyKeyRef = useRef<{ profileKey: string; regionRules?: ClassificationRule[] }>({ profileKey: '' })
+
   // Single gradient accessor shared by the moat effect and pass 0 below, so
   // both consumers see identical values and cache-refresh behaviour.
   const gradientFor = (way: OsmWay, elevGen: number): number | null => {
@@ -267,7 +306,7 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
   // ways: tileData accumulates across pans and a single OSM way with an
   // outlier node can span the bbox across a continent, which would make
   // prefetchElevation fire thousands of tile requests and stall the page.
-  // The viewport is always small (≤ MAX_VISIBLE_TILES). Off-screen ways
+  // The viewport is always small (≤ MAX_FETCH_TILES). Off-screen ways
   // fail soft (null gradient → shown) until the user pans to them.
   // Re-runs when ways change (i.e. a pan loaded new tiles). Tiles are
   // cached in-memory and shared with the router. Enriched ways carry their
@@ -351,9 +390,28 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
 
     const BROWSING_WEIGHT = 4
 
+    // Deterministic per-zoom render policy (pure function of zoom). Below the
+    // overview cutoff we drop the halo + finger-tap layers and thin the
+    // strokes — at city-overview zoom those are visual noise AND triple the
+    // deck.gl work (three layers per way vs one). At z >= OVERVIEW_MAX_ZOOM
+    // the style is the identity, so metro/street zooms paint exactly as
+    // before this change.
+    const ovStyle = overviewStyle(zoom)
+
     // Max gross gradient this mode tolerates on the browse overlay. Steeper
     // shown ways (e.g. 20% `highway=path` hiking trails) are hidden.
     const maxGradientPct = getOverlayMaxGradientPct(profileKey)
+
+    // Invalidate the classification cache when the inputs that change a way's
+    // itemName/pathLevel change. Tags are immutable per osmId, so nothing else
+    // can alter the cached outcome.
+    if (
+      classifyKeyRef.current.profileKey !== profileKey ||
+      classifyKeyRef.current.regionRules !== regionRules
+    ) {
+      classifyCache.current.clear()
+      classifyKeyRef.current = { profileKey, regionRules }
+    }
 
     // Pass 0a — classify + gate each painted candidate. Verdicts:
     //   hidden  — the way's own gradient exceeds the ceiling, or the moat
@@ -389,19 +447,22 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
       // Traffic-control pseudo-ways (single-coordinate signal/stop nodes in
       // the tile payload — see isControlNode) are router input, not paint.
       if (way.coordinates.length < 2) continue
-      const { pathLevel: routingPathLevel } = classifyEdge(way.tags)
-      if (routingPathLevel === '4') continue
-      // Crossing / traffic-island stubs are real connectors for routing but
-      // render as disconnected confetti on the browse overlay — drop them.
-      if (isOverlayCrossing(way.tags)) continue
-      if (isOverlayHiddenSurface(way.tags)) {
+      // Classification (classifyEdge + crossing/surface checks + item lookup)
+      // is cached by osmId — see classifyOverlayWay. Only the parts that
+      // depend on live gradient/moat state (overlayWayVerdict below) and
+      // preferredItemNames (isPreferred) are recomputed each render.
+      let cls = classifyCache.current.get(way.osmId)
+      if (cls === undefined) {
+        cls = classifyOverlayWay(way, profileKey, regionRules)
+        classifyCache.current.set(way.osmId, cls)
+      }
+      if (cls.kind === 'skip') continue
+      if (cls.kind === 'hiddenSurface') {
         // Surface IS rough — keep it for the cobble-marker pass.
-        if (isRoughSurface(way.tags)) roughWays.push(way)
+        if (cls.rough) roughWays.push(way)
         continue
       }
-
-      const itemName = classifyOsmTagsToItem(way.tags, profileKey, regionRules)
-      const pathLevel = getDisplayPathLevel(itemName, profileKey, routingPathLevel)
+      const { itemName, pathLevel } = cls
       const isPreferred = itemName !== null && preferredItemNames.has(itemName)
       // Overlay shows ONLY items the active mode prefers. Items at a
       // preferred LEVEL but flagged non-preferred for this mode (e.g.
@@ -464,13 +525,15 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
         : hasRoute
           ? browsingWeight * 0.75
           : browsingWeight
-      const weight = Math.max(2, Math.round(weightScaled))
+      const weight = Math.max(2, Math.round(weightScaled * ovStyle.strokeScale))
       const opacity = hasRoute && isBikeInfraTier
         ? settings.overlayOpacityBrowsing * 0.8
         : hasRoute
           ? settings.overlayOpacityWithRoute
           : settings.overlayOpacityBrowsing
-      const drawHalo = isBikeInfraTier
+      // Halos are dropped at overview zoom (ovStyle.drawHalo=false) — see
+      // overlayZoom.ts. Above the cutoff this is exactly isBikeInfraTier.
+      const drawHalo = isBikeInfraTier && ovStyle.drawHalo
       // Decimate the geometry once per render. All overlay passes
       // (halo, hit-area, colour, plus the stipple pass for rough
       // ways) share this simplified path so the GPU vertex count
@@ -539,22 +602,27 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
     // Pass 2a — invisible wide hit-area layer for finger taps. Sits
     // above halos but below the visible colour, with full hit width
     // (HIT_POLYLINE_WEIGHT). deck.gl picks at rendered geometry, so
-    // we need this dedicated layer for forgiving mobile taps.
-    const hitFeatures: PathLayerFeature[] = toRender.map((r) => ({
-      id: r.way.osmId,
-      coordinates: r.coords,
-      color: '#000000',
-      width: HIT_POLYLINE_WEIGHT,
-      opacity: 0,
-      meta: r,
-    }))
-    if (hitFeatures.length > 0) {
-      pathLayerHandles.push(engine.addPathLayer(hitFeatures, {
-        onClick: (id) => {
-          const r = wayIndex.get(id)
-          if (r) openSegmentPopup(r)
-        },
+    // we need this dedicated layer for forgiving mobile taps. Skipped at
+    // overview zoom (ovStyle.interactive=false): a 24px tap target spans
+    // kilometres there so per-segment picking is meaningless, and dropping
+    // the layer removes a full deck.gl PathLayer + its picking cost.
+    if (ovStyle.interactive) {
+      const hitFeatures: PathLayerFeature[] = toRender.map((r) => ({
+        id: r.way.osmId,
+        coordinates: r.coords,
+        color: '#000000',
+        width: HIT_POLYLINE_WEIGHT,
+        opacity: 0,
+        meta: r,
       }))
+      if (hitFeatures.length > 0) {
+        pathLayerHandles.push(engine.addPathLayer(hitFeatures, {
+          onClick: (id) => {
+            const r = wayIndex.get(id)
+            if (r) openSegmentPopup(r)
+          },
+        }))
+      }
     }
 
     // Pass 2b — visible coloured polylines (top z-order of pass 2).
@@ -650,9 +718,15 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
       getSouth: () => sw[0], getNorth: () => ne[0],
       getWest:  () => sw[1], getEast:  () => ne[1],
     }
-    const tiles = getVisibleTiles(bounds)
-
-    if (tiles.length > MAX_VISIBLE_TILES) { onStatusChange('zoom'); return }
+    // Fetch every visible tile up to a deterministic budget. When the
+    // viewport spans more than MAX_FETCH_TILES, selectFetchTiles keeps the
+    // budget-nearest-to-centre subset — a PURE function of (viewport), so a
+    // zoomed-out user fetches (and paints) the same tiles a zoomed-in user
+    // would for the identical viewport. The old code bailed here with a
+    // "zoom in" prompt, which left whatever tiles happened to be loaded from
+    // earlier navigation painted — history-dependent (the bug this fixes).
+    const center: [number, number] = [(sw[0] + ne[0]) / 2, (sw[1] + ne[1]) / 2]
+    const tiles = selectFetchTiles(getVisibleTiles(bounds), center, MAX_FETCH_TILES)
 
     const toLoad = tiles.filter((t) => {
       const k = tileKey(t.row, t.col)
@@ -723,7 +797,10 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
           getSouth: () => sw[0], getNorth: () => ne[0],
           getWest:  () => sw[1], getEast:  () => ne[1],
         }
-        const tiles = getVisibleTiles(bounds)
+        // Prime from cache using the SAME deterministic subset the fetch path
+        // uses, so the initial paint matches what loadVisibleTiles will load.
+        const center: [number, number] = [(sw[0] + ne[0]) / 2, (sw[1] + ne[1]) / 2]
+        const tiles = selectFetchTiles(getVisibleTiles(bounds), center, MAX_FETCH_TILES)
         const preloaded = new Map<string, OsmWay[]>()
         for (const t of tiles) {
           const cached = getCachedTile(t.row, t.col)

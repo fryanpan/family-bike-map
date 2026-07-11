@@ -313,6 +313,42 @@ button { font-family: inherit; cursor: pointer; }
 .tile-load-bytes { font-size: 11px; color: #6b7280; }
 .tile-load-err { color: #b45309; }
 
+/* Self-update toast (src/services/swUpdate.ts). Fixed to the viewport
+   (not .map-wrap) and top-center so it's visible regardless of uiState —
+   search, place-card, and routing panel all live lower on screen. High
+   z-index: this should sit above everything, including modals, since a
+   stale bundle can affect any of them. env() clears the iOS notch/status
+   bar on a pinned home-screen app. */
+.update-banner {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2200;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #111827;
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 8px 8px 16px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  font-size: 13px;
+}
+.update-banner-text { font-weight: 500; white-space: nowrap; }
+.update-banner-btn {
+  padding: 6px 14px;
+  background: #4f46e5;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background .15s;
+}
+.update-banner-btn:hover { background: #4338ca; }
+
 /* On-map translucent boxes over tiles that are still loading. */
 .tile-loading-boxes { position: absolute; inset: 0; pointer-events: none; z-index: 455; }
 .tile-loading-box {
