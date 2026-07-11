@@ -17,6 +17,35 @@ const CENTER = { lat: 37.7649, lng: -122.4294, zoom: 14 }
 const TRAVEL_MODE = 'kid-confident'
 const LONG_TASK_THRESHOLD_MS = 50 // standard Web Vitals "long task" floor
 
+// Hard cap on the post-interaction (zoom-out) measurement phase. Observed
+// hang (2026-07-11): both waitForTilesSettled calls logged their "still
+// active" warning (so both settled, or hit their own internal ~15s
+// budget), then the check hung for ~4 minutes producing no result.
+// waitForTilesSettled is internally bounded, but the zoom-out to
+// `CENTER.zoom - 3` fans out to a citywide tile fetch, and a busy/looping
+// main thread (repeated synchronous overlay recompute per tile arrival —
+// see learnings.md "Overlay-wide computation must stay off the
+// tile-arrival hot path") can starve the very next call,
+// `page.evaluate()` reading `__longTasks`, which has NO timeout of its
+// own and waits indefinitely for the main thread to go idle. Race the
+// whole post-interaction phase against this cap so the check always
+// produces a number or a clean TIMEOUT-fail instead of hanging the
+// harness.
+const POST_INTERACTION_TIMEOUT_MS = 30_000
+
+class CheckTimeoutError extends Error {}
+
+// clearTimeout on settle (either branch) so a won race doesn't leave a
+// dangling referenced timer keeping the whole `bun run render-check`
+// process alive for up to `ms` after the check itself is done.
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new CheckTimeoutError(`${label} exceeded ${ms}ms`)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 // Calibrated 2026-07-11 against a live local wrangler-dev build (3 runs,
 // cold-ish cache — see README.md "recalibrating budgets"): initial-load
 // TBT 688-982ms, zoom-out TBT 131-623ms. Budgets below are ~3x the worst
@@ -73,8 +102,38 @@ export async function runPerfBudgetCheck(baseUrl: string): Promise<CheckResult> 
     // ── zoom-out interaction ────────────────────────────────────────
     await clearLongTasks(page)
     await setEngineView(page, { lat: CENTER.lat, lng: CENTER.lng, zoom: CENTER.zoom - 3 })
-    await waitForTilesSettled(page)
-    const zoomTasks = await readLongTasks(page)
+
+    let zoomTasks: number[]
+    try {
+      // If the timeout wins the race, this inner promise keeps running in
+      // the background against a page we're about to close — swallow its
+      // eventual rejection so it doesn't surface as an unhandled
+      // rejection after the check has already returned a TIMEOUT result.
+      const postInteraction = (async () => {
+        await waitForTilesSettled(page)
+        return readLongTasks(page)
+      })()
+      postInteraction.catch(() => {})
+      zoomTasks = await withTimeout(
+        postInteraction,
+        POST_INTERACTION_TIMEOUT_MS,
+        'post-interaction (zoom-out) measurement phase',
+      )
+    } catch (err) {
+      if (err instanceof CheckTimeoutError) {
+        return {
+          name: 'perf-budget',
+          passed: false,
+          summary: `TIMEOUT: ${err.message} — check could not complete the zoom-out measurement`,
+          details: [
+            { label: 'initial-load long tasks', value: String(loadTasks.length) },
+            { label: 'initial-load TBT', value: `${loadTbt.toFixed(0)}ms (budget ${BUDGETS_MS.initialLoadTbt}ms)` },
+            { label: 'zoom-out phase', value: `TIMEOUT after ${POST_INTERACTION_TIMEOUT_MS}ms` },
+          ],
+        }
+      }
+      throw err
+    }
     const zoomTbt = totalBlockingTime(zoomTasks)
 
     const failures: string[] = []
