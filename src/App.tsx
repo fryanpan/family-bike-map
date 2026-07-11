@@ -732,9 +732,9 @@ export default function App() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const overlayStatusMsg =
-    // 'loading' is handled by the richer <TileLoadIndicator> (per-tile progress);
-    // keep this line for the zoom + error states only.
-    overlayStatus === 'zoom'    ? '🔍 Zoom in to see bike infrastructure' :
+    // 'loading' is handled by the richer <TileLoadIndicator> (per-tile progress).
+    // The overlay now fetches at every zoom (no more "zoom in" prompt — see
+    // selectFetchTiles), so only the error state surfaces a message here.
     overlayStatus === 'error'   ? '⚠️ Could not load bike map — pan or zoom to retry' :
     null
 
