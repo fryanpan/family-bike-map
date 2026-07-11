@@ -1,5 +1,22 @@
 # Architecture & Product Decisions
 
+## 2026-07-11: Enriched tiles expanded from SF Bay to statewide California
+
+**Context**: The enriched-tiles activation (2026-07-11, SF Bay core, `2026-07-11-seq2776`) covered rows 371–386 only — Marin was in, Santa Cruz/SLO/Sacramento/LA/San Diego/Tahoe were not, so most of the state fell to the slower runtime overlay path. Bryan asked to extend coverage to the whole state, capped at <$5.
+
+**Decision**: Bake all of California (Geofabrik `california-latest.osm.pbf`, ~1.2 GB) and cut the manifest over to the statewide tileset.
+
+- **Cost**: effectively $0 — DEM is open AWS Terrain Tiles, R2 storage (997 MB / 4,397 tiles) and put ops are within the free tier. Only cost is local Mac-mini compute (~9 min per half + ~4 min upload). Well under the $5 cap.
+- **Two-half bake (memory constraint)**: `enrich-region.ts` holds every bike-relevant node coordinate for the whole input PBF in one in-memory `Map`; a single-pass statewide bake OOMs the ~4 GB JS heap. Bake in two latitude halves split at the lat-35.0 tile-row boundary (north 35.0–42.05, south 32.4–35.0), then merge by row seam with the new `merge-tile-halves.ts` (row ≥ 350 → north, else south; complete-ways spillover taken from the authoritative side only). Merge reported `spillover-fallback 0` — clean seam, no gaps or double-counts.
+- **Upload resilience**: added 5× exponential-backoff retry per put to `upload-tiles.ts` — a single transient `wrangler` "fetch failed" among 4,397 puts previously aborted the whole batch before cutover. Manifest still written strictly last (atomic cutover preserved).
+- **Verification**: HTTP falsification pass on prod — San Diego, LA, SLO, Santa Cruz, Fresno, Sacramento, Truckee, CA-side South Lake Tahoe, Redding, and Marin all serve enriched geometry (HTTP 200 from R2); the lon −120.0 Nevada-line tile correctly falls open (no CA ways there); Berlin still fails open to the Overpass proxy.
+
+**Live version**: `2026-07-11-seq4844`. Rollback: `bun scripts/pipeline/upload-tiles.ts --rollback-to 2026-07-11-seq2776` (previous SF-Bay tileset), within the Worker's 60 s manifest cache TTL.
+
+**Follow-up**: The daily-diff updater (`update-region.sh`) still points at a NorCal PBF and rebuilds dirty tiles from a single file. It needs repointing at `data/california.osm.pbf`; incremental diffs are per-tile and fine, but any full-rebuild path must use the two-half split above to avoid the OOM.
+
+---
+
 ## 2026-05-25: Split "Protected bike lane on major road" from "Elevated sidewalk path"
 
 **Context**: SF streets like 17th and Folsom (curb-separated cycle tracks on tertiary/secondary roads) were being labelled "Elevated sidewalk path" — same legend item as a separated track on a quiet residential street. In OSM both share `cycleway=track` / `cycleway:right=track` tags, so `classifyOsmTagsToItem` lumped them together. The lived experience is different: a separated track next to a 50 km/h secondary road is loud, fume-y, and stressful for younger kids, while the same tagging on a residential street is genuinely calm. Bryan's framing: *not appropriate for kid-confident, but fine for kid-traffic-savvy.*

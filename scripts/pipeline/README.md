@@ -40,6 +40,30 @@ Useful flags: `--bbox south,west,north,east` (clip), `--no-dem` (skip the
 gradient bake), `--built-at ISO` / `--seq N` (pin provenance for
 byte-reproducible output).
 
+### Large regions (statewide) — bake in latitude halves
+
+`enrich-region.ts` holds every bike-relevant node coordinate for the whole
+input in one in-memory `Map`, so a single-pass bake of a full state PBF
+(e.g. all of California, ~90M nodes) OOMs the ~4 GB JS heap. Split at an
+integer tile-row boundary (tiles are 0.1°, so lat 35.0 = row 350), bake each
+half within heap, then merge by row seam:
+
+```sh
+bun scripts/pipeline/enrich-region.ts --pbf data/california.osm.pbf \
+  --out data/tiles/ca-north --bbox 35.0,-124.6,42.05,-114.0
+bun scripts/pipeline/enrich-region.ts --pbf data/california.osm.pbf \
+  --out data/tiles/ca-south --bbox 32.4,-124.6,35.0,-114.0
+bun scripts/pipeline/merge-tile-halves.ts \
+  --north data/tiles/ca-north --south data/tiles/ca-south \
+  --seam-row 350 --out data/tiles/california
+```
+
+Both bakes use osmium complete-ways extraction, so a way crossing the seam
+spills a sparse boundary tile into the other half; `merge-tile-halves.ts`
+takes each tile from its authoritative side only (row ≥ seam → north,
+row < seam → south), so every segment is stored exactly once. A
+`spillover-fallback 0` line in the merge output confirms a clean seam.
+
 ## Daily updates
 
 ```sh
