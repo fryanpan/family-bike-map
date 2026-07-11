@@ -44,4 +44,21 @@ describe('adminSettings', () => {
     store.set(STORAGE_KEY, '{not json')
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS)
   })
+
+  test('routingBackend defaults to empty string (in-browser routing)', () => {
+    expect(DEFAULT_SETTINGS.routingBackend).toBe('')
+    expect(loadSettings().routingBackend).toBe('')
+  })
+
+  test('stored settings predating routingBackend merge the default', () => {
+    const legacy = { ...DEFAULT_SETTINGS } as Record<string, unknown>
+    delete legacy.routingBackend
+    store.set(STORAGE_KEY, JSON.stringify(legacy))
+    expect(loadSettings().routingBackend).toBe('')
+  })
+
+  test('stored routingBackend URL overrides the default', () => {
+    store.set(STORAGE_KEY, JSON.stringify({ routingBackend: 'http://localhost:8787' }))
+    expect(loadSettings().routingBackend).toBe('http://localhost:8787')
+  })
 })

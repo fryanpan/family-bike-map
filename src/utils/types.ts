@@ -154,6 +154,33 @@ export interface OsmWay {
   coordinates: [number, number][]
   osmId: number
   tags: Record<string, string>
+  // ── Enriched-tile baked fields (docs/product/plans/enriched-tiles-plan.md) ──
+  // Present (possibly null) on ways from enriched tiles; ABSENT (undefined)
+  // on ways parsed from raw Overpass responses. Null means "the bake could
+  // not compute this" (DEM void, or a pipeline stage not yet wired) and
+  // fail-softs to SHOWN, exactly like the runtime path's null gradient.
+  /** Gross gradient %, same semantics as overlayGradientPct. */
+  gradientPct?: number | null
+  /** Minimax access gradient % from the mainland seed (bottleneck shortest
+   *  path) — the baked replacement for the runtime steep-moat verdict. */
+  accessGradientPct?: number | null
+  /** Total painted-candidate length (m) of the way's connected component —
+   *  the baked replacement for the runtime smallFragmentIds pass. */
+  componentPaintedLenM?: number | null
+}
+
+/**
+ * True when the way came from an enriched tile: at least one baked field is
+ * PRESENT on the object (null still counts — null is "computed as unknown",
+ * undefined is "this tile was never enriched"). The overlay uses this to
+ * pick the arithmetic verdict gate over the runtime moat/gradient path.
+ */
+export function isEnrichedWay(way: OsmWay): boolean {
+  return (
+    way.gradientPct !== undefined ||
+    way.accessGradientPct !== undefined ||
+    way.componentPaintedLenM !== undefined
+  )
 }
 // Note: roughness is NOT a cached field on OsmWay because it's profile-
 // dependent (paving_stones is fine for slow kid modes but rough for

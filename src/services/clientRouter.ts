@@ -30,6 +30,7 @@ import type { RegionProfile } from '../data/cityProfiles/overlay'
 import { applyPreferenceAdjustments } from '../data/preferences'
 import type { RiderPreference } from '../data/preferences'
 import { prefetchElevation, lookupElevation, wayAscentMeters } from './elevation'
+import { recordRouteTiming } from './routeTiming'
 
 // ── Haversine ──────────────────────────────────────────────────────────────
 
@@ -749,6 +750,11 @@ export async function clientRoute(
   riderPreference?: RiderPreference | null,
   settings?: AdminSettings,
 ): Promise<Route | null> {
+  // Timing instrumentation (routeTiming.ts) — pure observation, feeds the
+  // Admin → Benchmarks readout + the phone latency protocol. No routing
+  // decision reads these values.
+  const routeStartMs = performance.now()
+
   // Collect ways from cached tiles covering the corridor
   const tiles = getTilesForCorridor(startLat, startLng, endLat, endLng)
   const allWays: OsmWay[] = []
@@ -766,7 +772,16 @@ export async function clientRoute(
     allWays.push(...ways)
   }
 
-  if (allWays.length === 0) return null
+  if (allWays.length === 0) {
+    recordRouteTiming({
+      backend: 'client', mode: profileKey, startedAt: routeStartMs,
+      tileLoadMs: performance.now() - routeStartMs,
+      graphBuildMs: null, astarMs: null,
+      totalMs: performance.now() - routeStartMs,
+      graphNodes: null, graphEdges: null, found: false,
+    })
+    return null
+  }
 
   // Prefetch terrain-RGB tiles covering the corridor so the gradient
   // gate inside buildRoutingGraph can do synchronous lookups. Fails
@@ -780,11 +795,23 @@ export async function clientRoute(
     east:  Math.max(startLng, endLng) + corridorPad,
   })
 
+  const tilesReadyMs = performance.now()
   const graph = buildRoutingGraph(allWays, profileKey, preferredItemNames, regionRules, regionProfile, avoidedWayIds, riderPreference, settings)
+  const graphBuiltMs = performance.now()
   const result = routeOnGraph(
     graph, startLat, startLng, endLat, endLng,
     profileKey, preferredItemNames, regionRules,
   )
+  const routeDoneMs = performance.now()
+  recordRouteTiming({
+    backend: 'client', mode: profileKey, startedAt: routeStartMs,
+    tileLoadMs: tilesReadyMs - routeStartMs,
+    graphBuildMs: graphBuiltMs - tilesReadyMs,
+    astarMs: routeDoneMs - graphBuiltMs,
+    totalMs: routeDoneMs - routeStartMs,
+    graphNodes: graph.getNodeCount(), graphEdges: graph.getLinkCount(),
+    found: result != null,
+  })
 
   if (!result) return null
 

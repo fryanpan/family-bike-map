@@ -22,6 +22,7 @@ import DirectionsPanel from './components/DirectionsPanel'
 import { DEFAULT_PROFILES } from './data/profiles'
 import { scoreRoute } from './services/routeScorer'
 import { clientRoute } from './services/clientRouter'
+import { routeLegViaBackend } from './services/routeBackend'
 import { latLngToTile, getCachedTile } from './services/overpass'
 import { logRoute } from './services/routeLog'
 import { reverseGeocode } from './services/geocoding'
@@ -359,9 +360,13 @@ export default function App() {
     setSelectedRouteIndex(0)
 
     try {
-      // Client-side router is the only routing path. If the user has waypoints,
-      // we chain single-leg clientRoute calls through each waypoint in order and
-      // concatenate the results. Valhalla and BRouter are benchmark-only now.
+      // Our own router is the only routing path (Valhalla and BRouter are
+      // benchmark-only). If the user has waypoints, we chain single-leg
+      // route calls through each waypoint in order and concatenate the
+      // results. Each leg goes through routeLegViaBackend: the in-browser
+      // clientRoute by default, or the bun route server (same routing
+      // code) when the admin `routingBackend` URL is set — with fallback
+      // to in-browser routing on any server error.
       const legPoints: Array<{ lat: number; lng: number }> = [
         { lat: start.lat, lng: start.lng },
         ...wps,
@@ -372,11 +377,24 @@ export default function App() {
       for (let i = 0; i < legPoints.length - 1; i++) {
         const a = legPoints[i]
         const b = legPoints[i + 1]
-        const leg = await clientRoute(
-          a.lat, a.lng, b.lat, b.lng,
-          profileKey, preferredItemNames, regionRules, regionProfile, avoids,
-          // Chunk D shelved: no active preference passed.
-          null,
+        const leg = await routeLegViaBackend(
+          adminSettings.routingBackend,
+          {
+            start: { lat: a.lat, lng: a.lng },
+            end: { lat: b.lat, lng: b.lng },
+            travelMode: profileKey,
+            preferredItemNames,
+            // Mirrors the `avoids` argument of the clientRoute fallback
+            // below — the server backend must honor "reroute around this"
+            // identically to in-browser routing.
+            avoidedWayIds: avoids,
+          },
+          () => clientRoute(
+            a.lat, a.lng, b.lat, b.lng,
+            profileKey, preferredItemNames, regionRules, regionProfile, avoids,
+            // Chunk D shelved: no active preference passed.
+            null,
+          ),
         )
         if (!leg) throw new Error('No route found for this segment')
         legs.push(leg)
@@ -394,7 +412,9 @@ export default function App() {
               duration: legs.reduce((sum, l) => sum + l.summary.duration, 0),
             },
             segments: legs.flatMap((l) => l.segments ?? []),
-            engine: 'client',
+            // Legs share one backend per computeRoute call (a mid-loop
+            // fallback can mix, but the first leg names the intent).
+            engine: legs[0].engine ?? 'client',
           }
 
       // Bail out if a newer computeRoute has been kicked off while we

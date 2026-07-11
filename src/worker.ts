@@ -6,7 +6,9 @@
  * the [assets] binding for non-API paths.
  *
  * Routes:
- *   /api/overpass        → proxy to overpass-api.de with 30-day edge cache
+ *   /api/overpass        → enriched tile from R2 when the active tileset has
+ *                          one (see src/workerEnrichedTiles.ts), else proxy
+ *                          to overpass-api.de with 30-day edge cache
  *   /api/mapillary/*     → proxy to graph.mapillary.com with server-injected
  *                          token + 7-day edge cache
  *   /api/streetview      → proxy to Google Street View Static with server-
@@ -29,6 +31,12 @@
  */
 
 import * as Sentry from '@sentry/cloudflare'
+
+import {
+  getEnrichedTileResponse,
+  parseTileCoord,
+  type R2BucketLike,
+} from './workerEnrichedTiles'
 
 // Cloudflare Workers extends the standard CacheStorage interface with a `default`
 // cache instance. This is not in the DOM lib types, so we declare it here.
@@ -56,6 +64,10 @@ type Env = {
   /** 'production' on prod; absent or 'development' for `wrangler dev`. */
   SENTRY_ENV?: string
   ROUTE_LOGS: D1Database
+  /** R2 bucket with precomputed enriched tiles (bike-map-enriched-tiles).
+   *  Optional so a `wrangler dev` config without the binding still boots —
+   *  without it every tile request takes the Overpass proxy path. */
+  ENRICHED_TILES?: R2BucketLike
   ASSETS: { fetch: (request: Request) => Promise<Response> }
 }
 
@@ -79,6 +91,22 @@ const handler = {
     if (path === '/api/overpass') {
       const row = url.searchParams.get('row') ?? ''
       const col = url.searchParams.get('col') ?? ''
+
+      // ── Enriched tiles from R2 (precomputed slope + access-slope) ────
+      // The active tileset is named by the bucket's manifest.json; when it
+      // holds this tile, serve the baked payload and skip Overpass entirely.
+      // Fail-open: no manifest / no object / any R2 error falls through to
+      // the proxy below, so non-enriched regions (Berlin until its bake)
+      // behave exactly as before. See src/workerEnrichedTiles.ts.
+      const rowNum = parseTileCoord(url.searchParams.get('row'))
+      const colNum = parseTileCoord(url.searchParams.get('col'))
+      if (env.ENRICHED_TILES && rowNum != null && colNum != null) {
+        const enriched = await getEnrichedTileResponse(env.ENRICHED_TILES, rowNum, colNum, {
+          onError: (err) =>
+            Sentry.captureException(err, { extra: { route: '/api/overpass', source: 'enriched-r2', row, col } }),
+        })
+        if (enriched) return enriched
+      }
 
       // Synthetic GET URL used as Cloudflare cache key (POST responses aren't cacheable).
       // Cache version is bumped whenever buildQuery() changes which OSM ways a

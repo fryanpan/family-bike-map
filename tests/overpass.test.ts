@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, Semaphore, buildQuery, classifyOsmTagsToItem } from '../src/services/overpass'
+import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, Semaphore, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
+import { isEnrichedWay } from '../src/utils/types'
 
 // Minimal LatLngBounds stub
 function makeBounds(south: number, west: number, north: number, east: number) {
@@ -285,6 +286,184 @@ describe('buildQuery', () => {
     expect(q).toContain('"highway"="pedestrian"')
     const pedLine = q.split('\n').find((l) => l.includes('"highway"="pedestrian"'))
     expect(pedLine).toContain('"bicycle"~"^(yes|designated)$"')
+  })
+})
+
+// ── Enriched R2 tile payloads (Worker {meta, ways} shape) ───────────────────
+
+const ENRICHED_PAYLOAD = {
+  meta: { builtFromSeq: 12345, builtAt: '2026-07-03T00:00:00Z', pipelineVersion: '1', demSource: 'terrarium-v1' },
+  ways: [
+    {
+      osmId: 101,
+      itemName: null,
+      tags: { highway: 'cycleway' },
+      coordinates: [[37.75, -122.45], [37.751, -122.45]],
+      gradientPct: 4.2,
+      accessGradientPct: 7.8,
+      componentPaintedLenM: 5400,
+    },
+    {
+      // DEM-void way: baked fields null (computed as unknown, fail-soft SHOWN).
+      osmId: 102,
+      itemName: null,
+      tags: { highway: 'residential' },
+      coordinates: [[37.752, -122.451], [37.753, -122.451]],
+      gradientPct: null,
+      accessGradientPct: null,
+      componentPaintedLenM: null,
+    },
+    {
+      // Control-node pseudo-way (single coordinate) — appended after real ways.
+      osmId: 103,
+      itemName: null,
+      tags: { highway: 'traffic_signals' },
+      coordinates: [[37.7505, -122.45]],
+      gradientPct: null,
+      accessGradientPct: null,
+      componentPaintedLenM: null,
+    },
+  ],
+}
+
+describe('isEnrichedTilePayload', () => {
+  it('detects the Worker enriched {meta, ways} shape', () => {
+    expect(isEnrichedTilePayload(ENRICHED_PAYLOAD)).toBe(true)
+    expect(isEnrichedTilePayload({ ways: [] })).toBe(true)
+  })
+  it('rejects the raw Overpass {elements} shape and junk', () => {
+    expect(isEnrichedTilePayload({ elements: [] })).toBe(false)
+    expect(isEnrichedTilePayload(null)).toBe(false)
+    expect(isEnrichedTilePayload([])).toBe(false)
+    expect(isEnrichedTilePayload({ ways: 'nope' })).toBe(false)
+  })
+})
+
+describe('parseEnrichedTileResponse', () => {
+  it('maps enriched ways to OsmWay with baked fields PRESENT (isEnrichedWay true)', () => {
+    const ways = parseEnrichedTileResponse(ENRICHED_PAYLOAD)
+    expect(ways).toHaveLength(3)
+    expect(ways[0]).toEqual({
+      itemName: null,
+      osmId: 101,
+      coordinates: [[37.75, -122.45], [37.751, -122.45]],
+      tags: { highway: 'cycleway' },
+      gradientPct: 4.2,
+      accessGradientPct: 7.8,
+      componentPaintedLenM: 5400,
+    })
+    // Every way from an enriched tile takes the arithmetic verdict gate,
+    // including null-field (DEM void) ways — null is "computed as unknown",
+    // which fail-softs to shown; undefined would wrongly re-enter the
+    // runtime elevation/union-find path.
+    for (const w of ways) expect(isEnrichedWay(w)).toBe(true)
+    expect(ways[1].gradientPct).toBeNull()
+  })
+
+  it('keeps null fields present even when the payload omits them entirely', () => {
+    const ways = parseEnrichedTileResponse({
+      ways: [{ osmId: 7, tags: { highway: 'cycleway' }, coordinates: [[1, 2], [1.001, 2]] }],
+    })
+    expect(ways[0].gradientPct).toBeNull()
+    expect(isEnrichedWay(ways[0])).toBe(true)
+  })
+
+  it('passes control-node pseudo-ways through (router needs them for wait costs)', () => {
+    const ways = parseEnrichedTileResponse(ENRICHED_PAYLOAD)
+    expect(isControlNode(ways[2])).toBe(true)
+  })
+
+  it('accepts the pipeline writer output verbatim (serializeEnrichedTile → parse)', async () => {
+    // Writer/reader lock: what upload-tiles.ts puts in R2 is exactly what
+    // buildEnrichedTile/serializeEnrichedTile emit — the client parser must
+    // consume that byte stream, not a hand-approximated shape.
+    const { buildEnrichedTile, serializeEnrichedTile } = await import('../scripts/pipeline/lib/tiles')
+    const tile = buildEnrichedTile(
+      { builtFromSeq: 1, builtAt: '2026-07-03T00:00:00Z', pipelineVersion: '1', demSource: 'terrarium-v1' },
+      {
+        row: 377, col: -1225,
+        ways: [{ osmId: 55, tags: { highway: 'cycleway' }, coordinates: [[37.75, -122.45], [37.751, -122.45]], isControlNode: false }],
+        controlNodes: [{ osmId: 56, tags: { highway: 'stop' }, coordinates: [[37.75, -122.45]], isControlNode: true }],
+      },
+      {
+        gradientPct: () => 3.1,
+        accessGradientPct: () => 5.5,
+        componentPaintedLenM: () => 900,
+      },
+    )
+    const parsed: unknown = JSON.parse(serializeEnrichedTile(tile))
+    expect(isEnrichedTilePayload(parsed)).toBe(true)
+    const ways = parseEnrichedTileResponse(parsed as { ways: unknown[] })
+    expect(ways).toHaveLength(2)
+    expect(ways[0]).toMatchObject({ osmId: 55, gradientPct: 3.1, accessGradientPct: 5.5, componentPaintedLenM: 900 })
+    // Control nodes never carry enrichment values but stay enriched-present (null).
+    expect(ways[1]).toMatchObject({ osmId: 56, gradientPct: null })
+    expect(isControlNode(ways[1])).toBe(true)
+    expect(ways.every(isEnrichedWay)).toBe(true)
+  })
+
+  it('skips malformed entries without failing the tile', () => {
+    const ways = parseEnrichedTileResponse({
+      ways: [
+        null,
+        'garbage',
+        { osmId: 'not-a-number', coordinates: [[1, 2]] },
+        { osmId: 8, coordinates: 'nope' },
+        { osmId: 9, coordinates: [[1, 'x']] },
+        { osmId: 10, tags: { highway: 'cycleway' }, coordinates: [[1, 2], [1.1, 2]] },
+      ],
+    })
+    expect(ways).toHaveLength(1)
+    expect(ways[0].osmId).toBe(10)
+    expect(ways[0].tags).toEqual({ highway: 'cycleway' })
+  })
+})
+
+describe('fetchBikeInfraForTile — enriched Worker responses', () => {
+  async function withMockedFetch<T>(payload: unknown, fn: () => Promise<T>): Promise<T> {
+    const origFetch = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Cache': 'R2', 'X-Tile-Source': 'enriched' },
+      })) as unknown as typeof globalThis.fetch
+    try {
+      return await fn()
+    } finally {
+      globalThis.fetch = origFetch
+    }
+  }
+
+  it('parses the {meta, ways} R2 payload end-to-end (the shape the Worker serves)', async () => {
+    // The pre-fix bug: the client only understood Overpass {elements} and
+    // threw a TypeError on `data.elements.length` for every enriched tile,
+    // killing both the overlay and in-browser routing for the region.
+    const ways = await withMockedFetch(ENRICHED_PAYLOAD, () => fetchBikeInfraForTile(910, 911))
+    expect(ways).toHaveLength(3)
+    expect(ways.every(isEnrichedWay)).toBe(true)
+    expect(ways[0].gradientPct).toBe(4.2)
+    expect(ways[0].componentPaintedLenM).toBe(5400)
+    // And the parsed result is what got cached for the router's corridor reads.
+    expect(getCachedTile(910, 911)).toEqual(ways)
+  })
+
+  it('still parses raw Overpass {elements} responses (non-enriched fallback)', async () => {
+    const overpassPayload = {
+      elements: [
+        {
+          type: 'way',
+          id: 201,
+          tags: { highway: 'cycleway' },
+          geometry: [{ lat: 37.7, lon: -122.4 }, { lat: 37.701, lon: -122.4 }],
+        },
+        { type: 'node', id: 202, lat: 37.7, lon: -122.4, tags: { highway: 'traffic_signals' } },
+      ],
+    }
+    const ways = await withMockedFetch(overpassPayload, () => fetchBikeInfraForTile(912, 913))
+    expect(ways).toHaveLength(2)
+    expect(ways[0].osmId).toBe(201)
+    // Raw tiles never carry the baked fields — the runtime gate stays in charge.
+    expect(ways.some(isEnrichedWay)).toBe(false)
   })
 })
 

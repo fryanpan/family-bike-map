@@ -33,5 +33,14 @@ binding = "ROUTE_LOGS"
 database_name = "bike-route-logs"
 database_id = "0ccee590-8fea-4bf3-954e-5f02edc50a61"
 
+# Precomputed enriched tiles (slope + access-slope baked offline by
+# scripts/pipeline/, uploaded by scripts/pipeline/upload-tiles.ts).
+# manifest.json in the bucket names the active tileset version; the Worker
+# serves <version>/<row>_<col>.json when present and falls through to the
+# Overpass proxy otherwise. See src/workerEnrichedTiles.ts.
+[[r2_buckets]]
+binding = "ENRICHED_TILES"
+bucket_name = "bike-map-enriched-tiles"
+
 [observability]
 enabled = true

@@ -16,7 +16,7 @@ import { classifyEdge } from '../src/utils/lts'
 import type { PathLevel } from '../src/utils/lts'
 import type { OsmWay } from '../src/utils/types'
 import { CITIES as SHARED_CITIES, verifyFixtures, printVerifyReport, hasVerifyErrors } from './lib/fixtures'
-import { prefetchElevation, setElevationDecoder, setElevationReferer } from '../src/services/elevation'
+import { prefetchElevation, setElevationDecoder, setElevationReferer, getElevationSource } from '../src/services/elevation'
 import { PNG } from 'pngjs'
 
 // ── Elevation decoder injection ─────────────────────────────────────────
@@ -495,15 +495,22 @@ async function main() {
   }
   logMem('after fetchTilesForCity')
 
-  // Prefetch terrain-RGB elevation tiles covering the entire city bbox
+  // Prefetch encoded-elevation tiles covering the entire city bbox
   // once, up-front. The module-level tile cache in elevation.ts is
   // reused across every mode's graph build, so this single fetch
   // exercises the gradient gate for all 5 modes' route searches.
-  // If VITE_MAPBOX_TOKEN isn't set the calls soft-null and the gate is
-  // skipped (same as pre-2026-05-25 benchmark behavior).
-  const elevationEnabled = process.argv.includes('--elevation') || !!process.env.VITE_MAPBOX_TOKEN
+  // The runtime default is mapbox-terrain-rgb (the 2026-07-03 terrarium
+  // flip FAILED the SF carrying-kid gate and was reverted — see
+  // docs/research/2026-07-03-routing-benchmark-results.md). If a future
+  // run switches to terrarium (open data, no token) elevation is always
+  // exercised; the mapbox source gates on VITE_MAPBOX_TOKEN (missing
+  // token soft-nulls and skips the gate, same as pre-2026-05-25).
+  const elevationEnabled =
+    getElevationSource() === 'terrarium' ||
+    process.argv.includes('--elevation') ||
+    !!process.env.VITE_MAPBOX_TOKEN
   if (elevationEnabled) {
-    console.log('\nPrefetching elevation tiles…')
+    console.log(`\nPrefetching elevation tiles (source: ${getElevationSource()})…`)
     const eT0 = performance.now()
     await prefetchElevation({
       south: city.bbox.south, west: city.bbox.west,
