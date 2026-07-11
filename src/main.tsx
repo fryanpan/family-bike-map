@@ -4,7 +4,7 @@ import * as Sentry from '@sentry/react'
 import { initSentry } from './sentry'
 import { initUserback } from './userback'
 import { APP_VERSION } from './version'
-import { reportWaitingWorker, reportVersionMismatch, createOnceGuard, isNewVersion } from './services/swUpdate'
+import { reportWaitingWorker, reportVersionMismatch, isNewVersion } from './services/swUpdate'
 import 'leaflet/dist/leaflet.css'
 import './App.css'
 import App from './App'
@@ -47,14 +47,17 @@ function registerServiceWorker(): void {
   if (!('serviceWorker' in navigator)) return
   if (import.meta.env.DEV) return
 
-  // A postMessage(SKIP_WAITING) call makes the new SW activate, which
-  // fires `controllerchange` on every open client — including this one.
-  // Guard so we reload exactly once instead of looping if the event
-  // fires more than expected.
-  const allowReload = createOnceGuard()
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (allowReload()) window.location.reload()
-  })
+  // Deliberately NOT listening for `controllerchange` here to trigger a
+  // reload. public/sw.js's `install` handler calls `self.skipWaiting()`
+  // unconditionally, so a new SW activates and claims open clients on its
+  // own — firing controllerchange without any user action, both on a
+  // fresh device's first-ever visit and on every foreground
+  // `registration.update()` that finds a new build. A controllerchange
+  // listener would reload the page in both cases, which is exactly the
+  // spurious/uninitiated reload this feature must NOT do. The reload
+  // instead happens only inside `applyUpdate()` (services/swUpdate.ts),
+  // which runs only when the user taps "Reload" on the update toast. See
+  // that function's doc comment for the full history (PR #221 review).
 
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').then((registration) => {

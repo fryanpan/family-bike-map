@@ -1,8 +1,7 @@
-import { describe, it, expect, beforeEach, mock } from 'bun:test'
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test'
 import {
   isNewVersion,
   computeUpdateAvailable,
-  createOnceGuard,
   reportWaitingWorker,
   reportVersionMismatch,
   applyUpdate,
@@ -51,29 +50,6 @@ describe('computeUpdateAvailable', () => {
   })
 })
 
-describe('createOnceGuard', () => {
-  it('returns true on the first call', () => {
-    const guard = createOnceGuard()
-    expect(guard()).toBe(true)
-  })
-
-  it('returns false on every call after the first', () => {
-    const guard = createOnceGuard()
-    guard()
-    expect(guard()).toBe(false)
-    expect(guard()).toBe(false)
-    expect(guard()).toBe(false)
-  })
-
-  it('guards are independent per instance', () => {
-    const guardA = createOnceGuard()
-    const guardB = createOnceGuard()
-    expect(guardA()).toBe(true)
-    // B hasn't fired yet — A firing must not consume B's guard.
-    expect(guardB()).toBe(true)
-  })
-})
-
 describe('swUpdate store', () => {
   beforeEach(() => __resetSwUpdateStatus())
 
@@ -107,7 +83,25 @@ describe('swUpdate store', () => {
 describe('applyUpdate', () => {
   beforeEach(() => __resetSwUpdateStatus())
 
-  it('posts SKIP_WAITING to the waiting worker when one is present', () => {
+  // applyUpdate() always reloads directly — it is the ONLY caller of
+  // window.location.reload() for a self-update, and it only runs from
+  // the toast's onClick. This is what makes an auto-activated SW (see
+  // public/sw.js's unconditional self.skipWaiting()) unable to reload
+  // the page on its own; regression test for the PR #221 review finding.
+  let originalWindow: typeof globalThis.window | undefined
+  let reload: ReturnType<typeof mock>
+
+  beforeEach(() => {
+    originalWindow = globalThis.window
+    reload = mock(() => {})
+    ;(globalThis as { window: unknown }).window = { location: { reload } }
+  })
+
+  afterEach(() => {
+    ;(globalThis as { window: unknown }).window = originalWindow
+  })
+
+  it('posts SKIP_WAITING to the waiting worker AND reloads directly, when one is present', () => {
     const postMessage = mock(() => {})
     reportWaitingWorker({ postMessage } as unknown as ServiceWorker)
 
@@ -115,24 +109,20 @@ describe('applyUpdate', () => {
 
     expect(postMessage).toHaveBeenCalledTimes(1)
     expect(postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' })
+    // The reload must not depend on a `controllerchange` event ever
+    // firing — sw.js's install handler auto-activates the new worker,
+    // so that event may already have fired (and been ignored) before
+    // the user ever taps Reload.
+    expect(reload).toHaveBeenCalledTimes(1)
   })
 
-  it('falls back to a direct reload when no waiting worker is registered', () => {
+  it('reloads directly when no waiting worker is registered', () => {
     // version-mismatch-only case: /version detected staleness before any
     // SW updatefound cycle produced a waiting worker.
     reportVersionMismatch(true)
 
-    const originalLocation = globalThis.window?.location
-    const reload = mock(() => {})
-    ;(globalThis as { window: unknown }).window = { location: { reload } }
-
     applyUpdate()
 
     expect(reload).toHaveBeenCalledTimes(1)
-
-    // Restore, in case other tests in the same process touch window.location.
-    if (originalLocation) {
-      ;(globalThis as { window: { location: unknown } }).window.location = originalLocation
-    }
   })
 })

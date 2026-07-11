@@ -40,21 +40,6 @@ export function computeUpdateAvailable(swWaiting: boolean, versionMismatch: bool
   return swWaiting || versionMismatch
 }
 
-/**
- * Returns a guard function that returns `true` exactly once, then `false`
- * forever after. Used to make sure a `controllerchange` event (which can
- * legitimately fire more than once, and which our own SKIP_WAITING call
- * triggers) reloads the page exactly once instead of looping.
- */
-export function createOnceGuard(): () => boolean {
-  let fired = false
-  return () => {
-    if (fired) return false
-    fired = true
-    return true
-  }
-}
-
 // ── Observable store ──────────────────────────────────────────────────────
 
 export interface SwUpdateSnapshot {
@@ -104,20 +89,38 @@ export function reportVersionMismatch(mismatch: boolean): void {
 }
 
 /**
- * User tapped "Reload" on the update toast. If a new SW is waiting,
- * activate it via postMessage — the `controllerchange` listener
- * (registered once in main.tsx, guarded by createOnceGuard) does the
- * actual `location.reload()`. If we only have a bare version mismatch
- * (no waiting worker — e.g. SW registration failed, or the /version
- * signal arrived before `updatefound`), just reload directly; the
- * network-first HTML strategy in sw.js will fetch the new shell.
+ * User tapped "Reload" on the update toast. Reloads the page directly —
+ * this function is the ONLY place in the app that calls
+ * `window.location.reload()` for a self-update, and it only runs from the
+ * button's onClick, so a reload can never happen without the user asking
+ * for one.
+ *
+ * This is a deliberate change from an earlier design that reloaded from a
+ * `navigator.serviceWorker.addEventListener('controllerchange', ...)`
+ * listener in main.tsx instead. That listener reloaded on ANY
+ * controllerchange, but public/sw.js calls `self.skipWaiting()`
+ * unconditionally in `install` and `self.clients.claim()` in `activate`,
+ * so a new SW activates and claims open clients on its own — firing
+ * controllerchange without user action on (a) a first-ever visit to a
+ * fresh device, and (b) every foreground `registration.update()` call
+ * that finds a new build. Driving the reload from that listener meant a
+ * spurious full reload for every new user, and a surprise reload of an
+ * active user's in-progress state (search text, in-progress route)
+ * whenever a background check found an update. Reloading only from here
+ * fixes both (PR #221 review).
+ *
+ * Still posts SKIP_WAITING to a waiting worker first, best-effort, in
+ * case a future change makes `install` stop skip-waiting unconditionally
+ * (see the module doc for why that message currently has little left to
+ * do) — but the reload itself no longer depends on it doing anything,
+ * since the network-first HTML strategy in sw.js fetches the fresh shell
+ * on reload regardless of which SW instance is in control.
  */
 export function applyUpdate(): void {
   if (waitingWorker) {
     waitingWorker.postMessage({ type: 'SKIP_WAITING' })
-  } else {
-    window.location.reload()
   }
+  window.location.reload()
 }
 
 /** Test-only: read the current snapshot without the React hook. */
