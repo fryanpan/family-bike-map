@@ -701,6 +701,32 @@ function OverlayRenderer({ engine, ways, profileKey, preferredItemNames, hasRout
 
 // ── Tile loader ───────────────────────────────────────────────────────────
 
+/**
+ * Which tile keys should paint RIGHT NOW, given the keys the current
+ * viewport+zoom selected and which of them already have data.
+ *
+ * Paint is scoped to the active key set, and the overlay unmounts when that set
+ * yields no ways — so naming a fresh selection *before* its data lands blanks
+ * the map for the length of a round-trip. That's exactly what a zoom-out across
+ * OVERVIEW_MAX_ZOOM does (drop the detail-tile keys, name overview keys nothing
+ * has fetched yet), and what a cold pan into never-loaded territory does at any
+ * zoom. A blank map is worse than a flicker.
+ *
+ * So: swap as soon as ANY key of the new selection has data (same-level pans
+ * overlap, so this is immediate — progressive tile pop-in is preserved), and
+ * otherwise keep painting the previous selection until the new one has
+ * something to show. Callers set the new keys UNCONDITIONALLY once their fetch
+ * resolves, so the steady state is always exactly the new selection: this only
+ * ever retains the old paint transiently, and never paints both sets at once.
+ */
+export function nextActiveKeys(
+  prev: string[],
+  selected: string[],
+  hasData: (key: string) => boolean,
+): string[] {
+  return selected.some(hasData) ? selected : prev
+}
+
 interface ControllerProps {
   enabled: boolean
   profileKey: string
@@ -727,10 +753,14 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
   const loadedTilesRef  = useRef<Set<string>>(new Set())
   const generationRef   = useRef(0)
 
-  /** Fetch the 0.1° detail tiles (today's path, unchanged) into tileData. */
+  /** Fetch the 0.1° detail tiles (today's path, unchanged) into tileData.
+   *  `desiredKeys` (the caller's full new selection) re-runs the key-swap guard
+   *  as each tile lands, so a cold pan pops the first arriving tile in rather
+   *  than waiting for the whole batch. */
   const loadDetailTiles = useCallback(async (
     tiles: Tile[],
     generation: number,
+    desiredKeys?: string[],
   ): Promise<{ anyError: boolean }> => {
     const toLoad = tiles.filter((t) => {
       const k = tileKey(t.row, t.col)
@@ -747,6 +777,9 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
         if (generationRef.current !== generation) return
         loadedTilesRef.current.add(k)
         setTileData((prev) => { const next = new Map(prev); next.set(k, ways); return next })
+        if (desiredKeys) {
+          setActiveKeys((prev) => nextActiveKeys(prev, desiredKeys, (dk) => loadedTilesRef.current.has(dk)))
+        }
       } catch (err) {
         console.warn(`[BikeMapOverlay] Tile ${t.row}:${t.col} failed:`, err)
         anyError = true
@@ -779,8 +812,12 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
       const cells = selectFetchTiles(
         getVisibleOverviewCells(bounds), center, MAX_OVERVIEW_TILES, OVERVIEW_TILE_DEGREES,
       )
-      // Paint what's already cached immediately; the rest lands as it arrives.
-      setActiveKeys(cells.map((c) => overviewCellKey(c.row, c.col)))
+      // Paint the new selection as soon as ANY of it has data (cached cells
+      // paint instantly); until then keep the previous paint rather than
+      // unmounting the overlay to a blank map for the round-trip — see
+      // nextActiveKeys.
+      const cellKeys = cells.map((c) => overviewCellKey(c.row, c.col))
+      setActiveKeys((prev) => nextActiveKeys(prev, cellKeys, (k) => loadedTilesRef.current.has(k)))
 
       const results = await Promise.all(cells.map(async (c) => ({
         cell: c,
@@ -789,14 +826,15 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
       if (generationRef.current !== generation) return
 
       const baked = results.filter((r) => r.ways != null)
+      const bakedKeys = baked.map((r) => overviewCellKey(r.cell.row, r.cell.col))
       if (baked.length > 0) {
+        // loadedTilesRef is updated OUTSIDE the setTileData updater: React may
+        // defer the updater to render time, and the key-swap guard below reads
+        // this ref synchronously.
+        for (const k of bakedKeys) loadedTilesRef.current.add(k)
         setTileData((prev) => {
           const next = new Map(prev)
-          for (const r of baked) {
-            const k = overviewCellKey(r.cell.row, r.cell.col)
-            next.set(k, r.ways!)
-            loadedTilesRef.current.add(k)
-          }
+          for (const r of baked) next.set(overviewCellKey(r.cell.row, r.cell.col), r.ways!)
           return next
         })
       }
@@ -814,12 +852,19 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
         })
         const tiles = selectFetchTiles(inUnbaked, center, MAX_FETCH_TILES)
         detailKeys = tiles.map((t) => tileKey(t.row, t.col))
-        setActiveKeys([
-          ...baked.map((r) => overviewCellKey(r.cell.row, r.cell.col)),
-          ...detailKeys,
-        ])
-        const res = await loadDetailTiles(tiles, generation)
+        // Guarded again: in a fully un-baked region (Berlin) bakedKeys is empty,
+        // so naming the fallback keys before their tiles land would blank the
+        // map exactly as the un-guarded overview swap did.
+        const desired = [...bakedKeys, ...detailKeys]
+        setActiveKeys((prev) => nextActiveKeys(prev, desired, (k) => loadedTilesRef.current.has(k)))
+        const res = await loadDetailTiles(tiles, generation, desired)
         anyError = res.anyError
+        if (generationRef.current !== generation) return
+        // Steady state = exactly the new selection, no leftovers from the
+        // previous viewport or the previous LEVEL.
+        setActiveKeys(desired)
+      } else {
+        setActiveKeys(bakedKeys)
       }
 
       if (generationRef.current !== generation) return
@@ -837,10 +882,16 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
     // zoomed-out user fetches (and paints) the same tiles a zoomed-in user
     // would for the identical viewport.
     const tiles = selectFetchTiles(getVisibleTiles(bounds), center, MAX_FETCH_TILES)
-    setActiveKeys(tiles.map((t) => tileKey(t.row, t.col)))
-    const { anyError } = await loadDetailTiles(tiles, generation)
+    // Same guard as the overview branch: a cold pan into never-loaded territory
+    // (or a zoom-IN across OVERVIEW_MAX_ZOOM) names keys with no data yet, which
+    // would unmount the overlay for the round-trip. Overlapping pans have data
+    // for at least one key, so they still swap — and pop in — immediately.
+    const detailKeys = tiles.map((t) => tileKey(t.row, t.col))
+    setActiveKeys((prev) => nextActiveKeys(prev, detailKeys, (k) => loadedTilesRef.current.has(k)))
+    const { anyError } = await loadDetailTiles(tiles, generation, detailKeys)
 
     if (generationRef.current !== generation) return
+    setActiveKeys(detailKeys)
     const hasAnyVisibleData = tiles.some((t) =>
       loadedTilesRef.current.has(tileKey(t.row, t.col)) || isTileCached(t.row, t.col)
     )
