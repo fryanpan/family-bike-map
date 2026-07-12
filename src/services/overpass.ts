@@ -99,32 +99,6 @@ const FETCH_TIMEOUT_MS = 35_000
 // the 429 storm while still allowing two tiles to load in parallel.
 const MAX_CONCURRENT_FETCHES = 2
 
-export class Semaphore {
-  private _available: number
-  private _queue: Array<() => void> = []
-
-  constructor(count: number) {
-    this._available = count
-  }
-
-  async acquire(): Promise<void> {
-    if (this._available > 0) {
-      this._available--
-      return
-    }
-    return new Promise((resolve) => this._queue.push(resolve))
-  }
-
-  release(): void {
-    const next = this._queue.shift()
-    if (next) {
-      next()
-    } else {
-      this._available++
-    }
-  }
-}
-
 // ── Adaptive fetch concurrency gate ──────────────────────────────────────
 //
 // Most CA tiles are now served straight from our own R2 bucket via the

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, Semaphore, AdaptiveConcurrencyGate, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
+import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, AdaptiveConcurrencyGate, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
 import { isEnrichedWay } from '../src/utils/types'
 
 // Minimal LatLngBounds stub
@@ -88,45 +88,6 @@ describe('isTileCached / getCachedTile', () => {
   it('returns false/undefined before any fetch', () => {
     expect(isTileCached(9999, 9999)).toBe(false)
     expect(getCachedTile(9999, 9999)).toBeUndefined()
-  })
-})
-
-describe('Semaphore', () => {
-  it('allows up to N concurrent acquires immediately', async () => {
-    const sem = new Semaphore(2)
-    // Both acquires should resolve immediately without queuing
-    await sem.acquire()
-    await sem.acquire()
-    // Third acquire should queue — verify by releasing and reacquiring
-    let resolved = false
-    const pending = sem.acquire().then(() => { resolved = true })
-    expect(resolved).toBe(false)  // still waiting
-    sem.release()
-    await pending
-    expect(resolved).toBe(true)
-  })
-
-  it('serializes excess acquires through releases', async () => {
-    const sem = new Semaphore(1)
-    const order: number[] = []
-
-    await sem.acquire()
-    const p1 = sem.acquire().then(() => { order.push(1); sem.release() })
-    const p2 = sem.acquire().then(() => { order.push(2); sem.release() })
-
-    sem.release()  // unblocks p1
-    await Promise.all([p1, p2])
-    expect(order).toEqual([1, 2])  // FIFO ordering
-  })
-
-  it('restores count on release when queue is empty', async () => {
-    const sem = new Semaphore(2)
-    await sem.acquire()
-    sem.release()
-    // Should be back to full capacity — both acquires below should not block
-    await sem.acquire()
-    await sem.acquire()
-    // No assertion needed — if these hang the test times out
   })
 })
 
