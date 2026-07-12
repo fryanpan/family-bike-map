@@ -162,7 +162,52 @@ describe('AdaptiveConcurrencyGate', () => {
     reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
     expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
 
-    reportFetchOutcome(gate, makeResponse(200)) // no X-Tile-Source header at all
+    reportFetchOutcome(gate, makeResponse(200)) // no X-Tile-Source, no X-Cache
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on X-Cache: MISS without the enriched header (a real upstream Overpass call)', () => {
+    // This is a cold Berlin tile: the Worker had nothing in R2 and nothing at
+    // the edge, so it really called overpass-api.de. Full rate-limit exposure.
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 2)
+
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'MISS' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('is NEUTRAL on X-Cache: HIT without the enriched header — the ocean-tile case', () => {
+    // An ocean / empty cell inside California has no R2 object, so it fails
+    // open to the Overpass proxy and comes back with no X-Tile-Source header.
+    // But an edge-cache HIT made ZERO upstream Overpass calls, so it carries
+    // no rate-limit exposure and must not snap the gate. An SF/Marin viewport
+    // is full of Pacific tiles — snapping on each would thrash the gate back
+    // to 2-wide in exactly the region this feature exists to speed up.
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    const widened = gate.limit
+    expect(widened).toBe(MIN_CONCURRENCY + 3)
+
+    // Several ocean tiles in a row must leave the limit EXACTLY where it was:
+    // neither widened (a HIT isn't proof of R2) nor snapped (it cost nothing).
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
+    expect(gate.limit).toBe(widened)
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
+    expect(gate.limit).toBe(widened)
+  })
+
+  it('a neutral HIT at MIN does not widen the gate either', () => {
+    // Neutral means neutral in both directions — an edge-cached Overpass tile
+    // never earns a step toward MAX, because it is not proof of R2 coverage.
+    const gate = new AdaptiveConcurrencyGate()
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
     expect(gate.limit).toBe(MIN_CONCURRENCY)
   })
 

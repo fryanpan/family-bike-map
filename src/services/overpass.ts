@@ -139,12 +139,12 @@ export class Semaphore {
 // AdaptiveConcurrencyGate starts conservative (MIN_CONCURRENCY, today's
 // safe value) and widens one step at a time toward MAX_CONCURRENCY every
 // time a response is confirmed to have come from R2 (X-Tile-Source:
-// enriched). Any response that did NOT come from R2 — a plain Overpass
-// response, a missing header, a 429, or a 5xx — snaps the limit straight
-// back to MIN_CONCURRENCY. This makes the gate self-correcting at a bake
-// boundary: panning from baked California into un-baked Nevada, the first
-// Overpass-served tile snaps the gate shut again, so Berlin (never baked)
-// never leaves the 2-wide cap that keeps it 429-storm-safe.
+// enriched). See reportFetchOutcome below for the full three-way rule.
+//
+// It is self-correcting at a bake boundary: panning from baked California
+// into un-baked Nevada, the first tile that actually hits Overpass snaps
+// the gate shut again, so Berlin (never baked) never leaves the 2-wide cap
+// that keeps it 429-storm-safe.
 export const MIN_CONCURRENCY = MAX_CONCURRENT_FETCHES
 export const MAX_CONCURRENCY = 12
 
@@ -218,26 +218,61 @@ export class AdaptiveConcurrencyGate {
 
 /**
  * Adjust the gate's limit based on a completed tile fetch. Called once per
- * fetch attempt, after the response (or failure) is known:
- *   - `null` (network error / timeout after retries exhausted) → snap to MIN.
- *   - HTTP 429 or any 5xx → snap to MIN (transient Overpass/edge trouble).
- *   - `X-Tile-Source: enriched` (served from R2 via the Worker) → widen by one.
- *   - anything else (plain Overpass response, missing header) → snap to MIN.
+ * fetch attempt, after the response (or failure) is known.
+ *
+ * The signal that actually matters for the Overpass IP rate limit is **"did
+ * this request cause an upstream Overpass call?"** — not merely "was this
+ * tile enriched?". The Worker tells us both:
+ *   - `X-Tile-Source: enriched` → served from R2 (src/workerEnrichedTiles.ts).
+ *   - `X-Cache: HIT`  → served from the Cloudflare edge cache (src/worker.ts).
+ *   - `X-Cache: MISS` → the Worker really called overpass-api.de.
+ *
+ * Hence a THREE-way outcome, not two:
+ *
+ *   WIDEN   — `X-Tile-Source: enriched`. R2 through our own Worker; no rate
+ *             limit of any kind. Earns a step toward MAX_CONCURRENCY.
+ *
+ *   NEUTRAL — no enriched header, but `X-Cache: HIT`. Do not widen, do not
+ *             snap. This is the load-bearing, non-obvious case: an ocean or
+ *             empty cell *inside California* has no R2 object, so it fails
+ *             open to the Overpass proxy and comes back without the enriched
+ *             header. A two-way rule would snap the gate to MIN on every one
+ *             of them — and an SF/Marin/Santa Cruz viewport is full of
+ *             Pacific tiles, so the gate would thrash back to 2-wide in
+ *             precisely the region this exists to speed up. An edge-cache HIT
+ *             cost ZERO upstream Overpass calls, so it carries zero
+ *             rate-limit exposure and must not punish us. It also isn't proof
+ *             of R2, so it doesn't earn a step either. Leave the limit alone.
+ *
+ *   SNAP    — anything that did (or plausibly did) hit Overpass upstream:
+ *             no enriched header + `X-Cache: MISS` (a real upstream call), a
+ *             429, any 5xx, a missing/unknown X-Cache value, or the network
+ *             error path (`response === null`). A cold Berlin pan is all
+ *             MISSes, so Berlin stays pinned at 2-wide exactly as today.
  */
 export function reportFetchOutcome(gate: AdaptiveConcurrencyGate, response: Response | null): void {
+  // Network error / timeout after retries exhausted — assume we were the cause.
   if (!response) {
     gate.snapToMin()
     return
   }
+  // Rate limit or upstream trouble — back off regardless of any header.
   if (response.status === 429 || response.status >= 500) {
     gate.snapToMin()
     return
   }
+  // R2 hit via our own Worker: no rate limit, earn a step.
   if (response.headers.get('X-Tile-Source') === 'enriched') {
     gate.widen()
-  } else {
-    gate.snapToMin()
+    return
   }
+  // Edge-cache HIT: no upstream Overpass call → no rate-limit exposure.
+  // Neither widen nor snap (see the ocean-tile reasoning above).
+  if (response.headers.get('X-Cache') === 'HIT') {
+    return
+  }
+  // Everything else — notably X-Cache: MISS — really called Overpass. Snap.
+  gate.snapToMin()
 }
 
 const _fetchGate = new AdaptiveConcurrencyGate(MIN_CONCURRENCY)
