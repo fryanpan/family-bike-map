@@ -4,6 +4,7 @@ import {
   selectFetchTiles,
   MAX_FETCH_TILES,
   OVERVIEW_MAX_ZOOM,
+  OVERVIEW_TILE_DEGREES,
   type Tile,
 } from '../src/utils/overlayZoom'
 
@@ -89,5 +90,25 @@ describe('selectFetchTiles', () => {
   it('defaults to MAX_FETCH_TILES', () => {
     const tiles = grid([360, 395], [-1245, -1210]) // large
     expect(selectFetchTiles(tiles, center).length).toBe(MAX_FETCH_TILES)
+  })
+})
+
+describe('selectFetchTiles — grid pitch', () => {
+  it('defaults to the 0.1° detail grid (behaviour unchanged for detail tiles)', () => {
+    const tiles: Tile[] = []
+    for (let r = 370; r < 390; r++) for (let c = -1230; c < -1210; c++) tiles.push({ row: r, col: c })
+    const center: [number, number] = [37.75, -122.45]
+    const withDefault = selectFetchTiles(tiles, center, MAX_FETCH_TILES)
+    const withExplicit = selectFetchTiles(tiles, center, MAX_FETCH_TILES, 0.1)
+    expect(withDefault).toEqual(withExplicit)
+    // Centre tile of the SF viewport is in the selection.
+    expect(withDefault).toContainEqual({ row: 377, col: -1225 })
+  })
+
+  it('uses the 1.0° pitch for overview cells — the same centre picks different rows', () => {
+    const cells: Tile[] = []
+    for (let r = 35; r < 40; r++) for (let c = -125; c < -120; c++) cells.push({ row: r, col: c })
+    const selected = selectFetchTiles(cells, [37.75, -122.45], 2, OVERVIEW_TILE_DEGREES)
+    expect(selected[0]).toEqual({ row: 37, col: -123 })
   })
 })
