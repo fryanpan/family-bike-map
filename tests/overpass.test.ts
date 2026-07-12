@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, Semaphore, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
+import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, Semaphore, AdaptiveConcurrencyGate, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
 import { isEnrichedWay } from '../src/utils/types'
 
 // Minimal LatLngBounds stub
@@ -127,6 +127,162 @@ describe('Semaphore', () => {
     await sem.acquire()
     await sem.acquire()
     // No assertion needed — if these hang the test times out
+  })
+})
+
+function makeResponse(status: number, headers: Record<string, string> = {}): Response {
+  return new Response(null, { status, headers })
+}
+
+describe('AdaptiveConcurrencyGate', () => {
+  it('starts at MIN_CONCURRENCY', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('widens the limit by one step on an enriched response', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on X-Tile-Source: overpass', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    // Widen a couple of steps first.
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 2)
+
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'overpass' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY when the header is missing', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+
+    reportFetchOutcome(gate, makeResponse(200)) // no X-Tile-Source header at all
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on HTTP 429', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+
+    reportFetchOutcome(gate, makeResponse(429))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on any 5xx', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+
+    reportFetchOutcome(gate, makeResponse(503))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(500))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on a network error (null response)', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+
+    reportFetchOutcome(gate, null)
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('never exceeds MAX_CONCURRENCY no matter how many enriched responses arrive', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    for (let i = 0; i < MAX_CONCURRENCY + 10; i++) {
+      reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    }
+    expect(gate.limit).toBe(MAX_CONCURRENCY)
+  })
+
+  it('never drops below MIN_CONCURRENCY no matter how many snaps arrive', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    for (let i = 0; i < 10; i++) {
+      reportFetchOutcome(gate, makeResponse(429))
+    }
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+    expect(gate.limit).toBeGreaterThanOrEqual(MIN_CONCURRENCY)
+  })
+
+  it('allows up to `limit` concurrent acquires immediately, queues beyond that', async () => {
+    const gate = new AdaptiveConcurrencyGate(2)
+    await gate.acquire()
+    await gate.acquire()
+    let resolved = false
+    const pending = gate.acquire().then(() => { resolved = true })
+    expect(resolved).toBe(false)
+    gate.release()
+    await pending
+    expect(resolved).toBe(true)
+  })
+
+  it('growing the limit wakes queued waiters immediately, without waiting for a release', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire() // fills the only slot; inFlight=1, limit=1
+
+    let resolved = false
+    const pending = gate.acquire().then(() => { resolved = true })
+    // Give any stray microtask a chance to run — it should still be queued.
+    await Promise.resolve()
+    expect(resolved).toBe(false)
+
+    // Widen the limit to 2 without releasing the first slot — the queued
+    // waiter should be granted immediately because inFlight(1) < limit(2).
+    gate.widen()
+    await pending
+    expect(resolved).toBe(true)
+    expect(gate.inFlight).toBe(2)
+  })
+
+  it('shrinking the limit does not abort in-flight work — it just withholds new grants', async () => {
+    const gate = new AdaptiveConcurrencyGate(4)
+    await gate.acquire()
+    await gate.acquire()
+    await gate.acquire()
+    expect(gate.inFlight).toBe(3)
+
+    // Snap the limit down below the current in-flight count.
+    gate.snapToMin()
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+
+    // The 3 already-acquired slots are untouched — no exception, no forced release.
+    expect(gate.inFlight).toBe(3)
+
+    // A new acquire queues rather than being granted, since inFlight(3) >= new limit.
+    let resolved = false
+    const pending = gate.acquire().then(() => { resolved = true })
+    await Promise.resolve()
+    expect(resolved).toBe(false)
+
+    // As in-flight work completes and drops below the new (lower) limit,
+    // the queued waiter is eventually granted — nothing was lost.
+    gate.release() // inFlight 3 -> 2, still below MIN_CONCURRENCY(2)? equal now
+    if (!resolved) gate.release()
+    await pending
+    expect(resolved).toBe(true)
+  })
+
+  it('FIFO orders queued waiters through releases, same as Semaphore', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    const order: number[] = []
+
+    await gate.acquire()
+    const p1 = gate.acquire().then(() => { order.push(1); gate.release() })
+    const p2 = gate.acquire().then(() => { order.push(2); gate.release() })
+
+    gate.release() // unblocks p1
+    await Promise.all([p1, p2])
+    expect(order).toEqual([1, 2])
   })
 })
 

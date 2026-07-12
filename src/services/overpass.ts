@@ -125,7 +125,122 @@ export class Semaphore {
   }
 }
 
-const _fetchSemaphore = new Semaphore(MAX_CONCURRENT_FETCHES)
+// ── Adaptive fetch concurrency gate ──────────────────────────────────────
+//
+// Most CA tiles are now served straight from our own R2 bucket via the
+// Worker (see src/workerEnrichedTiles.ts) — same-network reads with no IP
+// rate limit. Overpass-api.de itself still rate-limits by IP (see
+// MAX_CONCURRENT_FETCHES comment above), so a fixed cap forces R2-backed
+// fetches to crawl through the same 2-wide gate an un-baked region needs.
+// A zoomed-out viewport can fetch up to 64 tiles = 32 sequential
+// round-trips at a fixed cap of 2 — that queueing delay is the bulk of the
+// user-visible wait (docs/product/plans/2026-07-12-overlay-zoom-scale-plan.md).
+//
+// AdaptiveConcurrencyGate starts conservative (MIN_CONCURRENCY, today's
+// safe value) and widens one step at a time toward MAX_CONCURRENCY every
+// time a response is confirmed to have come from R2 (X-Tile-Source:
+// enriched). Any response that did NOT come from R2 — a plain Overpass
+// response, a missing header, a 429, or a 5xx — snaps the limit straight
+// back to MIN_CONCURRENCY. This makes the gate self-correcting at a bake
+// boundary: panning from baked California into un-baked Nevada, the first
+// Overpass-served tile snaps the gate shut again, so Berlin (never baked)
+// never leaves the 2-wide cap that keeps it 429-storm-safe.
+export const MIN_CONCURRENCY = MAX_CONCURRENT_FETCHES
+export const MAX_CONCURRENCY = 12
+
+export class AdaptiveConcurrencyGate {
+  private _limit: number
+  private _inFlight = 0
+  private _queue: Array<() => void> = []
+
+  constructor(initialLimit: number = MIN_CONCURRENCY) {
+    this._limit = initialLimit
+  }
+
+  /** Current concurrency limit (for tests/diagnostics). */
+  get limit(): number {
+    return this._limit
+  }
+
+  /** Current in-flight count (for tests/diagnostics). */
+  get inFlight(): number {
+    return this._inFlight
+  }
+
+  async acquire(): Promise<void> {
+    if (this._inFlight < this._limit) {
+      this._inFlight++
+      return
+    }
+    return new Promise((resolve) => this._queue.push(resolve))
+  }
+
+  /**
+   * Release an in-flight slot. Grants it to the next queued waiter if the
+   * (possibly since-changed) limit allows; otherwise the slot just goes idle.
+   */
+  release(): void {
+    this._inFlight--
+    this._grantQueued()
+  }
+
+  /**
+   * Widen the limit by one step, capped at MAX_CONCURRENCY. Immediately
+   * grants any now-available slots to queued waiters — without this, a
+   * widen while requests are queued would silently do nothing until the
+   * next release.
+   */
+  widen(): void {
+    if (this._limit < MAX_CONCURRENCY) {
+      this._limit++
+      this._grantQueued()
+    }
+  }
+
+  /**
+   * Snap the limit back down to MIN_CONCURRENCY immediately. Deliberately
+   * does NOT touch `_inFlight` or cancel any in-flight fetch — it only
+   * stops granting NEW acquires until the in-flight count falls back
+   * below MIN_CONCURRENCY on its own via normal releases.
+   */
+  snapToMin(): void {
+    this._limit = MIN_CONCURRENCY
+  }
+
+  private _grantQueued(): void {
+    while (this._inFlight < this._limit && this._queue.length > 0) {
+      const next = this._queue.shift()!
+      this._inFlight++
+      next()
+    }
+  }
+}
+
+/**
+ * Adjust the gate's limit based on a completed tile fetch. Called once per
+ * fetch attempt, after the response (or failure) is known:
+ *   - `null` (network error / timeout after retries exhausted) → snap to MIN.
+ *   - HTTP 429 or any 5xx → snap to MIN (transient Overpass/edge trouble).
+ *   - `X-Tile-Source: enriched` (served from R2 via the Worker) → widen by one.
+ *   - anything else (plain Overpass response, missing header) → snap to MIN.
+ */
+export function reportFetchOutcome(gate: AdaptiveConcurrencyGate, response: Response | null): void {
+  if (!response) {
+    gate.snapToMin()
+    return
+  }
+  if (response.status === 429 || response.status >= 500) {
+    gate.snapToMin()
+    return
+  }
+  if (response.headers.get('X-Tile-Source') === 'enriched') {
+    gate.widen()
+  } else {
+    gate.snapToMin()
+  }
+}
+
+const _fetchGate = new AdaptiveConcurrencyGate(MIN_CONCURRENCY)
 
 export function buildQuery(bbox: { south: number; west: number; north: number; east: number }): string {
   const { south, west, north, east } = bbox
@@ -543,7 +658,7 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
   // Report status so the browse map can show a live loading indicator. Only
   // network fetches register — the cache hits above returned already.
   tileQueued(row, col)
-  await _fetchSemaphore.acquire()
+  await _fetchGate.acquire()
   tileLoading(row, col, null)
   try {
     response = await fetchWithRetry(fetchUrl, {
@@ -560,10 +675,16 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
     // surfaces them in browser dev tools when debugging.
     console.error(`[Overpass] Tile ${row}:${col} failed after all retries:`, err)
     tileError(row, col)
+    reportFetchOutcome(_fetchGate, null)
     throw err
   } finally {
-    _fetchSemaphore.release()
+    _fetchGate.release()
   }
+
+  // Widen/snap the concurrency gate based on where this response actually
+  // came from — must happen before the !response.ok branch below so 429/5xx
+  // responses (which are also !ok) get the same treatment.
+  reportFetchOutcome(_fetchGate, response)
 
   if (!response.ok) {
     const body = await response.text().catch(() => '')
