@@ -50,11 +50,19 @@ const MIN_PX_PER_CELL = 3
 // centre-blob behaviour can produce: with a 64-tile budget at z10 the outer
 // ring is blank by construction.
 //
-// CALIBRATION STATUS: chosen from the geometry of the gap this check exists to
-// catch, NOT measured against a real bake (no overview tiles were seeded when
-// this landed — see the seeding note above). Re-calibrate against the first
-// real CA bake and record the measured numbers here.
-const MIN_COVERED_CELLS_PCT = 60
+// CALIBRATED 2026-07-12 against the first real statewide CA overview bake
+// (70 cells), seeded into a local R2 and measured by this check:
+//
+//   z9  → 15/16 cells (94%), 58028 painted px
+//   z10 → 16/16 cells (100%), 50353 painted px
+//   z11 → 16/16 cells (100%), 39092 painted px
+//
+// The single uncovered cell at z9 is a genuinely infra-free corner of the
+// viewport, not a gap in the level — hence 85, not 100. The pre-overview
+// centre-blob behaviour cannot reach this: with a 64-tile budget at z10 the
+// outer ring is blank by construction, so anything near the old behaviour
+// lands far below this floor.
+const MIN_COVERED_CELLS_PCT = 85
 
 interface Coverage {
   coveredCells: number
