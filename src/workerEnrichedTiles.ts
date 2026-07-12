@@ -49,12 +49,26 @@ export interface EnrichedManifest {
   pipelineVersion?: string
   demSource?: string | null
   tileCount?: number
+  /** Number of 1.0° overview cells uploaded under `<version>/overview/`. 0 / absent = no overview level in this version (client falls back to 0.1° tiles). */
+  overviewTileCount?: number
   uploadedAt?: string
 }
 
 /** R2 object key for one enriched tile. Mirrors tileFileName() in scripts/pipeline/lib/tiles.ts (`<row>_<col>.json`). */
 export function enrichedTileObjectKey(version: string, row: number, col: number): string {
   return `${version}/${row}_${col}.json`
+}
+
+/**
+ * Sub-prefix for the coarse 1.0° OVERVIEW level inside a version, so BOTH
+ * levels live under one version prefix and one manifest — `--rollback-to`
+ * reverts detail and overview tiles in a single manifest write.
+ */
+export const OVERVIEW_PREFIX = 'overview'
+
+/** R2 object key for one 1.0° overview cell (row/col = integer degrees). */
+export function overviewTileObjectKey(version: string, row: number, col: number): string {
+  return `${version}/${OVERVIEW_PREFIX}/${row}_${col}.json`
 }
 
 /** Strict integer parse for ?row=/&col= query params ("377", "-1223"). Anything else → null. */
@@ -139,6 +153,43 @@ export async function getEnrichedTileResponse(
         // Distinguishable from the Overpass proxy's HIT/MISS in devtools/curl.
         'X-Cache': 'R2',
         'X-Tile-Source': 'enriched',
+        'X-Enriched-Version': manifest.version,
+      },
+    })
+  } catch (err) {
+    opts.onError?.(err)
+    return null
+  }
+}
+
+/**
+ * Serve one 1.0° OVERVIEW cell from R2, or null when it isn't baked (no
+ * manifest, no object, any error).
+ *
+ * Unlike the detail level there is NO fail-open here: the caller returns 404
+ * and the CLIENT falls back to the 0.1° path (src/services/overviewTiles.ts).
+ * Overpass cannot serve a 1° bbox of bike infrastructure — a fail-open at this
+ * layer would just be a 30 s timeout followed by an error.
+ */
+export async function getOverviewTileResponse(
+  bucket: R2BucketLike,
+  row: number,
+  col: number,
+  opts: GetEnrichedTileOptions = {},
+): Promise<Response | null> {
+  const now = opts.now ?? Date.now()
+  try {
+    const manifest = await getActiveManifest(bucket, now)
+    if (!manifest) return null
+
+    const obj = await bucket.get(overviewTileObjectKey(manifest.version, row, col))
+    if (!obj) return null
+
+    return new Response(obj.body, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Cache': 'R2',
+        'X-Tile-Source': 'overview',
         'X-Enriched-Version': manifest.version,
       },
     })
