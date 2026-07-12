@@ -16,7 +16,14 @@ import type { MapEngine, PolylineHandle, PopupHandle, PathLayerHandle, PathLayer
 import type { ClassificationRule } from '../services/rules'
 import { isEnrichedWay, type OsmWay } from '../utils/types'
 import { simplifyPath } from '../utils/simplifyPath'
-import { selectFetchTiles, overviewStyle, MAX_FETCH_TILES } from '../utils/overlayZoom'
+import {
+  selectFetchTiles, overviewStyle, MAX_FETCH_TILES, MAX_OVERVIEW_TILES,
+  OVERVIEW_MAX_ZOOM, OVERVIEW_TILE_DEGREES, type Tile,
+} from '../utils/overlayZoom'
+import {
+  fetchOverviewTile, getVisibleOverviewCells, getCachedOverviewCell,
+  overviewCellKey, overviewCellForTile, isOverviewCellKey,
+} from '../services/overviewTiles'
 
 // Hit-area weight for the transparent tap-target polylines. Sized for
 // fingertips on mobile. The visible coloured polyline still paints on
@@ -705,40 +712,33 @@ interface ControllerProps {
 
 function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, onStatusChange, regionRules }: ControllerProps) {
   const engine = useMapEngine()
+  // Ways by tile key. Keys are level-namespaced: `row:col` (0.1° detail tiles,
+  // tileKey) and `ov:row:col` (1.0° overview cells, overviewCellKey). Both
+  // levels can be resident at once (a zoom-out after browsing at street zoom
+  // leaves detail tiles cached) — activeKeys, not this map, decides what paints.
   const [tileData, setTileData] = useState<Map<string, OsmWay[]>>(new Map())
+  // The tile keys the CURRENT viewport+zoom selected. Painting is scoped to
+  // these, so (a) the two levels never double-plot the same geometry, and
+  // (b) paint stays a pure function of (viewport, zoom) — leftovers from
+  // earlier navigation don't leak onto the map.
+  const [activeKeys, setActiveKeys] = useState<string[]>([])
 
   const loadingTilesRef = useRef<Set<string>>(new Set())
   const loadedTilesRef  = useRef<Set<string>>(new Set())
   const generationRef   = useRef(0)
 
-  const loadVisibleTiles = useCallback(async () => {
-    if (!engine || !enabled) return
-    const [sw, ne] = engine.getBounds()
-    const bounds = {
-      getSouth: () => sw[0], getNorth: () => ne[0],
-      getWest:  () => sw[1], getEast:  () => ne[1],
-    }
-    // Fetch every visible tile up to a deterministic budget. When the
-    // viewport spans more than MAX_FETCH_TILES, selectFetchTiles keeps the
-    // budget-nearest-to-centre subset — a PURE function of (viewport), so a
-    // zoomed-out user fetches (and paints) the same tiles a zoomed-in user
-    // would for the identical viewport. The old code bailed here with a
-    // "zoom in" prompt, which left whatever tiles happened to be loaded from
-    // earlier navigation painted — history-dependent (the bug this fixes).
-    const center: [number, number] = [(sw[0] + ne[0]) / 2, (sw[1] + ne[1]) / 2]
-    const tiles = selectFetchTiles(getVisibleTiles(bounds), center, MAX_FETCH_TILES)
-
+  /** Fetch the 0.1° detail tiles (today's path, unchanged) into tileData. */
+  const loadDetailTiles = useCallback(async (
+    tiles: Tile[],
+    generation: number,
+  ): Promise<{ anyError: boolean }> => {
     const toLoad = tiles.filter((t) => {
       const k = tileKey(t.row, t.col)
       return !loadedTilesRef.current.has(k) && !loadingTilesRef.current.has(k)
     })
+    if (toLoad.length === 0) return { anyError: false }
 
-    if (toLoad.length === 0) { onStatusChange('ok'); return }
-
-    onStatusChange('loading')
-    const generation = generationRef.current
     for (const t of toLoad) loadingTilesRef.current.add(tileKey(t.row, t.col))
-
     let anyError = false
     await Promise.all(toLoad.map(async (t) => {
       const k = tileKey(t.row, t.col)
@@ -754,6 +754,91 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
         loadingTilesRef.current.delete(k)
       }
     }))
+    return { anyError }
+  }, [])
+
+  const loadVisibleTiles = useCallback(async () => {
+    if (!engine || !enabled) return
+    const [sw, ne] = engine.getBounds()
+    const bounds = {
+      getSouth: () => sw[0], getNorth: () => ne[0],
+      getWest:  () => sw[1], getEast:  () => ne[1],
+    }
+    const center: [number, number] = [(sw[0] + ne[0]) / 2, (sw[1] + ne[1]) / 2]
+    const zoom = engine.getZoom()
+    const generation = generationRef.current
+    onStatusChange('loading')
+
+    // ── Overview level (z < OVERVIEW_MAX_ZOOM) ────────────────────────────
+    // Baked 1.0° cells: the bike-infra network at simplified geometry. A cell
+    // that isn't baked (Berlin) answers 404 → fetchOverviewTile returns null
+    // → we fall back to the 0.1° path FOR THAT CELL ONLY. When no cell is
+    // baked (all of Berlin) that fallback selects exactly the tiles today's
+    // code selects, so an un-baked region is unchanged at every zoom.
+    if (zoom < OVERVIEW_MAX_ZOOM) {
+      const cells = selectFetchTiles(
+        getVisibleOverviewCells(bounds), center, MAX_OVERVIEW_TILES, OVERVIEW_TILE_DEGREES,
+      )
+      // Paint what's already cached immediately; the rest lands as it arrives.
+      setActiveKeys(cells.map((c) => overviewCellKey(c.row, c.col)))
+
+      const results = await Promise.all(cells.map(async (c) => ({
+        cell: c,
+        ways: await fetchOverviewTile(c.row, c.col),
+      })))
+      if (generationRef.current !== generation) return
+
+      const baked = results.filter((r) => r.ways != null)
+      if (baked.length > 0) {
+        setTileData((prev) => {
+          const next = new Map(prev)
+          for (const r of baked) {
+            const k = overviewCellKey(r.cell.row, r.cell.col)
+            next.set(k, r.ways!)
+            loadedTilesRef.current.add(k)
+          }
+          return next
+        })
+      }
+
+      const unbaked = results.filter((r) => r.ways == null).map((r) => r.cell)
+      let anyError = false
+      let detailKeys: string[] = []
+      if (unbaked.length > 0) {
+        // 0.1° fallback, restricted to the un-baked cells and selected with
+        // the SAME deterministic nearest-to-centre rule as the detail path.
+        const unbakedKeys = new Set(unbaked.map((c) => overviewCellKey(c.row, c.col)))
+        const inUnbaked = getVisibleTiles(bounds).filter((t) => {
+          const parent = overviewCellForTile(t.row, t.col)
+          return unbakedKeys.has(overviewCellKey(parent.row, parent.col))
+        })
+        const tiles = selectFetchTiles(inUnbaked, center, MAX_FETCH_TILES)
+        detailKeys = tiles.map((t) => tileKey(t.row, t.col))
+        setActiveKeys([
+          ...baked.map((r) => overviewCellKey(r.cell.row, r.cell.col)),
+          ...detailKeys,
+        ])
+        const res = await loadDetailTiles(tiles, generation)
+        anyError = res.anyError
+      }
+
+      if (generationRef.current !== generation) return
+      const hasAnyVisibleData =
+        baked.length > 0 || detailKeys.some((k) => loadedTilesRef.current.has(k))
+      if (anyError && !hasAnyVisibleData) onStatusChange('error')
+      else                                onStatusChange('ok')
+      return
+    }
+
+    // ── Detail level (z >= OVERVIEW_MAX_ZOOM) — unchanged ─────────────────
+    // Fetch every visible tile up to a deterministic budget. When the
+    // viewport spans more than MAX_FETCH_TILES, selectFetchTiles keeps the
+    // budget-nearest-to-centre subset — a PURE function of (viewport), so a
+    // zoomed-out user fetches (and paints) the same tiles a zoomed-in user
+    // would for the identical viewport.
+    const tiles = selectFetchTiles(getVisibleTiles(bounds), center, MAX_FETCH_TILES)
+    setActiveKeys(tiles.map((t) => tileKey(t.row, t.col)))
+    const { anyError } = await loadDetailTiles(tiles, generation)
 
     if (generationRef.current !== generation) return
     const hasAnyVisibleData = tiles.some((t) =>
@@ -761,7 +846,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
     )
     if (anyError && !hasAnyVisibleData) onStatusChange('error')
     else                                onStatusChange('ok')
-  }, [enabled, engine, onStatusChange])
+  }, [enabled, engine, onStatusChange, loadDetailTiles])
 
   // Subscribe to map move/zoom/resize via the engine event API.
   useEffect(() => {
@@ -797,18 +882,36 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
           getSouth: () => sw[0], getNorth: () => ne[0],
           getWest:  () => sw[1], getEast:  () => ne[1],
         }
-        // Prime from cache using the SAME deterministic subset the fetch path
-        // uses, so the initial paint matches what loadVisibleTiles will load.
+        // Prime from cache using the SAME deterministic subset (and the same
+        // level) the fetch path uses, so the initial paint matches what
+        // loadVisibleTiles will load.
         const center: [number, number] = [(sw[0] + ne[0]) / 2, (sw[1] + ne[1]) / 2]
-        const tiles = selectFetchTiles(getVisibleTiles(bounds), center, MAX_FETCH_TILES)
+        const zoom = engine.getZoom()
         const preloaded = new Map<string, OsmWay[]>()
-        for (const t of tiles) {
-          const cached = getCachedTile(t.row, t.col)
-          if (cached) {
-            const k = tileKey(t.row, t.col)
-            preloaded.set(k, cached)
-            loadedTilesRef.current.add(k)
+        if (zoom < OVERVIEW_MAX_ZOOM) {
+          const cells = selectFetchTiles(
+            getVisibleOverviewCells(bounds), center, MAX_OVERVIEW_TILES, OVERVIEW_TILE_DEGREES,
+          )
+          for (const c of cells) {
+            const cached = getCachedOverviewCell(c.row, c.col)
+            if (cached) {
+              const k = overviewCellKey(c.row, c.col)
+              preloaded.set(k, cached)
+              loadedTilesRef.current.add(k)
+            }
           }
+          setActiveKeys(cells.map((c) => overviewCellKey(c.row, c.col)))
+        } else {
+          const tiles = selectFetchTiles(getVisibleTiles(bounds), center, MAX_FETCH_TILES)
+          for (const t of tiles) {
+            const cached = getCachedTile(t.row, t.col)
+            if (cached) {
+              const k = tileKey(t.row, t.col)
+              preloaded.set(k, cached)
+              loadedTilesRef.current.add(k)
+            }
+          }
+          setActiveKeys(tiles.map((t) => tileKey(t.row, t.col)))
         }
         setTileData(preloaded)
         loadVisibleTiles()
@@ -819,22 +922,33 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
       loadingTilesRef.current = new Set()
       loadedTilesRef.current = new Set()
       setTileData(new Map())
+      setActiveKeys([])
       onStatusChange('idle')
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, engine])
 
+  // Painted set = the ways of the tiles the CURRENT viewport+zoom selected.
+  // Scoping to activeKeys (rather than every tile ever loaded) is what keeps
+  // the two levels from double-plotting the same geometry after a zoom
+  // crossing, and keeps paint a pure function of (viewport, zoom).
   const allWays = useMemo<OsmWay[]>(() => {
     const result: OsmWay[] = []
-    for (const ways of tileData.values()) for (const w of ways) result.push(w)
+    for (const k of activeKeys) {
+      const ways = tileData.get(k)
+      if (ways) for (const w of ways) result.push(w)
+    }
     return result
-  }, [tileData])
+  }, [tileData, activeKeys])
 
-  // The moat filter's edge fail-soft needs to know which OSM tiles are
-  // loaded. tileData's keys mirror loadedTilesRef (both are written in the
-  // same load flow) but tileData is reactive state, so deriving from it
-  // keeps the renderer's memo in sync without threading a mutable ref.
-  const loadedTileKeys = useMemo(() => new Set(tileData.keys()), [tileData])
+  // The moat filter's edge fail-soft needs to know which 0.1° OSM tiles are
+  // loaded. Overview cells are excluded: their ways are all enriched (baked
+  // verdicts), so they never consult this set — and their keys aren't on the
+  // 0.1° grid the moat pass indexes by.
+  const loadedTileKeys = useMemo(
+    () => new Set(activeKeys.filter((k) => !isOverviewCellKey(k) && tileData.has(k))),
+    [tileData, activeKeys],
+  )
 
   if (!engine || !enabled || allWays.length === 0) return null
   return (
