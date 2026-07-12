@@ -115,6 +115,35 @@ out. If you need a *hard* guarantee that painting is fully done, re-
 screenshot after an additional wait and compare against the first — none
 of the current checks need that, but a future one might.
 
+## OVERVIEW-COVERAGE (z9 / z10 / z11) — needs seeded overview tiles
+
+`checks/overview-coverage.ts` asserts the property the baked 1.0° overview level
+exists to deliver: at overview zoom the overlay covers the **whole viewport**,
+not a blob around the cursor. It splits the map canvas into a 4×4 grid and
+requires painted overlay pixels in at least 60% of the cells at z9, z10 and z11
+(Bay Area → Sacramento Delta, land in every quadrant).
+
+ALWAYS-VISIBLE cannot catch this: a non-empty floor is satisfied by the old
+centre-blob behaviour too — 64 nearest-to-centre tiles always paint *something*
+near the middle. The regression it misses is the deterministic coverage GAP at
+the edges. So this check asserts a spatial property, not a count.
+
+**It SKIPs unless the local R2 has baked overview cells.** The overview level is
+served from R2 through the active manifest; a fresh `wrangler dev` has an empty
+local R2, `/api/overview` 404s, and the client (by design) falls back to the
+0.1° path — where the coverage gap is EXPECTED, so a failure there would be
+unattributable. Seed it first:
+
+```sh
+bun scripts/pipeline/bake-overview.ts --tiles data/tiles/california
+bun scripts/pipeline/upload-tiles.ts  --tiles data/tiles/california --local
+```
+
+The check probes `/api/overview?row=38&col=-122` and reports `SKIPPED` when it
+404s. The 60% threshold is derived from the geometry of the gap, NOT calibrated
+against a real bake — re-calibrate it (and record the measured numbers in the
+check) against the first CA overview bake.
+
 ## The ALWAYS-VISIBLE known-fail
 
 `scripts/render-checks/known-fails.ts` lists checks that are expected to

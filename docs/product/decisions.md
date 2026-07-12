@@ -630,3 +630,56 @@ to a nonexistent version forces full fail-open to Overpass — the pre-#214 beha
 **Status**: Live. Follow-ups: full-NorCal bake (current bbox is SF Bay core),
 daily diff cron, phone-latency protocol (`server/README.md`) → server-backend decision,
 DEM-swap retry behind the benchmark gate.
+
+## 2026-07-12: Baked 1.0° overview tiles — infra-only, simplified, 404-fallback
+
+**Context**: The browse overlay had no zoom pyramid — 0.1° tiles at every zoom, capped
+at `MAX_FETCH_TILES = 64` nearest-to-centre. Zooming OUT therefore asked for *more*
+full-detail data and still only covered a blob around the cursor: a NorCal-scale view
+queued 64 multi-MB tiles and left the rest of the viewport blank by construction
+(`docs/product/plans/2026-07-12-overlay-zoom-scale-plan.md`, WP2). Below
+`OVERVIEW_MAX_ZOOM` (z12) the client now fetches baked 1.0° cells
+(`/api/overview?row=&col=`, budget `MAX_OVERVIEW_TILES = 32`), served from the same R2
+bucket, resolved through the same manifest — so `upload-tiles.ts --rollback-to` reverts
+both levels in one write.
+
+**Decision 1 — the overview level paints the bike-infrastructure NETWORK only.** Ways
+survive the bake when the production `classifyEdge` yields
+`carFree || bikePriority || bikeInfra`. Plain quiet residential (LTS 2b, no bike infra)
+is dropped. At z10 one pixel is ~150 m; painting every residential street there is a
+solid colour wash that answers no question. The overview answers *"where is the good
+bike network?"*; z12+ restores full street detail.
+
+This is a **deliberate difference in painted set between overview and detail zoom**, not
+a determinism violation: the determinism invariant is "same viewport AND same zoom →
+same tiles fetched, same paint." Zoom is an input to that function. It is also not a
+routing difference — overview tiles are display-only, the router keeps using 0.1° tiles
+via `fetchBikeInfraForTile`, and nothing in `clientRouter.ts` / `routeScorer.ts` can see
+them.
+
+**Decision 2 — geometry is simplified, tags are NOT.** Douglas–Peucker at 0.001° (~110 m,
+under one z10 pixel) via the same `simplifyToTolerance` the runtime overlay uses, then
+drop ways under 200 m post-simplification (sub-pixel). Ways keep their full tags and all
+baked enrichment fields, so the client runs the SAME classifier and the SAME visibility
+gates on an overview way as on a detail way — no parallel classification path.
+
+Measured (Bay Area bake): 277,764 distinct ways → 21,941 kept (7.9%); densest SF cell
+2.7 MB raw / 428 KB gzipped. The plan's ≤1.5 MB *raw* budget is exceeded in the two
+densest SF cells and **tolerance is not the lever** — DP already leaves ~2.6 points per
+way, and 0.001° → 0.003° moved the worst cell only 2.7 → 2.5 MB. The payload is tags +
+per-way JSON scaffolding. Since the tag set is load-bearing for classifier parity, the
+levers left are `--min-length` or dropping enriched fields; neither was taken. Wire cost
+(gzip, what Cloudflare actually serves) is comfortably inside budget.
+
+**Decision 3 — a Worker 404 falls back to the 0.1° path, on the client.** `/api/overview`
+does NOT fail open to Overpass (Overpass cannot serve a 1° bbox — falling through buys a
+30 s timeout, not data). It answers 404, and `fetchOverviewTile` returns null; the
+overlay then fetches 0.1° tiles **for exactly the cells that 404'd**, selected with the
+same deterministic nearest-to-centre rule. In an un-baked region (Berlin) every cell
+404s, so the fallback selects precisely the tiles today's code selects and behaviour is
+unchanged at every zoom. Without this fallback Berlin's overlay would go blank below z12.
+404s are cached (an un-baked region must not re-probe on every pan); transient errors are
+not.
+
+**Rollback**: manifest-only, as before. A manifest pointing at a version *without* an
+overview level degrades cleanly to the 0.1° path rather than blanking the overlay.

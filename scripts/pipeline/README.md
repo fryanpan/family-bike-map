@@ -64,6 +64,49 @@ takes each tile from its authoritative side only (row ≥ seam → north,
 row < seam → south), so every segment is stored exactly once. A
 `spillover-fallback 0` line in the merge output confirms a clean seam.
 
+## Overview level (1.0° cells, browse zoom < 12)
+
+The overlay's coarse level. Below `OVERVIEW_MAX_ZOOM` (z12) the client fetches
+1.0° cells instead of 0.1° tiles, so a NorCal-scale view covers the WHOLE
+viewport with a handful of requests instead of 64 full-detail tiles around the
+cursor. Baked FROM an already-baked 0.1° tile dir — no PBF, no DEM, seconds:
+
+```sh
+bun scripts/pipeline/bake-overview.ts --tiles data/tiles/california
+# → data/tiles/california/overview/<row>_<col>.json   (row/col = integer degrees)
+```
+
+Flags: `--out <dir>` (default `<tiles>/overview`), `--tolerance 0.001` (DP, in
+degrees), `--min-length 200` (metres, post-simplification).
+
+Two deliberate reductions, both DISPLAY-only (the router never reads these
+tiles — it keeps using 0.1° tiles via `fetchBikeInfraForTile`):
+
+1. **Bike-infrastructure network only** — ways where the production
+   `classifyEdge` yields `carFree || bikePriority || bikeInfra`. Plain quiet
+   residential is excluded: at z10 one pixel ≈ 150 m, so painting every
+   residential street is a colour wash that answers no question.
+2. **Simplified geometry** — Douglas-Peucker at ~0.001° (~110 m), then drop
+   ways shorter than 200 m post-simplification (sub-pixel at overview zoom).
+
+Ways keep their **full tags and enriched fields**, so the client runs the same
+classifier and the same visibility gates on an overview way as on a detail way.
+
+Size: the bake prints raw AND gzipped bytes per cell. Measured on the Bay Area
+bake (2026-07-12): the two densest SF cells are 2.7 MB / 2.1 MB raw (over the
+1.5 MB raw budget) but **428 KB / 313 KB gzipped**, which is what the wire
+carries. Tightening `--tolerance` is a weak lever (DP already leaves ~2.6 points
+per way; 0.001° → 0.003° moved the worst cell 2.7 → 2.5 MB) — the payload is
+tags + JSON scaffolding. If raw size must come down, use `--min-length`. Never
+strip tags: that would fork the classifier's inputs between the two levels.
+
+Upload: the `overview/` subdir rides along with the normal upload (below) under
+the SAME version prefix (`<version>/overview/<row>_<col>.json`) and the SAME
+manifest — so `--rollback-to` reverts both levels in one write.
+
+A region with no overview bake (Berlin) simply 404s on `/api/overview`, and the
+client falls back to the 0.1° path — exactly today's behaviour at every zoom.
+
 ## Daily updates
 
 ```sh
@@ -109,9 +152,11 @@ so non-enriched regions (Berlin until its bake) keep working.
 Bucket layout:
 
 ```
-manifest.json                       ← names the ACTIVE version ({"version": "..."})
-2026-07-03-seq2776/377_-1223.json   ← one tileset per version prefix
+manifest.json                                ← names the ACTIVE version ({"version": "..."})
+2026-07-03-seq2776/377_-1223.json            ← 0.1° detail tiles (one tileset per version prefix)
 2026-07-03-seq2776/…
+2026-07-03-seq2776/overview/37_-123.json     ← 1.0° overview cells (same version, same manifest)
+2026-07-03-seq2776/overview/…
 ```
 
 ### Upload (atomic cutover)
@@ -156,7 +201,12 @@ bun scripts/pipeline/upload-tiles.ts --tiles data/tiles/bayarea-core --local
 bunx wrangler dev --port 8791 --local
 curl -s -D - -X POST 'http://localhost:8791/api/overpass?row=377&col=-1223' --data 'data='
 # → 200 with X-Tile-Source: enriched, X-Enriched-Version: <version>
+curl -s -D - 'http://localhost:8791/api/overview?row=37&col=-123' -o /dev/null
+# → 200 with X-Tile-Source: overview  (404 if the dir had no overview/ subdir)
 ```
+
+Seeding the overview level locally is also what unblocks the render-check
+`overview-coverage` scenarios (z9/z10/z11) — see `scripts/render-checks/README.md`.
 
 Without seeded local objects every request takes the Overpass proxy
 path, same as before enriched tiles existed.
