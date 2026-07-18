@@ -8,6 +8,12 @@
 // covered separately by checks/determinism.ts. Keep these two concerns
 // apart: this check only asserts "something painted," not "the same
 // thing painted every time."
+//
+// Nor is it a COVERAGE check. Below z12 the overlay switches to the baked 1.0°
+// overview level, where the assertion that matters is "the whole viewport is
+// covered" — a non-empty floor is satisfied by the old centre-blob behaviour
+// too. That stronger property lives in checks/overview-coverage.ts (z9/z10/z11);
+// this check stays on the z12 detail level.
 
 import { chromium } from 'playwright'
 import { serveApp } from '../lib/serve'

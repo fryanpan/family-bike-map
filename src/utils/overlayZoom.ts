@@ -20,6 +20,18 @@ export interface Tile { row: number; col: number }
 // gap — full coverage at those zooms wants baked overview tiles (B2).
 export const MAX_FETCH_TILES = 64
 
+// Upper bound on 1.0° OVERVIEW cells fetched for one viewport (z <
+// OVERVIEW_MAX_ZOOM). A 1° cell is ~111 km × ~88 km at Bay Area latitude, so a
+// z9 laptop viewport spans a handful of cells and even a whole-California view
+// is ~15 populated cells — 32 covers every realistic overview viewport in FULL,
+// which is the point: at overview zoom there is no deterministic coverage gap.
+export const MAX_OVERVIEW_TILES = 32
+
+// Grid pitch of the two tile levels, in degrees. Used by selectFetchTiles to
+// place a tile's centre for the nearest-to-centre sort.
+export const DETAIL_TILE_DEGREES = 0.1
+export const OVERVIEW_TILE_DEGREES = 1
+
 // At or above this zoom the overlay paints exactly as it did before this
 // change: full halos, full-width finger-tap hit layer, full stroke weight.
 // Below it the view is a city/metro OVERVIEW where those per-way extras are
@@ -63,14 +75,21 @@ export function overviewStyle(zoom: number): OverviewStyle {
  * tiles arrived or were discovered. When `tiles.length <= max` every tile is
  * returned unchanged (order preserved).
  *
- * @param tiles   all tiles intersecting the viewport (getVisibleTiles output)
- * @param center  viewport centre [lat, lng]
- * @param max     tile budget (defaults to MAX_FETCH_TILES)
+ * The same function serves BOTH tile levels — pass `tileDegrees` so the
+ * tile-centre maths matches the grid the tiles came from (0.1° detail tiles,
+ * 1.0° overview cells). One selection rule, one determinism proof.
+ *
+ * @param tiles        all tiles intersecting the viewport (getVisibleTiles /
+ *                     getVisibleOverviewCells output)
+ * @param center       viewport centre [lat, lng]
+ * @param max          tile budget (defaults to MAX_FETCH_TILES)
+ * @param tileDegrees  grid pitch of `tiles` (defaults to the 0.1° detail grid)
  */
 export function selectFetchTiles(
   tiles: Tile[],
   center: [number, number],
   max: number = MAX_FETCH_TILES,
+  tileDegrees: number = DETAIL_TILE_DEGREES,
 ): Tile[] {
   if (tiles.length <= max) return tiles
   const [clat, clng] = center
@@ -79,10 +98,10 @@ export function selectFetchTiles(
   // over-favours same-latitude tiles (at SF's 37.8° a lng degree is ~0.79×
   // a lat degree). Deterministic — depends only on the viewport centre.
   const cosLat = Math.cos((clat * Math.PI) / 180)
-  // Tile centre in the same 0.1° grid units used by latLngToTile.
+  // Tile centre in the grid units the caller's tiles were derived from.
   const dist2 = (t: Tile): number => {
-    const tlat = (t.row + 0.5) * 0.1
-    const tlng = (t.col + 0.5) * 0.1
+    const tlat = (t.row + 0.5) * tileDegrees
+    const tlng = (t.col + 0.5) * tileDegrees
     const dlat = tlat - clat
     const dlng = (tlng - clng) * cosLat
     return dlat * dlat + dlng * dlng

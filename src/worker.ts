@@ -9,6 +9,11 @@
  *   /api/overpass        → enriched tile from R2 when the active tileset has
  *                          one (see src/workerEnrichedTiles.ts), else proxy
  *                          to overpass-api.de with 30-day edge cache
+ *   /api/overview        → baked 1.0° overview cell from R2 (display-only,
+ *                          bike-infra network at simplified geometry), or 404
+ *                          when the region isn't baked — NO Overpass fail-open
+ *                          (it cannot serve 1° of data); the client then falls
+ *                          back to the 0.1° path
  *   /api/mapillary/*     → proxy to graph.mapillary.com with server-injected
  *                          token + 7-day edge cache
  *   /api/streetview      → proxy to Google Street View Static with server-
@@ -34,6 +39,7 @@ import * as Sentry from '@sentry/cloudflare'
 
 import {
   getEnrichedTileResponse,
+  getOverviewTileResponse,
   parseTileCoord,
   type R2BucketLike,
 } from './workerEnrichedTiles'
@@ -88,6 +94,33 @@ const handler = {
     // ?row=&col= query params identify the tile for the cache key.
     // Profile is intentionally excluded — the Overpass query is profile-independent
     // so one cache entry serves all travel modes.
+    // ── Baked 1.0° overview cells (display-only, browse zoom < 12) ────
+    // Resolved through the SAME manifest as the detail tiles, one level
+    // deeper in the key space (`<version>/overview/<row>_<col>.json`), so a
+    // `upload-tiles.ts --rollback-to` reverts both levels in one write.
+    //
+    // Deliberately NO fail-open to Overpass: a 1° bbox is orders of magnitude
+    // past what the public Overpass API will answer, so falling through would
+    // buy a 30 s timeout and an error, not data. A 404 is the contract — the
+    // client reads it as "this region isn't baked" and fetches 0.1° tiles
+    // exactly as it does today (src/services/overviewTiles.ts).
+    if (path === '/api/overview') {
+      const rowNum = parseTileCoord(url.searchParams.get('row'))
+      const colNum = parseTileCoord(url.searchParams.get('col'))
+      const notFound = new Response('overview tile not baked', {
+        status: 404,
+        headers: { 'X-Tile-Source': 'overview' },
+      })
+      if (!env.ENRICHED_TILES || rowNum == null || colNum == null) return notFound
+      const overview = await getOverviewTileResponse(env.ENRICHED_TILES, rowNum, colNum, {
+        onError: (err) =>
+          Sentry.captureException(err, {
+            extra: { route: '/api/overview', source: 'enriched-r2', row: rowNum, col: colNum },
+          }),
+      })
+      return overview ?? notFound
+    }
+
     if (path === '/api/overpass') {
       const row = url.searchParams.get('row') ?? ''
       const col = url.searchParams.get('col') ?? ''

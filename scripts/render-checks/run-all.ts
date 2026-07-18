@@ -12,6 +12,7 @@ import { runDeterminismCheck } from './checks/determinism'
 import { runTimeStabilityCheck } from './checks/time-stability'
 import { runAlwaysVisibleCheck } from './checks/always-visible'
 import { runPerfBudgetCheck } from './checks/perf-budget'
+import { runOverviewCoverageCheck } from './checks/overview-coverage'
 import { KNOWN_FAILS } from './known-fails'
 import type { CheckResult } from './lib/types'
 
@@ -20,6 +21,9 @@ const CHECKS: Record<string, (baseUrl: string) => Promise<CheckResult>> = {
   'time-stability': runTimeStabilityCheck,
   'always-visible': runAlwaysVisibleCheck,
   'perf-budget': runPerfBudgetCheck,
+  // Overview zooms (z9/z10/z11). SKIPs unless the local R2 has baked overview
+  // cells — see scripts/render-checks/README.md.
+  'overview-coverage': runOverviewCoverageCheck,
 }
 
 function printResult(result: CheckResult): void {
