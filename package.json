@@ -39,6 +39,6 @@
     "pngjs": "^7.0.0",
     "typescript": "^5.4.5",
     "vite": "^8.0.5",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.110.0"
   }
 }
