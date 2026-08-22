@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { computeLts, computeLtsBreakdown, familySafetyScore, classifyEdge, parseMaxspeedKmh } from '../src/utils/lts'
+import { computeLts, computeLtsBreakdown, familySafetyScore, classifyEdge, parseMaxspeedKmh, UNKNOWN_POSTED_SPEED_KMH, QUIET_STREET_MAX_KMH } from '../src/utils/lts'
 import type { LtsBreakdown } from '../src/utils/lts'
 
 // ── computeLts ──────────────────────────────────────────────────────────────
@@ -277,11 +277,36 @@ describe('parseMaxspeedKmh', () => {
     expect(parseMaxspeedKmh('none')).toBe(130)
   })
 
-  it('returns null for absent or unparseable values', () => {
+  it('returns null ONLY when the tag is absent', () => {
     expect(parseMaxspeedKmh(undefined)).toBeNull()
     expect(parseMaxspeedKmh('')).toBeNull()
-    expect(parseMaxspeedKmh('signals')).toBeNull()
-    expect(parseMaxspeedKmh('DE:urban')).toBeNull()
+    expect(parseMaxspeedKmh('   ')).toBeNull()
+  })
+
+  it('resolves implicit country-coded values to statutory speeds', () => {
+    expect(parseMaxspeedKmh('DE:urban')).toBe(50)
+    expect(parseMaxspeedKmh('US:rural')).toBe(100)
+    expect(parseMaxspeedKmh('DE:living_street')).toBe(7)
+    expect(parseMaxspeedKmh('DE:zone30')).toBe(30)
+    expect(parseMaxspeedKmh('DE:zone:30')).toBe(30)
+  })
+
+  it('treats a PRESENT but unreadable value as fast, never as calm', () => {
+    // The dangerous direction. A way whose maxspeed we cannot parse must
+    // not fall through to "quiet street" -- someone posted a limit here.
+    // Mirrors the pre-fix parseInt->NaN behaviour, where NaN failed every
+    // `<=` comparison.
+    expect(parseMaxspeedKmh('signals')).toBe(UNKNOWN_POSTED_SPEED_KMH)
+    expect(parseMaxspeedKmh('variable')).toBe(UNKNOWN_POSTED_SPEED_KMH)
+    expect(parseMaxspeedKmh('0')).toBe(UNKNOWN_POSTED_SPEED_KMH)
+    expect(UNKNOWN_POSTED_SPEED_KMH).toBeGreaterThan(QUIET_STREET_MAX_KMH)
+  })
+
+  it('does not let an unreadable maxspeed promote a painted lane to 2a', () => {
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', maxspeed: 'signals', lanes: '2' }).pathLevel).toBe('3')
+    // ...while the same way with no maxspeed tag at all still reaches 2a
+    // via the tertiary road-class default (the Folsom/17th case).
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', lanes: '2' }).pathLevel).toBe('2a')
   })
 })
 

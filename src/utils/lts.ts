@@ -38,11 +38,35 @@ export const QUIET_STREET_MAX_KMH = 40
  * error in the *dangerous* direction for a family-safety product, because it
  * makes a 30 mph (48 km/h) arterial look like a quiet street.
  *
- * Returns null when the tag is absent or not a speed we understand, which
- * callers treat as "unknown" rather than "fast".
+ * Returns null ONLY when the tag is absent — "we have no information," which
+ * callers may treat permissively. A tag that is PRESENT but unrecognized
+ * returns UNKNOWN_POSTED_SPEED_KMH instead, deliberately high, so it can
+ * never satisfy a "calmed street" test. Someone bothered to post a speed
+ * limit on this way; assuming it is quiet because we failed to read it is
+ * the one failure mode this whole function exists to prevent. (It also
+ * preserves the pre-2026-08-22 behaviour, where `parseInt` returned NaN for
+ * these and NaN failed every `<=` comparison.)
+ *
+ * Implicit country-coded values (`DE:urban`, `US:rural`, `DE:zone30`, …) are
+ * mapped to their statutory speeds rather than dumped into the unknown
+ * bucket, so a Berlin Tempo-30 zone still reads as 30.
  */
+export const UNKNOWN_POSTED_SPEED_KMH = 999
+
+/** Statutory speeds for OSM's implicit `COUNTRY:category` maxspeed values. */
+const IMPLICIT_MAXSPEED_KMH: Record<string, number> = {
+  living_street: 7,
+  walk: 7,
+  urban: 50,
+  rural: 100,
+  motorway: 130,
+  trunk: 100,
+  nsl_single: 96, // UK national speed limit, single carriageway (60 mph)
+  nsl_dual: 112, // UK national speed limit, dual carriageway (70 mph)
+}
+
 export function parseMaxspeedKmh(raw: string | undefined): number | null {
-  if (!raw) return null
+  if (raw == null || raw.trim() === '') return null
   const value = raw.trim().toLowerCase()
 
   // Walking pace — living streets and shared spaces.
@@ -50,12 +74,25 @@ export function parseMaxspeedKmh(raw: string | undefined): number | null {
   // Explicitly derestricted (autobahn). Definitely not calm.
   if (value === 'none' || value === 'unlimited') return 130
 
-  const match = /^(\d+(?:\.\d+)?)\s*(mph|km\/h|kmh|kph)?$/.exec(value)
-  if (!match) return null
+  const numeric = /^(\d+(?:\.\d+)?)\s*(mph|km\/h|kmh|kph)?$/.exec(value)
+  if (numeric) {
+    const n = parseFloat(numeric[1])
+    if (!Number.isFinite(n) || n <= 0) return UNKNOWN_POSTED_SPEED_KMH
+    return numeric[2] === 'mph' ? Math.round(n * 1.609344) : Math.round(n)
+  }
 
-  const n = parseFloat(match[1])
-  if (!Number.isFinite(n) || n <= 0) return null
-  return match[2] === 'mph' ? Math.round(n * 1.609344) : Math.round(n)
+  // Implicit forms: "DE:urban", "US:rural", "DE:zone30", "DE:zone:30".
+  const zone = /(?:^|:)zone:?(\d+)$/.exec(value)
+  if (zone) {
+    const n = parseInt(zone[1], 10)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  const category = value.includes(':') ? value.slice(value.lastIndexOf(':') + 1) : value
+  const implicit = IMPLICIT_MAXSPEED_KMH[category]
+  if (implicit != null) return implicit
+
+  // Present, but we could not read it. Assume fast, never calm.
+  return UNKNOWN_POSTED_SPEED_KMH
 }
 
 /**
