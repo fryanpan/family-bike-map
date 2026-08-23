@@ -683,3 +683,57 @@ not.
 
 **Rollback**: manifest-only, as before. A manifest pointing at a version *without* an
 overview level degrades cleanly to the 0.1° path rather than blanking the overlay.
+
+## 2026-08-22: maxspeed unit parsing + the "calmed street" ceiling (2a)
+
+Bryan reported Folsom St and 17th St missing from the SF Mission overlay for
+kid-traffic-savvy — he expected them in the blue "Bike route beside cars" tier
+and they painted nothing at all. Diagnosis against live OSM found two entangled
+defects in `classifyEdge`, both of which had to move together.
+
+**Defect 1 — `parseInt(tags.maxspeed)` dropped the unit.** OSM stores US speeds
+as `"25 mph"`. `parseInt` returned `25`, which the classifier then compared
+against a km/h threshold. Measured in central SF: **every** `maxspeed` value in
+the painted-lane corpus is mph-suffixed (213× `25 mph`, 104× `20 mph`, 85×
+`30 mph`, 23× `35 mph`; zero bare-numeric values). The consequence ran in the
+dangerous direction — the 85 ways posted `30 mph` (48 km/h, an arterial) were
+classifying as *"Painted bike lane on quiet street"* and painting as preferred
+family infrastructure.
+
+**Defect 2 — the 2a ceiling was 30 km/h, which no US street can satisfy.**
+25 mph is 40.2 km/h and even a 20 mph slow street is 32.2 km/h. So once the unit
+bug is fixed, a strict 30 km/h gate excludes essentially every calmed street in
+America. The two defects were cancelling: SF's blue tier existed *only* because
+mph values were being mis-read low enough to sneak under the gate. 301 of the
+338 SF ways then in 2a got there that way — fixing the parse alone would have
+collapsed the tier to 46 ways.
+
+**Decision 1 — one ceiling, set at 40 km/h** (`QUIET_STREET_MAX_KMH`), replacing
+the bare `30`. It is chosen so both real-world regimes that mean "calmed urban
+street" land inside it: a European Tempo-30 zone (30 km/h) and a US 25 mph
+street (40 km/h). A US 30 mph street (48 km/h) and a European 50 km/h
+Hauptstraße both stay out. Verified against live OSM: moving the ceiling 30 → 40
+changes **zero** ways in central Berlin, because Berlin streets are posted 30 or
+50 and nothing sits between. The threshold is global, not regional — no new
+per-city classification path.
+
+**Decision 2 — the untagged-`tertiary` speed guess drops 50 → 40.** Folsom and
+17th carry no `maxspeed` tag at all, so they were inheriting a road-class
+default of 50 km/h — above any plausible ceiling, which is why they painted
+nothing rather than painting as an arterial. Under the old defaults **pathLevel
+2a was unreachable for any way of class tertiary or above unless a mapper had
+typed an explicit `maxspeed ≤ 30`**, so in cities that don't tag speed densely
+the whole category was effectively dead. Berlin tags 99% of its tertiaries
+(413/417) so the default almost never fires there; SF leaves 137 of 210
+untagged. A tertiary is a minor connector, and 40 is the more honest guess.
+`secondary` and above keep 50+ — those genuinely are arterials, and an untagged
+secondary still correctly lands at '3'.
+
+**Rejected — a per-city speed profile in `src/data/cityProfiles/`.** That is
+architecturally where regional calibration belongs (Layer 2), but the only lever
+those profiles expose is `ClassificationRule` tag-matching, which overrides the
+*display* item name without touching `classifyEdge`. Using it here would have
+produced exactly the parallel-classifier drift the project forbids: the overlay
+would show Folsom as a quiet street while the router still costed it as an
+arterial. If 40 proves wrong for a specific city, the fix is to thread a region
+into `classifyEdge` itself so display and routing keep sharing one answer.
