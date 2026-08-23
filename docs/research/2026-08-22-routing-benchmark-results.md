@@ -133,3 +133,37 @@ the benchmark measures the same enriched data SF users are served.
    cannot silently rot again.
 3. Memory grows steeply with tile completeness — a full Berlin fetch reached
    1.2 GB RSS / 1.6 GB heap by the third mode. Not yet a failure, but thin.
+
+---
+
+## Addendum — re-run after hardening the parser against unreadable values
+
+A self-review pass on this branch found that `parseMaxspeedKmh` returned
+`null` for any value it could not parse, and `classifyEdge` reads it as
+`parseMaxspeedKmh(...) ?? 0` — so `maxspeed=signals` or `maxspeed=DE:urban`
+resolved to **0 km/h, the quietest possible street.** That is worse than the
+`parseInt` code being replaced: `parseInt('DE:urban')` is `NaN`, and `NaN`
+fails every `<=` comparison, so the old code treated those ways as fast.
+
+Fixed by returning `null` only when the tag is *absent*, resolving implicit
+country-coded values to statutory speeds (`DE:urban` 50, `US:rural` 100,
+`DE:zone30` 30, `*:living_street` 7, UK NSL), and returning
+`UNKNOWN_POSTED_SPEED_KMH = 999` for anything present but unreadable.
+
+Because that changes edge costs, the gate was re-run in full.
+
+| City | Found | Avg preferred % | 2a % | vs. the post-fix numbers above |
+|---|---|---|---|---|
+| Berlin | 22/22 all modes | 52 / 66 / 67 / 57 / 46 | 4 / 4 / 5 / 5 / 6 | **identical** |
+| SF | 17/17 all modes | 28 / 41 / 61 / 54 / 51 | 16 / 15 / 17 / 18 / 19 | **identical** |
+
+(Mode order: kid-starting-out, kid-confident, kid-traffic-savvy,
+carrying-kid, training. 0 failed tiles in both runs.)
+
+**Interpretation:** the hardening is a no-op on both benchmark cities —
+neither corpus contains a way whose `maxspeed` is present but unparseable,
+so no edge cost moved. That is the expected shape for a defensive fix: it
+closes a hole that the current data does not happen to exercise. The value
+is in the cities we do not benchmark, and in Germany specifically, where
+`DE:urban` / `DE:zone30` are ordinary tagging and would previously have
+been read as 0 km/h.
