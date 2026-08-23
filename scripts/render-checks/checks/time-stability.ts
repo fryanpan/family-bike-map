@@ -9,7 +9,7 @@
 import { chromium } from 'playwright'
 import { serveApp } from '../lib/serve'
 import { gotoView, waitForTilesSettled } from '../lib/mapControl'
-import { screenshotMapCanvas } from '../lib/screenshot'
+import { screenshotMapCanvas, screenshotWhenPaintSettles } from '../lib/screenshot'
 import { paintedMask, comparePaintedMasks } from '../lib/pixels'
 import type { CheckResult, CheckDetail } from '../lib/types'
 
@@ -25,7 +25,11 @@ const STABILITY_WAIT_MS = 15000
 // this guards; a whole region vanishing is. Zero would be ideal but
 // raster basemap redraw isn't perfectly pixel-stable even with no
 // overlay change at all.
-const MAX_VANISHED_PIXEL_RATIO = 0.01
+// Fraction of the PAINTED overlay allowed to disappear between t0 and
+// t+15s. Small on purpose: rendering-changes.md treats any edge that
+// vanishes without interaction as a regression until proven otherwise,
+// and this budget only absorbs antialiasing jitter.
+const MAX_VANISHED_PIXEL_RATIO = 0.02
 
 interface ZoomStabilityResult {
   zoom: number
@@ -39,7 +43,7 @@ async function checkZoom(browser: import('playwright').Browser, baseUrl: string,
   try {
     await gotoView(page, baseUrl, { ...CENTER, zoom }, { travelMode: TRAVEL_MODE })
     await waitForTilesSettled(page) // "t0" = right after tiles visibly finish loading, per rendering-changes.md
-    const t0Img = await screenshotMapCanvas(page)
+    const t0Img = await screenshotWhenPaintSettles(page)
 
     await page.waitForTimeout(STABILITY_WAIT_MS)
     const t15Img = await screenshotMapCanvas(page)
@@ -47,8 +51,15 @@ async function checkZoom(browser: import('playwright').Browser, baseUrl: string,
     const maskT0 = paintedMask(t0Img)
     const maskT15 = paintedMask(t15Img)
     const cmp = comparePaintedMasks(maskT0, maskT15, t0Img.width, t0Img.height)
-    const totalPx = t0Img.width * t0Img.height
-    const vanishedRatio = cmp.onlyInA / totalPx // painted at t0, gone by t15
+    // Denominate in PAINTED pixels, not canvas pixels. The canvas is
+    // 1280x800 = 1,024,000 px while the overlay paints only a few
+    // thousand, so a canvas-denominated ratio made this gate
+    // mathematically incapable of failing: at ~4,000 painted px, EVERY
+    // painted pixel could vanish and still land at 0.4%, under the 1%
+    // budget. That is the exact regression class rendering-changes.md
+    // exists to catch. Against the painted set, "10% of the overlay
+    // vanished" now reads as 10%.
+    const vanishedRatio = cmp.paintedInA === 0 ? 0 : cmp.onlyInA / cmp.paintedInA
 
     return {
       zoom,
@@ -58,7 +69,7 @@ async function checkZoom(browser: import('playwright').Browser, baseUrl: string,
         { label: `z${zoom} painted @t0`, value: String(cmp.paintedInA) },
         { label: `z${zoom} painted @t+15s`, value: String(cmp.paintedInB) },
         { label: `z${zoom} vanished px`, value: String(cmp.onlyInA) },
-        { label: `z${zoom} vanished ratio`, value: `${(vanishedRatio * 100).toFixed(3)}%` },
+        { label: `z${zoom} vanished ratio`, value: `${(vanishedRatio * 100).toFixed(3)}% of painted` },
       ],
     }
   } finally {

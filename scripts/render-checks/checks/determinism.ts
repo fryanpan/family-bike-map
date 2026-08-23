@@ -12,7 +12,7 @@
 import { chromium } from 'playwright'
 import { serveApp } from '../lib/serve'
 import { gotoView, panAwayAndReturn, waitForTilesSettled } from '../lib/mapControl'
-import { screenshotMapCanvas } from '../lib/screenshot'
+import { screenshotWhenPaintSettles } from '../lib/screenshot'
 import { paintedMask, comparePaintedMasks } from '../lib/pixels'
 import type { CheckResult } from '../lib/types'
 
@@ -23,7 +23,7 @@ const TRAVEL_MODE = 'kid-confident'
 // redraw / label placement can jitter a handful of pixels even with no
 // overlay change at all). This is a "did a whole region vanish or
 // appear" tripwire, not a pixel-perfect diff.
-const MAX_DIVERGENT_PIXEL_RATIO = 0.02
+const MAX_DIVERGENT_PIXEL_RATIO = 0.10
 
 export async function runDeterminismCheck(baseUrl: string): Promise<CheckResult> {
   const browser = await chromium.launch()
@@ -32,7 +32,7 @@ export async function runDeterminismCheck(baseUrl: string): Promise<CheckResult>
     const pageA = await browser.newPage({ viewport: { width: 1280, height: 800 } })
     await gotoView(pageA, baseUrl, TARGET_VIEW, { travelMode: TRAVEL_MODE })
     await waitForTilesSettled(pageA)
-    const imgA = await screenshotMapCanvas(pageA)
+    const imgA = await screenshotWhenPaintSettles(pageA)
     await pageA.close()
 
     // (b) load elsewhere, zoom in, pan, zoom back out to the same viewport
@@ -41,7 +41,7 @@ export async function runDeterminismCheck(baseUrl: string): Promise<CheckResult>
     await gotoView(pageB, baseUrl, elsewhere, { travelMode: TRAVEL_MODE })
     await panAwayAndReturn(pageB, TARGET_VIEW)
     await waitForTilesSettled(pageB)
-    const imgB = await screenshotMapCanvas(pageB)
+    const imgB = await screenshotWhenPaintSettles(pageB)
     await pageB.close()
 
     if (imgA.width !== imgB.width || imgA.height !== imgB.height) {
@@ -56,8 +56,12 @@ export async function runDeterminismCheck(baseUrl: string): Promise<CheckResult>
     const maskA = paintedMask(imgA)
     const maskB = paintedMask(imgB)
     const cmp = comparePaintedMasks(maskA, maskB, imgA.width, imgA.height)
-    const totalPx = imgA.width * imgA.height
-    const divergentRatio = (cmp.onlyInA + cmp.onlyInB) / totalPx
+    // Painted-denominated, for the same reason as time-stability: a
+    // canvas denominator (1280x800) drowns the few thousand painted px
+    // the overlay actually produces, so losing 90% of the overlay scored
+    // 0.367% and passed a 2% budget.
+    const paintedRef = Math.max(cmp.paintedInA, cmp.paintedInB)
+    const divergentRatio = paintedRef === 0 ? 0 : (cmp.onlyInA + cmp.onlyInB) / paintedRef
 
     const passed = divergentRatio <= MAX_DIVERGENT_PIXEL_RATIO
     return {
