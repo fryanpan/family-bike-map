@@ -30,7 +30,8 @@ export async function screenshotMapCanvas(page: Page): Promise<DecodedImage> {
  * painted denominator it would read as a 90% failure every run.
  *
  * Polling the painted count directly measures the thing the checks assert
- * on. Two consecutive equal readings means paint has converged.
+ * on. Convergence is declared after `stableReadings` consecutive identical
+ * counts (default 3 — see the inline note on why two is not enough).
  */
 export async function screenshotWhenPaintSettles(
   page: Page,
