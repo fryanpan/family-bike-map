@@ -77,6 +77,100 @@ type Env = {
   ASSETS: { fetch: (request: Request) => Promise<Response> }
 }
 
+/**
+ * Public Overpass instances, tried in order.
+ *
+ * Why a list at all: on 2026-10-16 the live map failed for every tile outside
+ * California with HTTP 521. Cloudflare's Worker-to-`overpass-api.de` fetch was
+ * returning a *synthesized* 521 (a connect failure, not an exception and not
+ * the upstream's own response — overpass-api.de runs bare nginx with no
+ * Cloudflare in front), and the proxy passed `resp.status` straight through.
+ * The same query answered 200 in 36 s from a laptop, so the instance was
+ * healthy and only the Cloudflare egress path was broken. A single hardcoded
+ * upstream makes that a total outage for every unbaked region.
+ *
+ * **Every entry must be a global instance.** `overpass.osm.ch` is excluded
+ * deliberately: it answered the Boston bbox with HTTP 200 and an empty
+ * `elements` array, because it only holds Switzerland. A regional instance is
+ * the worst possible fallback — indistinguishable from "no bike infrastructure
+ * here" at every layer above this one, so the map would paint nothing and
+ * report success. Verify global coverage with a query far from the host
+ * country before adding an entry.
+ *
+ * `/api/status` is NOT a health check for these: `overpass.kumi.systems` and
+ * `overpass.private.coffee` both answer it with HTTP 500 while
+ * kumi.systems serves real queries fine.
+ */
+export const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+] as const
+
+/** Per-attempt cap. The dense central-SF tile takes ~19 s and Boston measured
+ *  28-36 s, so this has to be generous; the failure we're guarding against
+ *  (a Cloudflare connect error) returns in ~3 s, so the realistic worst case
+ *  is one slow success, not the sum of the caps. */
+const OVERPASS_ATTEMPT_TIMEOUT_MS = 40_000
+
+/**
+ * POST `body` to each Overpass instance until one answers with a usable
+ * response, and return that one along with the trail of what was tried.
+ *
+ * A response is usable when it is HTTP 2xx. Partial responses (Overpass
+ * returns 200 with a top-level `"remark"` when a query times out) are
+ * returned to the caller rather than retried — the caller already declines to
+ * cache them, and retrying a timeout on a second instance mostly buys another
+ * timeout. An empty `elements` array is a legitimate answer for a tile with no
+ * bike infrastructure, so it is NOT treated as a failure; the guard against
+ * regional instances is the endpoint list above, not a runtime check.
+ */
+export async function fetchOverpass(body: ArrayBuffer): Promise<{
+  resp: Response
+  respBody: ArrayBuffer
+  endpoint: string
+  attempts: { endpoint: string; status: number | string }[]
+}> {
+  const attempts: { endpoint: string; status: number | string }[] = []
+  let last: { resp: Response; respBody: ArrayBuffer; endpoint: string } | null = null
+
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'FamilyBikeMap/0.1 (github.com/fryanpan/family-bike-map)',
+        },
+        body,
+        signal: AbortSignal.timeout(OVERPASS_ATTEMPT_TIMEOUT_MS),
+      })
+      const respBody = await resp.arrayBuffer()
+      attempts.push({ endpoint, status: resp.status })
+      last = { resp, respBody, endpoint }
+      if (resp.ok) return { ...last, attempts }
+    } catch (err) {
+      // Connect failure, DNS failure or the attempt timeout. Keep going —
+      // the whole point of the list is that one instance being unreachable
+      // from Cloudflare's edge should not be an outage.
+      attempts.push({ endpoint, status: err instanceof Error ? err.name : 'error' })
+    }
+  }
+
+  if (last) return { ...last, attempts }
+
+  // Every endpoint threw, so there is no upstream response to pass through.
+  // 502 is the honest status: the proxy itself is fine, its upstreams are not.
+  // The client treats any non-200 as "retry on pan/zoom".
+  return {
+    resp: new Response(null, { status: 502 }),
+    respBody: new TextEncoder().encode(
+      JSON.stringify({ error: 'All Overpass endpoints unreachable', attempts }),
+    ).buffer as ArrayBuffer,
+    endpoint: 'none',
+    attempts,
+  }
+}
+
 const handler = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
@@ -164,16 +258,13 @@ const handler = {
       }
 
       const body = await request.arrayBuffer()
-      const resp = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'FamilyBikeMap/0.1 (github.com/fryanpan/family-bike-map)',
-        },
-        body,
-      })
-
-      const respBody = await resp.arrayBuffer()
+      const { resp, respBody, endpoint, attempts } = await fetchOverpass(body)
+      if (attempts.length > 1) {
+        Sentry.captureMessage(`Overpass fell back to ${endpoint}`, {
+          level: 'warning',
+          extra: { route: '/api/overpass', row, col, attempts },
+        })
+      }
 
       // Overpass returns HTTP 200 with a top-level `"remark"` (and PARTIAL data)
       // when a query times out — the dense central-SF tile fetches in ~19s against
@@ -208,6 +299,10 @@ const handler = {
         headers: {
           'Content-Type': resp.headers.get('Content-Type') ?? 'application/json',
           'X-Cache': 'MISS',
+          // Which instance actually answered. The 2026-10-16 outage was
+          // diagnosed by curl against prod, and this is the header that would
+          // have made it a one-request diagnosis instead of a guess.
+          'X-Overpass-Endpoint': endpoint,
         },
       })
     }
