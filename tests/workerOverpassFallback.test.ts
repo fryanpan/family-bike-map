@@ -31,6 +31,15 @@ describe('OVERPASS_ENDPOINTS', () => {
     expect(OVERPASS_ENDPOINTS.length).toBeGreaterThan(1)
   })
 
+  it('lists distinct hosts, and excludes private.coffee — it shares kumi.systems failure domain', () => {
+    // Measured 2026-10-17: kumi.systems and private.coffee returned
+    // byte-identical 646-byte Apache 500 pages for the same query. Listing
+    // both would look like two fallbacks and behave as one.
+    const hosts = OVERPASS_ENDPOINTS.map((e) => new URL(e).hostname)
+    expect(new Set(hosts).size).toBe(hosts.length)
+    expect(hosts).not.toContain('overpass.private.coffee')
+  })
+
   it('excludes overpass.osm.ch — it answers non-Swiss bboxes 200 with zero elements', () => {
     // A regional instance is the worst fallback: an empty elements array is
     // indistinguishable from "no bike infrastructure here" at every layer
