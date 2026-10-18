@@ -203,6 +203,28 @@ describe('classifyEdge — per-side cycleway tags', () => {
 
   // Sharrows get no stress reduction under LTS, and buildQuery() does not
   // fetch them. See docs/research/2026-06-26-sf-bike-infra-market-research.md.
+  it('a painted lane above the 2a speed ceiling demotes 2b -> 3, not up to 2a', () => {
+    // The one direction of this fix that is NOT an upgrade, and it is
+    // intentional: before the fix a left-side lane was invisible, so the street
+    // scored as ordinary quiet residential (2b). Seeing the lane on a 50 km/h
+    // street correctly reads it as a painted lane on a road too fast to count
+    // as calmed, which derivePathLevel demotes to 3 under the kid-first
+    // framing. 1 SF and 3 Berlin ways move this way — see
+    // docs/research/2026-10-18-cycleway-left-benchmark-results.md.
+    const street = { highway: 'residential', maxspeed: '50', lanes: '2' }
+    expect(classifyEdge(street).pathLevel).toBe('2b')
+    expect(classifyEdge({ ...street, 'cycleway:left': 'lane', 'cycleway:right': 'no' }).pathLevel).toBe('3')
+  })
+
+  it('share_busway is read on every side, not just the plain key', () => {
+    const base = { highway: 'secondary', maxspeed: '30' }
+    const levels = (['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'] as const).map(
+      (k) => classifyEdge({ ...base, [k]: 'share_busway' }).pathLevel,
+    )
+    expect(new Set(levels).size).toBe(1)
+    expect(levels[0]).toBe('2a')
+  })
+
   it('cycleway=shared_lane is not bike infrastructure', () => {
     const c = classifyEdge({ highway: 'residential', cycleway: 'shared_lane', maxspeed: '30' })
     expect(c.bikeInfra).toBe(false)
