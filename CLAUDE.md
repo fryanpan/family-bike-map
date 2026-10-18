@@ -68,6 +68,14 @@ See `docs/product/architecture.md` for full technical architecture.
 - No unnecessary abstractions for one-time operations
 - Clean up dead code created by your changes
 
+### Dependencies
+- **bun is the package manager.** `bun.lock` is the lockfile; CI and deploy both run
+  `bun install --frozen-lockfile`. There is no npm lockfile — don't add one back.
+- Dependabot is pinned to the `bun` ecosystem in `.github/dependabot.yml`. A dependency
+  PR that touches any other lockfile is targeting a file nothing reads; close it.
+- Dependency PRs with fresh green CI may be merged without asking. Check the check's
+  *date* first — a green from before the last few dozen commits to main proves nothing.
+
 @docs/process/learnings.md
 @.claude/rules/routing-changes.md
 @.claude/rules/rendering-changes.md
