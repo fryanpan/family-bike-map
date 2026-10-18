@@ -1,12 +1,19 @@
-// Diagnostic: how many real ways does classifyEdge mis-tier because it never
-// reads `cycleway:left`?
+// Diagnostic: how many real ways change tier once every cycleway side is read?
 //
 // `buildQuery()` fetches ways tagged on ANY side — the key regex is
-// ^cycleway(:right|:left|:both)?$ — but classifyEdge reads only
-// `cycleway` / `cycleway:right` / `cycleway:both`. A way whose only bike
-// facility is tagged on the left is fetched, then classified as if it had no
-// bike infrastructure at all. The display classifier derives pathLevel from
-// classifyEdge, so the overlay mislabels it too.
+// ^cycleway(:right|:left|:both)?$ — but `classifyEdge` used to read the sides
+// through a `??` chain over `cycleway` / `cycleway:right` / `cycleway:both`,
+// which never looked at `cycleway:left` at all and, worse, stopped at any key
+// that was merely PRESENT. `cycleway:right=no` is present and very commonly
+// tagged, so it masked a real facility on another side. A way whose facility
+// the chain could not see was fetched and then scored as having no bike
+// infrastructure at all. The display classifier derives pathLevel from
+// classifyEdge, so the overlay mislabelled it too.
+//
+// `oldSideValue` below reconstructs that chain locally rather than calling a
+// past version of classifyEdge, so this script measures the same delta whether
+// it is run before or after the fix — it stays usable as a regression probe,
+// and reports the same numbers on either commit.
 //
 //   bun scripts/diag-cycleway-left.ts
 import { classifyEdge } from '../src/utils/lts'
@@ -22,6 +29,27 @@ const CITIES: Record<string, string> = {
 
 // The values buildQuery() actually fetches.
 const FETCHED = new Set(['track', 'lane', 'opposite_track', 'opposite_lane', 'share_busway'])
+
+/** The single value the pre-fix `??` chain selected, or '' if it selected none. */
+function oldSideValue(tags: Record<string, string>): string {
+  return tags.cycleway ?? tags['cycleway:right'] ?? tags['cycleway:both'] ?? ''
+}
+
+/**
+ * The tags the pre-fix classifyEdge effectively saw: its only use of cycleway
+ * tags was the one value `oldSideValue` picks, so collapsing all four keys to
+ * that value reproduces the old classification exactly.
+ */
+function asOldTags(tags: Record<string, string>): Record<string, string> {
+  const out = { ...tags }
+  delete out['cycleway:left']
+  delete out['cycleway:right']
+  delete out['cycleway:both']
+  const sel = oldSideValue(tags)
+  if (sel) out.cycleway = sel
+  else delete out.cycleway
+  return out
+}
 
 for (const [city, bbox] of Object.entries(CITIES)) {
   const query = `
@@ -45,23 +73,18 @@ out tags;
   const data = (await res.json()) as { elements: Array<{ tags: Record<string, string> }> }
   const ways = data.elements.filter((e) => e.tags?.highway)
 
-  let leftOnly = 0
+  let hidden = 0
   const shifts = new Map<string, number>()
   const examples: Array<Record<string, string>> = []
 
   for (const { tags } of ways) {
-    const left = tags['cycleway:left'] ?? ''
-    // Does any side classifyEdge DOES read carry a fetched value?
-    const seen =
-      FETCHED.has(tags.cycleway ?? '') ||
-      FETCHED.has(tags['cycleway:right'] ?? '') ||
-      FETCHED.has(tags['cycleway:both'] ?? '')
-    if (!FETCHED.has(left) || seen) continue
-    leftOnly++
+    // Did the old chain see a facility at all, when one is tagged somewhere?
+    const anyFetched = (['cycleway', 'cycleway:right', 'cycleway:left', 'cycleway:both'] as const)
+      .some((k) => FETCHED.has(tags[k] ?? ''))
+    if (anyFetched && !FETCHED.has(oldSideValue(tags))) hidden++
 
-    const before = classifyEdge(tags).pathLevel
-    // Simulate the fix: make the left value visible on a key classifyEdge reads.
-    const after = classifyEdge({ ...tags, cycleway: left }).pathLevel
+    const before = classifyEdge(asOldTags(tags)).pathLevel
+    const after = classifyEdge(tags).pathLevel
     if (before !== after) {
       const k = `${before} -> ${after}`
       shifts.set(k, (shifts.get(k) ?? 0) + 1)
@@ -72,8 +95,8 @@ out tags;
   const moved = [...shifts.values()].reduce((a, b) => a + b, 0)
   console.log(`\n=== ${city} (${Date.now() - t0}ms) ===`)
   console.log(`fetched ways with a cycleway facility: ${ways.length}`)
-  console.log(`  of those, left-side tag is the ONLY one classifyEdge can see: ${leftOnly}`)
-  console.log(`  pathLevel changes once the left side is read:               ${moved}`)
+  console.log(`  facility hidden from the old ?? chain:        ${hidden}`)
+  console.log(`  pathLevel changes once every side is read:    ${moved}`)
   for (const [k, n] of [...shifts.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`     ${k}: ${n}`)
   }
