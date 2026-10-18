@@ -331,7 +331,24 @@ export type TrafficDensity = 'low' | 'moderate' | 'high'
  */
 export function classifyEdge(tags: Record<string, string>): LtsClassification {
   const highway = tags.highway ?? ''
-  const cycleway = tags.cycleway ?? tags['cycleway:right'] ?? tags['cycleway:both'] ?? ''
+  // A cycling facility is tagged on the plain `cycleway` key or per side
+  // (`:right` / `:left` / `:both`), and every side has to be read
+  // independently. A chain of `??` stops at the first key that is PRESENT,
+  // and `cycleway:right=no` — "explicitly nothing on this side" — is both
+  // present and very common, so it masked any real facility tagged on the
+  // left. buildQuery() fetches ways tagged on ANY side, so a side this
+  // function could not see was a way we fetched and then classified as
+  // having no bike infrastructure at all. classifyOsmTagsToItem reads all
+  // four the same way and derives its pathLevel from here, so the two must
+  // stay structurally identical.
+  const cyclewaySides = [
+    tags.cycleway,
+    tags['cycleway:right'],
+    tags['cycleway:left'],
+    tags['cycleway:both'],
+  ]
+  const anySide = (...values: string[]) =>
+    cyclewaySides.some((v) => v != null && values.includes(v))
   // 0 = untagged, the sentinel the comparisons below already expect.
   const maxspeed = parseMaxspeedKmh(tags.maxspeed) ?? 0
   const lanes = parseInt(tags.lanes ?? '0', 10)
@@ -349,9 +366,12 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
   const bikeOnFoot = isFootway && (tags.bicycle === 'yes' || tags.bicycle === 'designated')
   const bikeOnPath = isPath && tags.bicycle !== 'no'
   const explicitlyNoMotor = tags.motor_vehicle === 'no' || tags.access === 'no'
-  const hasSeparatedTrack = cycleway === 'track' || cycleway === 'opposite_track'
-  const hasPaintedLane = cycleway === 'lane' || cycleway === 'opposite_lane'
-  const hasBusLane = cycleway === 'share_busway'
+  const hasSeparatedTrack = anySide('track', 'opposite_track')
+  const hasPaintedLane = anySide('lane', 'opposite_lane')
+  // `cycleway=shared_lane` (a sharrow) deliberately matches nothing here: LTS
+  // assigns sharrows no stress reduction and buildQuery() does not fetch them.
+  // See docs/research/2026-06-26-sf-bike-infra-market-research.md.
+  const hasBusLane = anySide('share_busway')
 
   // carFree: the bike is not sharing a traffic surface with motor vehicles.
   // Curb-separated cycle tracks next to a road count (cars are adjacent but
