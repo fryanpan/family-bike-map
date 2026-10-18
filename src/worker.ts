@@ -100,8 +100,29 @@ type Env = {
  * `/api/status` is NOT a health check for these: `overpass.kumi.systems` and
  * `overpass.private.coffee` both answer it with HTTP 500 while
  * kumi.systems serves real queries fine.
+ *
+ * **Order is by measured capacity, not by canonical-ness.** overpass-api.de is
+ * the reference instance but it load-sheds this query: on 2026-10-17 it
+ * answered the full production query for Boston with `502 "This Overpass API
+ * server is currently at capacity"` in 0.5 s and Berlin with 504, while a
+ * two-subquery reduction of the same tile got a 200 in 36.8 s. Re-measure
+ * before reordering; "it worked from my laptop" can mean you sent a smaller
+ * query, not that the instance is healthy.
+ *
+ * Measured 2026-10-17, full production query, per tile:
+ *
+ *   | instance            | Boston 42.3,-71.1  | Berlin 52.5,13.4   |
+ *   |---------------------|--------------------|--------------------|
+ *   | openstreetmap.fr    | 200 4.4s 7229 ways | 200 5.4s 11544 ways|
+ *   | overpass-api.de     | 502 at capacity    | 504                |
+ *   | kumi.systems        | 500                | 500                |
+ *   | private.coffee      | 500                | 500                |
+ *
+ * kumi.systems and private.coffee returned byte-identical 646-byte Apache 500
+ * pages, so treat them as ONE failure domain, not two fallbacks.
  */
 export const OVERPASS_ENDPOINTS = [
+  'https://overpass.openstreetmap.fr/api/interpreter',
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
 ] as const
@@ -303,6 +324,9 @@ const handler = {
           // diagnosed by curl against prod, and this is the header that would
           // have made it a one-request diagnosis instead of a guess.
           'X-Overpass-Endpoint': endpoint,
+          'X-Overpass-Attempts': attempts
+            .map((a) => `${new URL(a.endpoint).hostname}=${a.status}`)
+            .join(','),
         },
       })
     }
