@@ -137,7 +137,7 @@ describe('computeLts', () => {
     })
   })
 
-  describe('cycleway:right and cycleway:both fallback', () => {
+  describe('per-side cycleway tags', () => {
     it('cycleway:right=track → LTS 1', () => {
       expect(computeLts({ highway: 'secondary', 'cycleway:right': 'track' })).toBe(1)
     })
@@ -145,10 +145,95 @@ describe('computeLts', () => {
     it('cycleway:both=lane, 30 km/h, 2 lanes → LTS 2', () => {
       expect(computeLts({ highway: 'secondary', 'cycleway:both': 'lane', maxspeed: '30', lanes: '2' })).toBe(2)
     })
+
+    it('cycleway:left=track → LTS 1', () => {
+      expect(computeLts({ highway: 'secondary', 'cycleway:left': 'track' })).toBe(1)
+    })
+
+    // Every side is read independently. `cycleway:right=no` is a real and
+    // common tag ("explicitly nothing on this side"), and a `??` chain stops
+    // at it because it is PRESENT — which used to hide the left-side
+    // facility entirely.
+    it('cycleway:left=track is not masked by cycleway:right=no', () => {
+      expect(computeLts({ highway: 'primary', 'cycleway:left': 'track', 'cycleway:right': 'no' })).toBe(1)
+    })
+
+    it('cycleway:right=track is not masked by cycleway=no', () => {
+      expect(computeLts({ highway: 'secondary', cycleway: 'no', 'cycleway:right': 'track' })).toBe(1)
+    })
+
+    it('cycleway:left=lane on a calmed street → LTS 2', () => {
+      expect(computeLts({ highway: 'secondary', 'cycleway:left': 'lane', maxspeed: '30', lanes: '2' })).toBe(2)
+    })
+
+    it('explicit =no on every side scores the same as no cycleway tags at all', () => {
+      expect(computeLts({ highway: 'secondary', cycleway: 'no', 'cycleway:left': 'no', 'cycleway:right': 'no' }))
+        .toBe(computeLts({ highway: 'secondary' }))
+    })
   })
 
   it('unknown highway defaults to LTS 3', () => {
     expect(computeLts({ highway: 'motorway_link' })).toBe(3)
+  })
+})
+
+describe('classifyEdge — per-side cycleway tags', () => {
+  it('reads a left-only separated track as car-free bike infra', () => {
+    const c = classifyEdge({ highway: 'residential', 'cycleway:left': 'track', 'cycleway:right': 'no', maxspeed: '30' })
+    expect(c.carFree).toBe(true)
+    expect(c.bikeInfra).toBe(true)
+    expect(c.pathLevel).toBe('1a')
+  })
+
+  it('reads a left-only painted lane on a calmed street as 2a', () => {
+    const c = classifyEdge({ highway: 'tertiary', 'cycleway:left': 'lane', 'cycleway:right': 'no', maxspeed: '30' })
+    expect(c.carFree).toBe(false)
+    expect(c.bikeInfra).toBe(true)
+    expect(c.pathLevel).toBe('2a')
+  })
+
+  it('a left-only facility is invisible to no side — all four keys agree', () => {
+    const base = { highway: 'residential', maxspeed: '30' }
+    const levels = (['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'] as const).map(
+      (k) => classifyEdge({ ...base, [k]: 'track' }).pathLevel,
+    )
+    expect(new Set(levels).size).toBe(1)
+    expect(levels[0]).toBe('1a')
+  })
+
+  // Sharrows get no stress reduction under LTS, and buildQuery() does not
+  // fetch them. See docs/research/2026-06-26-sf-bike-infra-market-research.md.
+  it('a painted lane above the 2a speed ceiling demotes 2b -> 3, not up to 2a', () => {
+    // The one direction of this fix that is NOT an upgrade, and it is
+    // intentional: before the fix a left-side lane was invisible, so the street
+    // scored as ordinary quiet residential (2b). Seeing the lane on a 50 km/h
+    // street correctly reads it as a painted lane on a road too fast to count
+    // as calmed, which derivePathLevel demotes to 3 under the kid-first
+    // framing. 1 SF and 3 Berlin ways move this way — see
+    // docs/research/2026-10-18-cycleway-left-benchmark-results.md.
+    const street = { highway: 'residential', maxspeed: '50', lanes: '2' }
+    expect(classifyEdge(street).pathLevel).toBe('2b')
+    expect(classifyEdge({ ...street, 'cycleway:left': 'lane', 'cycleway:right': 'no' }).pathLevel).toBe('3')
+  })
+
+  it('share_busway is read on every side, not just the plain key', () => {
+    const base = { highway: 'secondary', maxspeed: '30' }
+    const levels = (['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'] as const).map(
+      (k) => classifyEdge({ ...base, [k]: 'share_busway' }).pathLevel,
+    )
+    expect(new Set(levels).size).toBe(1)
+    expect(levels[0]).toBe('2a')
+  })
+
+  it('cycleway=shared_lane is not bike infrastructure', () => {
+    const c = classifyEdge({ highway: 'residential', cycleway: 'shared_lane', maxspeed: '30' })
+    expect(c.bikeInfra).toBe(false)
+    expect(c.carFree).toBe(false)
+    expect(c.pathLevel).toBe('2b')
+  })
+
+  it('cycleway:left=shared_lane is not bike infrastructure either', () => {
+    expect(classifyEdge({ highway: 'residential', 'cycleway:left': 'shared_lane', maxspeed: '30' }).bikeInfra).toBe(false)
   })
 })
 

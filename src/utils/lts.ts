@@ -323,6 +323,52 @@ function derivePathLevel(params: {
 export type TrafficDensity = 'low' | 'moderate' | 'high'
 
 /**
+ * The OSM `cycleway` values that denote each kind of facility.
+ *
+ * `shared_lane` (a sharrow) is deliberately in none of them: LTS assigns
+ * sharrows no stress reduction and `buildQuery()` does not fetch them. See
+ * docs/research/2026-06-26-sf-bike-infra-market-research.md.
+ *
+ * `buildQuery()`'s value regex fetches exactly the union of these three; keep
+ * it in step if a value is ever added here.
+ */
+export const CYCLEWAY_TRACK_VALUES = ['track', 'opposite_track']
+export const CYCLEWAY_LANE_VALUES = ['lane', 'opposite_lane']
+export const CYCLEWAY_BUSWAY_VALUES = ['share_busway']
+
+/**
+ * True when ANY cycleway side carries one of `values`.
+ *
+ * A facility is tagged either on the plain `cycleway` key or per side
+ * (`:right` / `:left` / `:both`), and every side has to be read independently.
+ * A chain of `??` over those keys does NOT do that: `??` falls through only on
+ * null/undefined, and `cycleway:right=no` — "explicitly nothing on this side",
+ * very commonly tagged — is present, so it short-circuits the chain and masks
+ * a real facility on another side. `buildQuery()` fetches ways tagged on ANY
+ * side, so a side a classifier cannot see is a way we downloaded and then
+ * scored as having no bike infrastructure at all.
+ *
+ * Both classifiers call this — `classifyEdge` for routing and
+ * `classifyOsmTagsToItem` for display — so neither can drift from the other by
+ * reading a different set of sides or a different set of values. They had
+ * drifted exactly that way: the display side tested `opposite_track` /
+ * `opposite_lane` on the plain key only, so a per-side `opposite_track` on a
+ * residential street labelled "Bike path" (preferred for every mode) while
+ * routing scored it a curb-separated track.
+ */
+export function anyCyclewaySide(
+  tags: Record<string, string>,
+  values: readonly string[],
+): boolean {
+  return (
+    values.includes(tags.cycleway) ||
+    values.includes(tags['cycleway:right']) ||
+    values.includes(tags['cycleway:left']) ||
+    values.includes(tags['cycleway:both'])
+  )
+}
+
+/**
  * Classify an edge from its OSM tags. Returns a rich LtsClassification
  * object. The LTS tier is computed per Furth's canonical criteria
  * (https://peterfurth.sites.northeastern.edu/level-of-traffic-stress/);
@@ -331,7 +377,6 @@ export type TrafficDensity = 'low' | 'moderate' | 'high'
  */
 export function classifyEdge(tags: Record<string, string>): LtsClassification {
   const highway = tags.highway ?? ''
-  const cycleway = tags.cycleway ?? tags['cycleway:right'] ?? tags['cycleway:both'] ?? ''
   // 0 = untagged, the sentinel the comparisons below already expect.
   const maxspeed = parseMaxspeedKmh(tags.maxspeed) ?? 0
   const lanes = parseInt(tags.lanes ?? '0', 10)
@@ -349,9 +394,9 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
   const bikeOnFoot = isFootway && (tags.bicycle === 'yes' || tags.bicycle === 'designated')
   const bikeOnPath = isPath && tags.bicycle !== 'no'
   const explicitlyNoMotor = tags.motor_vehicle === 'no' || tags.access === 'no'
-  const hasSeparatedTrack = cycleway === 'track' || cycleway === 'opposite_track'
-  const hasPaintedLane = cycleway === 'lane' || cycleway === 'opposite_lane'
-  const hasBusLane = cycleway === 'share_busway'
+  const hasSeparatedTrack = anyCyclewaySide(tags, CYCLEWAY_TRACK_VALUES)
+  const hasPaintedLane = anyCyclewaySide(tags, CYCLEWAY_LANE_VALUES)
+  const hasBusLane = anyCyclewaySide(tags, CYCLEWAY_BUSWAY_VALUES)
 
   // carFree: the bike is not sharing a traffic surface with motor vehicles.
   // Curb-separated cycle tracks next to a road count (cars are adjacent but
