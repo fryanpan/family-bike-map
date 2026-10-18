@@ -366,11 +366,11 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
   const bikeOnFoot = isFootway && (tags.bicycle === 'yes' || tags.bicycle === 'designated')
   const bikeOnPath = isPath && tags.bicycle !== 'no'
   const explicitlyNoMotor = tags.motor_vehicle === 'no' || tags.access === 'no'
+  // `shared_lane` (a sharrow) is deliberately absent from all three lists:
+  // LTS assigns sharrows no stress reduction and buildQuery() does not fetch
+  // them. See docs/research/2026-06-26-sf-bike-infra-market-research.md.
   const hasSeparatedTrack = anySide('track', 'opposite_track')
   const hasPaintedLane = anySide('lane', 'opposite_lane')
-  // `cycleway=shared_lane` (a sharrow) deliberately matches nothing here: LTS
-  // assigns sharrows no stress reduction and buildQuery() does not fetch them.
-  // See docs/research/2026-06-26-sf-bike-infra-market-research.md.
   const hasBusLane = anySide('share_busway')
 
   // carFree: the bike is not sharing a traffic surface with motor vehicles.
