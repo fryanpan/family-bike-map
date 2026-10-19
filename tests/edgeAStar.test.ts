@@ -159,6 +159,39 @@ describe('edge A* unsignalized major-road crossings (Joanna #4)', () => {
     expect(withJunction.durationS).toBeCloseTo(withoutJunction.durationS, 0)
   })
 
+  it('does not charge at a T-junction where the major road merely ends', () => {
+    // Codex review 2026-10-18. Incidence is not a crossing: a primary that
+    // terminates at the node cannot be crossed there, yet the first version
+    // charged every turn between the other arms because a major way touched
+    // the node. The rider here runs straight through, E-W, on a cycleway.
+    const through = (stub: Record<string, string>): OsmWay[] => [
+      way([[0, -STEP], [0, 0], [0, STEP]]),
+      way([[-STEP, 0], [0, 0]], stub),
+    ]
+    const W: [number, number] = [0, -STEP]
+    const E: [number, number] = [0, STEP]
+    const majorStub = routeAs(MODE, through({ highway: 'primary', maxspeed: '50' }), W, E)!
+    const quietStub = routeAs(MODE, through({ highway: 'residential', maxspeed: '30' }), W, E)!
+    expect(majorStub.durationS).toBeCloseTo(quietStub.durationS, 0)
+  })
+
+  it('does not charge a SEPARATE way running alongside the major road', () => {
+    // Codex review 2026-10-18, and the costlier half of the same bug. A Berlin
+    // Hauptstrasse sidepath is its own OSM way, so excluding "the ways being
+    // traversed" by way id missed it: riding along the sidepath was charged at
+    // every node it shares with the road. Here the cycleway parallels the N-S
+    // road and touches it only at the middle node.
+    const parallel = (road: Record<string, string>): OsmWay[] => [
+      way([[-STEP, 0], [0, 0], [STEP, 0]], road),
+      way([[-STEP, STEP / 10], [0, 0], [STEP, STEP / 10]]),
+    ]
+    const S: [number, number] = [-STEP, STEP / 10]
+    const N: [number, number] = [STEP, STEP / 10]
+    const alongMajor = routeAs('carrying-kid', parallel({ highway: 'primary', maxspeed: '50' }), S, N)!
+    const alongQuiet = routeAs('carrying-kid', parallel({ highway: 'residential', maxspeed: '30' }), S, N)!
+    expect(alongMajor.durationS).toBeCloseTo(alongQuiet.durationS, 0)
+  })
+
   it('exempts walking edges, so the bridge-walk escape survives', () => {
     // kid-starting-out rejects the cycleway's crossing of a primary only via
     // bridge-walk; charging the gap wait on a walked edge would remove the
