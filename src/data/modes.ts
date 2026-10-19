@@ -324,7 +324,17 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
       'elevated sidewalk paths — they\'re narrow and pedestrian-heavy, which kills the ' +
       '30 km/h flow.',
     acceptedLevels: new Set<PathLevel>(['1a', '1b', '2a', '2b', '3']),
-    levelMultipliers: {},
+    // Training accepts everything down to level 3, and with no multipliers
+    // every accepted tier cost the same per metre — edge cost is
+    // distance/speed, so A* just took the shortest path. On a long ride
+    // that means a painted lane along a 50 km/h major road beats a
+    // slightly longer bike path, which is backwards: this rider wants
+    // flow, and flow is better off the arterial. Penalising 3 (major
+    // road) and 2b (residential, no bike infra) leaves 1a/1b/2a at par
+    // and buys the bike-infra tiers a modest distance budget. Shape
+    // mirrors kid-traffic-savvy's 1.5x nudge one tier down.
+    // Joanna 2026-04-29, from the Rudower Chaussee corridor.
+    levelMultipliers: { '3': 1.5, '2b': 1.2 },
     roughSurfaceMultiplier: 5.0,
     rejectPathTypes: new Set(['Elevated sidewalk path']),
     surfaceOk: SMOOTH_ONLY,
