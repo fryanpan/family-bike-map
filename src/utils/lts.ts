@@ -287,6 +287,36 @@ export interface LtsClassification {
 }
 
 /**
+ * Assumed speed for a road class when the way carries no `maxspeed`.
+ *
+ * Null for car-free classes (cycleway, path, footway, pedestrian): they have
+ * no motor traffic to assume a speed for, and `derivePathLevel` treats a null
+ * speed as "no evidence this is fast" rather than guessing.
+ *
+ * Exported because the arterial-track demote needs the speed of a road it is
+ * NOT classifying — a sidepath's parent, named by `is_sidepath:of` — and a
+ * second copy of this table is how routing and display drift apart.
+ */
+export function speedDefaultForClass(highway: string): number | null {
+  switch (highway) {
+    case 'living_street': return 15
+    case 'residential': return 30
+    case 'unclassified': return 30
+    // A tertiary is a minor connector, not an arterial. Guessing 50 here put
+    // every untagged tertiary above the 2a ceiling, which silently deleted
+    // whole painted-lane corridors from the overlay in cities that don't tag
+    // maxspeed densely (SF: Folsom St, 17th St). 40 is the more honest guess
+    // for an urban connector; secondary and above keep 50+ because those
+    // genuinely are arterials.
+    case 'tertiary': return 40
+    case 'secondary': return 50
+    case 'primary': return 60
+    case 'trunk': return 80
+    default: return null
+  }
+}
+
+/**
  * Derive pathLevel from the other LtsClassification fields. Captures our two
  * departures from strict Furth:
  *   - Quiet residential (LTS 1 per Furth) demotes to '2b' when it has no bike
@@ -369,6 +399,67 @@ export function anyCyclewaySide(
 }
 
 /**
+ * True when this way is a physically separated bike track running beside motor
+ * traffic faster than a calmed street.
+ *
+ * Such a track is car-free between intersections and not at any of them: every
+ * driveway, turn-mixing zone and right-hook puts the cars back in the bike's
+ * path, and on an arterial those come every block. Joanna's point on
+ * 2026-04-29 was that a parent reads "Bike path" as "my kid is away from
+ * traffic", and beside 50 km/h traffic that is a promise the infrastructure
+ * does not keep. `classifyEdge` therefore scores it 2a — bike infrastructure
+ * on a street, the same tier as a painted lane on a calmed road — rather than
+ * 1a, and `classifyOsmTagsToItem` labels it "Protected bike lane on major
+ * road" rather than "Bike path".
+ *
+ * Both of those callers ask THIS function rather than re-deriving the test.
+ * The tier and the label have to agree: a way scored 2a and labelled "Painted
+ * bike lane on quiet street" would be wrong twice over, since it is neither
+ * painted nor on a quiet street.
+ *
+ * The speed line is QUIET_STREET_MAX_KMH, the same constant that decides
+ * whether a painted lane is 2a or 3, so this file holds one definition of
+ * "calmed" rather than two that can drift. Measured on live OSM 2026-10-18
+ * (scripts/diag-arterial-pbl-demote.ts): the first draft hardcoded `> 30`,
+ * which is identical to `> 40` in Berlin (it posts 30 or 50 and nothing
+ * between) but in SF would catch 380 ways instead of 115 — the extra 265
+ * being 20 mph and 25 mph streets that this file calls calmed everywhere else.
+ *
+ * Two tagging styles reach the same infrastructure, and the parent road's
+ * speed comes from a different place in each:
+ *
+ *   - Inline: `cycleway:right=track` on the motor road itself. The way's own
+ *     `highway` and `maxspeed` describe the traffic beside the lane.
+ *   - Sidepath: a standalone `highway=cycleway` with `is_sidepath=yes`, which
+ *     is how Berlin maps its classic Radweg alongside a Hauptstrasse. Its own
+ *     tags say nothing about the parent — but `is_sidepath:of` names the
+ *     parent's road CLASS, which 469 of Berlin's 685 sidepath ways carry, so
+ *     the class default gives its speed. None of those 685 carries a
+ *     `maxspeed` of its own, and it would be the wrong number if it did: a
+ *     cycleway's `maxspeed` limits BIKES, not the cars next to them.
+ *
+ * A sidepath with no `is_sidepath:of` returns false. We cannot tell what it
+ * runs beside from tags, and joining it to its parent needs geometry (the same
+ * shape as the Mandela Parkway median in docs/process/learnings.md).
+ */
+export function isSeparatedTrackBesideFastTraffic(tags: Record<string, string>): boolean {
+  const highway = tags.highway ?? ''
+  const parentClass = tags['is_sidepath:of'] ?? null
+  const isSidepath = tags.is_sidepath === 'yes' || parentClass != null
+
+  if (isSidepath) {
+    // Never read the sidepath's own maxspeed — it limits bikes, not cars.
+    const parentSpeed = parentClass != null ? speedDefaultForClass(parentClass) : null
+    return parentSpeed != null && parentSpeed > QUIET_STREET_MAX_KMH
+  }
+
+  const isArterial = highway === 'primary' || highway === 'secondary' || highway === 'tertiary'
+  if (!isArterial || !anyCyclewaySide(tags, CYCLEWAY_TRACK_VALUES)) return false
+  const speedKmh = parseMaxspeedKmh(tags.maxspeed) ?? speedDefaultForClass(highway)
+  return speedKmh != null && speedKmh > QUIET_STREET_MAX_KMH
+}
+
+/**
  * Classify an edge from its OSM tags. Returns a rich LtsClassification
  * object. The LTS tier is computed per Furth's canonical criteria
  * (https://peterfurth.sites.northeastern.edu/level-of-traffic-stress/);
@@ -434,26 +525,7 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
     hasBusLane
 
   // Speed: from maxspeed tag if present, otherwise from road-class defaults.
-  const speedKmh: number | null = (() => {
-    if (maxspeed > 0) return maxspeed
-    if (isCycleway || isPath || isFootway || isPedestrian) return null
-    if (isLivingStreet) return 15
-    if (isResidential) return 30
-    switch (highway) {
-      case 'unclassified': return 30
-      // A tertiary is a minor connector, not an arterial. Guessing 50 here
-      // put every untagged tertiary above the 2a ceiling, which silently
-      // deleted whole painted-lane corridors from the overlay in cities that
-      // don't tag maxspeed densely (SF: Folsom St, 17th St). 40 is the more
-      // honest guess for an urban connector; secondary and above keep 50+
-      // because those genuinely are arterials.
-      case 'tertiary': return 40
-      case 'secondary': return 50
-      case 'primary': return 60
-      case 'trunk': return 80
-      default: return null
-    }
-  })()
+  const speedKmh: number | null = maxspeed > 0 ? maxspeed : speedDefaultForClass(highway)
 
   // Traffic density heuristic from road class. Null for car-free infra.
   const trafficDensity: TrafficDensity | null = (() => {
@@ -515,7 +587,12 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
     return 3 // default for unknown
   })()
 
-  const pathLevel = derivePathLevel({ lts, carFree, bikePriority, bikeInfra, speedKmh })
+  const segmentPathLevel = derivePathLevel({ lts, carFree, bikePriority, bikeInfra, speedKmh })
+
+  // Tier and label both hang off this one question — see
+  // isSeparatedTrackBesideFastTraffic.
+  const pathLevel: PathLevel =
+    segmentPathLevel === '1a' && isSeparatedTrackBesideFastTraffic(tags) ? '2a' : segmentPathLevel
 
   return { lts, pathLevel, carFree, bikePriority, bikeInfra, speedKmh, trafficDensity, surface, smoothness }
 }

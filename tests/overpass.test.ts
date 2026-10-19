@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, AdaptiveConcurrencyGate, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
 import { isEnrichedWay } from '../src/utils/types'
+import { classifyEdge } from '../src/utils/lts'
 
 // Minimal LatLngBounds stub
 function makeBounds(south: number, west: number, north: number, east: number) {
@@ -690,5 +691,49 @@ describe('classifyOsmTagsToItem — untagged-speed painted lanes (Folsom St, 17t
   it('still names a 30 mph arterial lane a major-road lane', () => {
     const arterial = { highway: 'secondary', cycleway: 'lane', maxspeed: '30 mph', lanes: '2' }
     expect(classifyOsmTagsToItem(arterial, 'kid-traffic-savvy')).toBe('Painted bike lane on major road')
+  })
+})
+
+// ── Arterial separated-track demote: the label must match the tier ──────────
+
+describe('classifyOsmTagsToItem — demoted arterial tracks keep an honest label', () => {
+  it('labels a demoted Hauptstrasse track "Protected bike lane on major road", not a painted lane', () => {
+    // classifyEdge scores this 2a. The default 2a label is "Painted bike lane
+    // on quiet street", which would be wrong twice over for a curb-separated
+    // track beside 50 km/h traffic.
+    const way = { highway: 'secondary', 'cycleway:right': 'track', maxspeed: '50' }
+    expect(classifyEdge(way).pathLevel).toBe('2a')
+    expect(classifyOsmTagsToItem(way, 'carrying-kid')).toBe('Protected bike lane on major road')
+  })
+
+  it('labels a demoted Berlin sidepath the same way', () => {
+    const way = { highway: 'cycleway', is_sidepath: 'yes', 'is_sidepath:of': 'secondary' }
+    expect(classifyEdge(way).pathLevel).toBe('2a')
+    expect(classifyOsmTagsToItem(way, 'carrying-kid')).toBe('Protected bike lane on major road')
+  })
+
+  it('still calls a real painted lane on a calmed street a painted lane', () => {
+    const way = { highway: 'residential', cycleway: 'lane', maxspeed: '30' }
+    expect(classifyEdge(way).pathLevel).toBe('2a')
+    expect(classifyOsmTagsToItem(way, 'carrying-kid')).toBe('Painted bike lane on quiet street')
+  })
+
+  it('keeps the label on a calmed-tertiary track, which stays 1a', () => {
+    // The demote does not fire (class default 40 is AT the ceiling), so this
+    // way is still car-free — but it is the same infrastructure, so the label
+    // does not change across the tier boundary.
+    const way = { highway: 'tertiary', 'cycleway:right': 'track' }
+    expect(classifyEdge(way).pathLevel).toBe('1a')
+    expect(classifyOsmTagsToItem(way, 'carrying-kid')).toBe('Protected bike lane on major road')
+  })
+
+  it('agrees with the routing tier on every side and both track values', () => {
+    for (const side of ['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'] as const) {
+      for (const value of ['track', 'opposite_track']) {
+        const way = { highway: 'secondary', maxspeed: '50', [side]: value }
+        expect(classifyEdge(way).pathLevel).toBe('2a')
+        expect(classifyOsmTagsToItem(way, 'carrying-kid')).toBe('Protected bike lane on major road')
+      }
+    }
   })
 })

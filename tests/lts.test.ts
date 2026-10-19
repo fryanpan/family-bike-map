@@ -429,3 +429,84 @@ describe('pathLevel 2a — calmed-street ceiling', () => {
     expect(classifyEdge({ highway: 'secondary', cycleway: 'lane' }).pathLevel).toBe('3')
   })
 })
+
+// ── Arterial separated-track demote (Joanna 2026-04-29, research item #3) ───
+
+describe('classifyEdge — separated track beside fast traffic demotes 1a → 2a', () => {
+  it('demotes an inline track on a 50 km/h Hauptstrasse', () => {
+    const way = { highway: 'secondary', 'cycleway:right': 'track', maxspeed: '50' }
+    expect(classifyEdge(way).pathLevel).toBe('2a')
+  })
+
+  it('leaves the same track alone when the street is calmed', () => {
+    const way = { highway: 'secondary', 'cycleway:right': 'track', maxspeed: '30' }
+    expect(classifyEdge(way).pathLevel).toBe('1a')
+  })
+
+  it('uses the calmed ceiling, not a second threshold — 25 mph stays 1a, 30 mph demotes', () => {
+    // The first draft of this rule hardcoded `maxspeed > 30`, which with
+    // correct unit parsing demotes a 25 mph (40 km/h) street. Every other
+    // rule in this file calls 25 mph calmed; this pins the two together.
+    const base = { highway: 'secondary', 'cycleway:right': 'track' }
+    expect(classifyEdge({ ...base, maxspeed: '20 mph' }).pathLevel).toBe('1a')
+    expect(classifyEdge({ ...base, maxspeed: '25 mph' }).pathLevel).toBe('1a')
+    expect(classifyEdge({ ...base, maxspeed: '30 mph' }).pathLevel).toBe('2a')
+  })
+
+  it('leaves an untagged tertiary alone and demotes an untagged secondary', () => {
+    // Class defaults: tertiary 40 (calmed), secondary 50 (arterial).
+    expect(classifyEdge({ highway: 'tertiary', 'cycleway:right': 'track' }).pathLevel).toBe('1a')
+    expect(classifyEdge({ highway: 'secondary', 'cycleway:right': 'track' }).pathLevel).toBe('2a')
+  })
+
+  it('reads the track on every side, including opposite_track', () => {
+    for (const side of ['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'] as const) {
+      for (const value of ['track', 'opposite_track']) {
+        expect(classifyEdge({ highway: 'secondary', maxspeed: '50', [side]: value }).pathLevel).toBe('2a')
+      }
+    }
+  })
+
+  it('demotes a Berlin sidepath by its parent class, which is_sidepath:of names', () => {
+    expect(classifyEdge({ highway: 'cycleway', is_sidepath: 'yes', 'is_sidepath:of': 'secondary' }).pathLevel).toBe('2a')
+    expect(classifyEdge({ highway: 'cycleway', is_sidepath: 'yes', 'is_sidepath:of': 'primary' }).pathLevel).toBe('2a')
+  })
+
+  it('leaves a sidepath of a calmed parent alone', () => {
+    expect(classifyEdge({ highway: 'cycleway', is_sidepath: 'yes', 'is_sidepath:of': 'residential' }).pathLevel).toBe('1a')
+    expect(classifyEdge({ highway: 'cycleway', is_sidepath: 'yes', 'is_sidepath:of': 'tertiary' }).pathLevel).toBe('1a')
+  })
+
+  it('leaves a sidepath with no parent class alone rather than guessing', () => {
+    // 216 of Berlin's 685 sidepath ways are tagged this way. We cannot tell
+    // what they run beside from tags, so they keep the car-free tier.
+    expect(classifyEdge({ highway: 'cycleway', is_sidepath: 'yes' }).pathLevel).toBe('1a')
+    expect(classifyEdge({ highway: 'cycleway', is_sidepath: 'yes', 'is_sidepath:of:name': 'Hauptstr.' }).pathLevel).toBe('1a')
+  })
+
+  it('never reads a sidepath’s own maxspeed as the parent’s speed', () => {
+    // A cycleway's maxspeed limits bikes, not the cars beside it. No Berlin
+    // sidepath way carries one today, but a 50 here must not demote.
+    expect(classifyEdge({ highway: 'cycleway', is_sidepath: 'yes', maxspeed: '50' }).pathLevel).toBe('1a')
+  })
+
+  it('leaves a standalone cycleway alone — it is not a sidepath', () => {
+    expect(classifyEdge({ highway: 'cycleway' }).pathLevel).toBe('1a')
+    expect(classifyEdge({ highway: 'cycleway', maxspeed: '50' }).pathLevel).toBe('1a')
+  })
+
+  it('only ever moves 1a, never a tier that was already lower', () => {
+    // A painted lane on a 50 km/h road is 3; the demote must not touch it.
+    expect(classifyEdge({ highway: 'secondary', cycleway: 'lane', maxspeed: '50' }).pathLevel).toBe('3')
+    // A Fahrradstrasse is 1b and stays there.
+    expect(classifyEdge({ highway: 'residential', bicycle_road: 'yes' }).pathLevel).toBe('1b')
+  })
+
+  it('leaves carFree true — the demote is about the tier, not the surface', () => {
+    // The bike still is not sharing the traffic surface. carFreeBonus and the
+    // bridge-walk rule both read carFree, and neither should change here.
+    const cls = classifyEdge({ highway: 'secondary', 'cycleway:right': 'track', maxspeed: '50' })
+    expect(cls.pathLevel).toBe('2a')
+    expect(cls.carFree).toBe(true)
+  })
+})
