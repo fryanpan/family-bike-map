@@ -37,13 +37,20 @@ Three corrections to the 2026-04-29 draft of this change, each measured rather
 than assumed:
 
 - **The speed line is the existing `QUIET_STREET_MAX_KMH` (40), not a hardcoded
-  30.** The draft predates unit-aware `maxspeed` parsing, so `parseInt('25 mph')`
-  gave it 25 and its `> 30` test barely fired in SF. With correct parsing a
-  hardcoded 30 catches **380** SF ways instead of 115 — the extra 265 are 20 mph
-  and 25 mph streets that this codebase calls calmed everywhere else. Berlin is
-  unaffected either way: its streets are posted 30 or 50 and nothing sits
-  between, so `> 30` and `> 40` select identically there. Reusing the existing
-  constant also avoids a second threshold that can drift from the first.
+  30.** Measured with today's unit-aware parsing, a hardcoded 30 catches **380**
+  SF ways instead of 115 — the extra 265 are 20 mph and 25 mph streets that this
+  codebase calls calmed everywhere else. Berlin is unaffected either way: its
+  streets are posted 30 or 50 and nothing sits between, so `> 30` and `> 40`
+  select identically there. Reusing the existing constant also avoids a second
+  threshold that can drift from the first.
+
+  The draft's `> 30` also predates `parseMaxspeedKmh`, so `parseInt('25 mph')`
+  gave it 25. What that did to the draft's own SF numbers is not something this
+  run measures, and the obvious guess is wrong in an instructive way: under
+  `parseInt` + `> 30` a 30 mph street reads 30 and is **not** demoted, while
+  under correct parsing it reads 48 km/h and **is**. So the draft demoted a
+  *smaller* SF set than this branch does, which cannot explain the draft
+  reporting a *larger* SF regression. See the baseline note below.
 - **A sidepath's speed comes from its parent road's class, via `is_sidepath:of`.**
   Never from its own `maxspeed` — a cycleway's `maxspeed` limits bikes, not the
   adjacent cars — and **no sidepath way in the Berlin corpus (0/685) carries one
@@ -140,19 +147,43 @@ Rudower Chaussee 12, through the production Worker proxy:
 kid-traffic-savvy's share does not move but its route does: 2.56 km shifts onto
 protected lanes, within the same preferred set.
 
-## Three figures from the board decision have moved
+## The 2026-04-29 figures are not differenceable against these
 
-The review item Bryan answered quoted the 2026-04-29 benchmark file. Measured
-against current `main`, three of its numbers are different. Two moved in his
-favour and one against; "Ship all" is still satisfied, but the numbers under the
-decision are not the ones he was shown.
+The review item Bryan answered quoted
+`docs/research/2026-04-29-routing-benchmark-after-joanna-routing-changes.md`.
+That file measured a different implementation of change #3 against a `main` six
+months older — since then `main` gained the BRouter-style ascent cost,
+`carFreeBonus`, per-side cycleway reads and a 40 km/h 2a ceiling, each of which
+moves preferred-% on its own. **Its deltas and these cannot be subtracted**, and
+nothing below should be read as "the change got gentler." Both columns are
+printed because the decision was made on the left one.
 
-| What the item said | Measured now |
-|---|---|
-| Berlin kid-starting-out −39pp, kid-confident −20pp | **−20pp and −12pp** — about half |
-| SF −7pp and −9pp | **−1pp and −1pp** — the 2026-04-29 draft's `parseInt('25 mph')` bug meant its demote barely fired in SF, so that column never described the rule in either direction |
-| "roughly 40% of Berlin route distance converts to walk the bike" for kid-starting-out | **65% of distance is walked**, up from 39% — a 26pp conversion. This is the one that moved against him, and it is the cost the decision accepted |
-| training on Joanna's Rudower route: 25% → 79.3% preferred | **64.3% → 68.3%.** The 25% baseline was 6-month-old `main`; the corridor has since improved on its own, so the change's own contribution there is +4pp, not +54pp |
+| Figure | 2026-04-29 file | This run |
+|---|---|---|
+| Berlin kid-starting-out preferred | −39pp | **−20pp** |
+| Berlin kid-confident preferred | −20pp | **−12pp** |
+| SF kid-starting-out / kid-confident | −7pp / −9pp | **−1pp / −1pp** |
+| Berlin kid-starting-out walk share | "roughly 40% of route distance" | **65% of distance**, from a 39% baseline |
+| training on Joanna's Rudower route | 25% → 79.3% preferred | **64.3% → 68.3%** |
+
+Two of these matter regardless of which baseline they sit on.
+
+**The walk share.** The decision accepted "roughly 40% of Berlin route distance
+becomes walking" for kid-starting-out. The measured figure on this branch is
+**65%**, with average trip time going 171 → 222 min. Whatever the old baseline
+was, 65% is what ships, and it is two thirds larger than the number the decision
+was made at. This is the one figure that moved against the decision.
+
+**The Rudower gain.** Here the gap has a measured cause rather than an inferred
+one: re-running the same spot-check on this branch's base gives training 64.3%
+preferred on that corridor, so the 25% in the old file is six months of
+unrelated improvement, not something this change delivers. Its own contribution
+on Joanna's corridor is **+4pp**, not +54pp.
+
+For the SF column I have no explanation that the evidence supports, and the
+mechanism I first reached for is ruled out above. The honest statement is that
+the old SF figures were produced by a different rule against a different
+baseline and I do not know what drove them.
 
 ## Limits of this run
 
