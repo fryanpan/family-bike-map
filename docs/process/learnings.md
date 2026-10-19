@@ -115,6 +115,8 @@ Technical discoveries that should persist across sessions.
 
 ## Stacked PRs
 
+- **A PR based on another branch gets NO CI, and nothing on the PR page says so.** `.github/workflows/ci.yml` triggers on `pull_request: branches: [main]`, which filters on the **base** branch, so a PR stacked on a feature branch never runs the test job — `statusCheckRollup` comes back empty rather than failing, and `mergeStateStatus` reads `UNKNOWN`. An empty check list looks like "checks haven't started yet" and stays that way forever. Run the suite and the typecheck locally and say in the PR body that CI did not run and why; the first CI run happens when the PR is retargeted to `main` after its base merges.
+
 - **Squash-merging the base branch makes a stacked PR DIRTY**, not CLEAN. GitHub sees the squash commit on main as a brand-new SHA that doesn't match the original commits in the stacked branch, and reports conflicts for every file both touch. The fix is to merge `origin/main` into the feature branch, resolve conflicts by `git checkout --ours` (the stacked branch's content supersedes the squashed base by definition), commit the merge, and push. This was how PR #111 was cleanly merged after PR #110 squashed.
 
 ## Render-check harness (scripts/render-checks/)
