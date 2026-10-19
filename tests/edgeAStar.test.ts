@@ -91,3 +91,86 @@ describe('edge A* signal waits', () => {
     expect(straightSig.turnCount).toBe(0)
   })
 })
+
+describe('edge A* unsignalized major-road crossings (Joanna #4)', () => {
+  const STEP = 0.001
+
+  function routeAs(mode: string, ways: OsmWay[], from: [number, number], to: [number, number]) {
+    const p = getDefaultPreferredItems(mode)
+    const graph = buildRoutingGraph(ways, mode, p, undefined, null, null, null, undefined, null)
+    return routeOnGraph(graph, from[0], from[1], to[0], to[1], mode, p)
+  }
+
+  /** A cycleway running N–S across one E–W road. */
+  function crossing(crossTags: Record<string, string>): OsmWay[] {
+    return [
+      way([[-STEP, 0], [0, 0], [STEP, 0]]),
+      way([[0, -STEP], [0, 0], [0, STEP]], crossTags),
+    ]
+  }
+  const A: [number, number] = [-STEP, 0]
+  const B: [number, number] = [STEP, 0]
+
+  it('charges the crossing wait at an unsignalized primary', () => {
+    const quiet = routeAs(MODE, crossing({ highway: 'residential', maxspeed: '30' }), A, B)!
+    const major = routeAs(MODE, crossing({ highway: 'primary', maxspeed: '50' }), A, B)!
+    // kid-confident unsignalizedMajorCrossingSec = 50
+    expect(major.durationS - quiet.durationS).toBeCloseTo(50, 0)
+  })
+
+  it('charges the signal wait instead when a signal is mapped there', () => {
+    const ways = [...crossing({ highway: 'primary', maxspeed: '50' }), signalAt(0, 0)]
+    const quiet = routeAs(MODE, crossing({ highway: 'residential', maxspeed: '30' }), A, B)!
+    const signalled = routeAs(MODE, ways, A, B)!
+    // Signal through-wait is 15 for kid-confident, not the 50 s gap wait —
+    // a mapped control means the rider is not waiting for a gap.
+    expect(signalled.durationS - quiet.durationS).toBeCloseTo(15, 0)
+  })
+
+  it('does not charge for crossing a secondary', () => {
+    // Berlin's ordinary Hauptstrasse. Charging every unsignalised one would
+    // penalise the whole grid rather than the hostile crossings.
+    const quiet = routeAs(MODE, crossing({ highway: 'residential', maxspeed: '30' }), A, B)!
+    const secondary = routeAs(MODE, crossing({ highway: 'secondary', maxspeed: '50' }), A, B)!
+    expect(secondary.durationS).toBeCloseTo(quiet.durationS, 0)
+  })
+
+  it('does not charge for crossing a calmed primary', () => {
+    const quiet = routeAs(MODE, crossing({ highway: 'residential', maxspeed: '30' }), A, B)!
+    const slow = routeAs(MODE, crossing({ highway: 'primary', maxspeed: '30' }), A, B)!
+    expect(slow.durationS).toBeCloseTo(quiet.durationS, 0)
+  })
+
+  it('does not charge a rider travelling ALONG the major road', () => {
+    // A primary with a separated track is 2a after the arterial demote, so
+    // carrying-kid rides it. Passing its own junction nodes must not cost
+    // 50 s a block — that is riding the arterial, not crossing it.
+    const arterial = { highway: 'primary', maxspeed: '50', 'cycleway:right': 'track' }
+    const along: OsmWay[] = [
+      way([[0, 0], [0, STEP], [0, 2 * STEP]], arterial),
+      // A side street meeting it mid-way, making the middle node a junction.
+      way([[0, STEP], [STEP, STEP]], { highway: 'residential', maxspeed: '30' }),
+    ]
+    const bare: OsmWay[] = [
+      way([[0, 0], [0, STEP], [0, 2 * STEP]], arterial),
+    ]
+    const withJunction = routeAs('carrying-kid', along, [0, 0], [0, 2 * STEP])!
+    const withoutJunction = routeAs('carrying-kid', bare, [0, 0], [0, 2 * STEP])!
+    expect(withJunction.durationS).toBeCloseTo(withoutJunction.durationS, 0)
+  })
+
+  it('exempts walking edges, so the bridge-walk escape survives', () => {
+    // kid-starting-out rejects the cycleway's crossing of a primary only via
+    // bridge-walk; charging the gap wait on a walked edge would remove the
+    // escape rather than shape the route.
+    // The N–S way is a secondary, which kid-starting-out rejects, so both
+    // legs are bridge-walked. The only difference between the two routes is
+    // the class of the road being crossed.
+    const walkedWay = () => way([[-STEP, 0], [0, 0], [STEP, 0]], { highway: 'secondary', maxspeed: '50' })
+    const acrossMajor = [walkedWay(), way([[0, -STEP], [0, 0], [0, STEP]], { highway: 'primary', maxspeed: '50' })]
+    const acrossQuiet = [walkedWay(), way([[0, -STEP], [0, 0], [0, STEP]], { highway: 'residential', maxspeed: '30' })]
+    const major = routeAs('kid-starting-out', acrossMajor, A, B)!
+    const quiet = routeAs('kid-starting-out', acrossQuiet, A, B)!
+    expect(major.durationS).toBeCloseTo(quiet.durationS, 0)
+  })
+})

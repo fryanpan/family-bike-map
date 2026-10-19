@@ -23,6 +23,7 @@
 import type { Graph, Link, NodeId } from 'ngraph.graph'
 import type { ModeRule } from '../data/modes'
 import type { NodeData, EdgeData } from './clientRouter'
+import { parseMaxspeedKmh, speedDefaultForClass } from '../utils/lts'
 
 export interface EdgeSearchResult {
   /** Links in path order, start → end. */
@@ -54,6 +55,49 @@ export function turnDelta(bearingIn: number, bearingOut: number): number {
 }
 
 // ── Junction detection ──────────────────────────────────────────────────────
+
+// ── Unsignalized major-road crossings ───────────────────────────────────────
+
+// The road classes a family rider has to cross rather than ride (Joanna
+// 2026-04-29, research item #4). Secondary and tertiary are excluded on
+// purpose: in Berlin a secondary is an ordinary Hauptstrasse with a signal at
+// most junctions, and charging every unsignalised one would penalise the whole
+// grid rather than the genuinely hostile crossings.
+const MAJOR_CROSSING_CLASSES = new Set(['primary', 'trunk'])
+const MAJOR_CROSSING_MIN_KMH = 50
+
+/** Speed of a way for the crossing test: posted, else the class default. Uses
+ *  the same two primitives as classifyEdge so there is no second speed table
+ *  to drift from. */
+function waySpeedKmh(tags: Record<string, string>): number | null {
+  return parseMaxspeedKmh(tags.maxspeed) ?? speedDefaultForClass(tags.highway ?? '')
+}
+
+/** Way ids of the major roads incident to each node, for nodes that have at
+ *  least one. A node missing from the map has none. Cached per graph: the
+ *  graph is rebuilt whenever the tile set or mode changes. */
+const majorWaysCache = new WeakMap<Graph<NodeData, EdgeData>, Map<NodeId, Set<number>>>()
+
+function majorWaysByNode(graph: Graph<NodeData, EdgeData>): Map<NodeId, Set<number>> {
+  const cached = majorWaysCache.get(graph)
+  if (cached) return cached
+  const out = new Map<NodeId, Set<number>>()
+  graph.forEachNode((node) => {
+    const links = graph.getLinks(node.id)
+    if (!links) return
+    for (const link of links) {
+      const tags = link.data.wayTags
+      if (!MAJOR_CROSSING_CLASSES.has(tags.highway ?? '')) continue
+      const speed = waySpeedKmh(tags)
+      if (speed == null || speed < MAJOR_CROSSING_MIN_KMH) continue
+      let set = out.get(node.id)
+      if (!set) { set = new Set(); out.set(node.id, set) }
+      set.add(link.data.wayId)
+    }
+  })
+  majorWaysCache.set(graph, out)
+  return out
+}
 
 // Unique-neighbour count per node, cached per graph instance. A node is a
 // junction (a place where a navigating human makes a decision) iff it has
@@ -190,6 +234,30 @@ export function edgeAStar(
     } else if (node.data.control === 'stop' && rule.stopSignWaitSec) {
       cost += rule.stopSignWaitSec
       dur += rule.stopSignWaitSec
+    } else if (rule.unsignalizedMajorCrossingSec && !l1.data.isWalking && !l2.data.isWalking) {
+      // No control node here. If a major road meets this junction and the
+      // rider is on neither side of it, they are crossing it on a gap in
+      // 50 km/h traffic — real time, and the reason to detour a block to a
+      // signal. The two ways being traversed are excluded because a rider
+      // ALONG an arterial passes its own nodes every block and must not be
+      // charged for crossing itself.
+      //
+      // Walking edges are exempt. A bridge-walk is the designed escape when
+      // an edge is too stressful to ride, and charging it the same crossing
+      // wait removes the escape instead of shaping the route — the 2026-04-29
+      // first cut did exactly that and deepened the regression it was meant
+      // to avoid.
+      const major = majorWaysByNode(graph).get(nodeId)
+      if (major) {
+        let crossing = false
+        for (const wayId of major) {
+          if (wayId !== l1.data.wayId && wayId !== l2.data.wayId) { crossing = true; break }
+        }
+        if (crossing) {
+          cost += rule.unsignalizedMajorCrossingSec
+          dur += rule.unsignalizedMajorCrossingSec
+        }
+      }
     }
 
     // Turn costs. A bend is an *instruction* ("turn onto X") when the way
