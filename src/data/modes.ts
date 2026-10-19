@@ -140,6 +140,19 @@ export interface ModeRule {
 
   // Expected wait at a highway=stop node, any direction. Cost AND ETA.
   stopSignWaitSec?: number
+
+  // Expected wait to CROSS a primary/trunk road at >= 50 km/h where OSM maps
+  // no traffic_signals or stop node (Joanna 2026-04-29, research item #4).
+  // The signal and stop waits above charge for a control that exists; this
+  // charges for one that does not. Waiting for a gap in 50 km/h traffic is
+  // real time, so it lands on cost AND ETA, and it is what makes the router
+  // detour a block to a signalised crossing instead.
+  //
+  // Only charged when the rider genuinely crosses: if the major road is one
+  // of the two ways being traversed, they are riding ALONG it, not across it,
+  // and riding an arterial must not cost 50 s a block. Absent means zero, so
+  // a mode opts in.
+  unsignalizedMajorCrossingSec?: number
 }
 
 // Surfaces universally OK for paved riding across all modes.
@@ -207,6 +220,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     turnPenaltySec: 12,
     signalWaitSec: { through: 15, left: 45 },
     stopSignWaitSec: 5,
+    // A kid this age needs a big gap and an adult's full attention; the
+    // router should spend a block finding a signal instead.
+    unsignalizedMajorCrossingSec: 50,
   },
 
   'kid-confident': {
@@ -241,6 +257,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     turnPenaltySec: 12,
     signalWaitSec: { through: 15, left: 45 },
     stopSignWaitSec: 5,
+    // Same gap requirement as starting-out — judgment, not bike handling,
+    // is the limit here.
+    unsignalizedMajorCrossingSec: 50,
   },
 
   'kid-traffic-savvy': {
@@ -276,6 +295,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     turnPenaltySec: 8,
     signalWaitSec: { through: 12, left: 30 },
     stopSignWaitSec: 4,
+    // Reads traffic and takes a smaller gap, but still an unprotected
+    // crossing of a 50 km/h road.
+    unsignalizedMajorCrossingSec: 30,
   },
 
   'carrying-kid': {
@@ -312,6 +334,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     turnPenaltySec: 8,
     signalWaitSec: { through: 12, left: 30 },
     stopSignWaitSec: 4,
+    // Adult judgment, but a loaded bike accelerates slowly across the
+    // lanes, so the gap has to be larger than an unloaded rider's.
+    unsignalizedMajorCrossingSec: 30,
   },
 
   training: {
@@ -324,7 +349,17 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
       'elevated sidewalk paths — they\'re narrow and pedestrian-heavy, which kills the ' +
       '30 km/h flow.',
     acceptedLevels: new Set<PathLevel>(['1a', '1b', '2a', '2b', '3']),
-    levelMultipliers: {},
+    // Training accepts everything down to level 3, and with no multipliers
+    // every accepted tier cost the same per metre — edge cost is
+    // distance/speed, so A* just took the shortest path. On a long ride
+    // that means a painted lane along a 50 km/h major road beats a
+    // slightly longer bike path, which is backwards: this rider wants
+    // flow, and flow is better off the arterial. Penalising 3 (major
+    // road) and 2b (residential, no bike infra) leaves 1a/1b/2a at par
+    // and buys the bike-infra tiers a modest distance budget. Shape
+    // mirrors kid-traffic-savvy's 1.5x nudge one tier down.
+    // Joanna 2026-04-29, from the Rudower Chaussee corridor.
+    levelMultipliers: { '3': 1.5, '2b': 1.2 },
     roughSurfaceMultiplier: 5.0,
     rejectPathTypes: new Set(['Elevated sidewalk path']),
     surfaceOk: SMOOTH_ONLY,
@@ -344,6 +379,9 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // Training does vehicular lefts, not two-stage crossings.
     signalWaitSec: { through: 10, left: 20 },
     stopSignWaitSec: 3,
+    // Fitness rider takes the gap an adult cyclist takes. Charged at all
+    // so the ETA stays honest, not to shape the route much.
+    unsignalizedMajorCrossingSec: 15,
   },
 }
 

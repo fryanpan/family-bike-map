@@ -23,6 +23,7 @@
 import type { Graph, Link, NodeId } from 'ngraph.graph'
 import type { ModeRule } from '../data/modes'
 import type { NodeData, EdgeData } from './clientRouter'
+import { parseMaxspeedKmh, speedDefaultForClass } from '../utils/lts'
 
 export interface EdgeSearchResult {
   /** Links in path order, start → end. */
@@ -54,6 +55,96 @@ export function turnDelta(bearingIn: number, bearingOut: number): number {
 }
 
 // ── Junction detection ──────────────────────────────────────────────────────
+
+// ── Unsignalized major-road crossings ───────────────────────────────────────
+
+// The road classes a family rider has to cross rather than ride (Joanna
+// 2026-04-29, research item #4). Secondary and tertiary are excluded on
+// purpose: in Berlin a secondary is an ordinary Hauptstrasse with a signal at
+// most junctions, and charging every unsignalised one would penalise the whole
+// grid rather than the genuinely hostile crossings.
+const MAJOR_CROSSING_CLASSES = new Set(['primary', 'trunk'])
+const MAJOR_CROSSING_MIN_KMH = 50
+
+/** Speed of a way for the crossing test: posted, else the class default. Uses
+ *  the same two primitives as classifyEdge so there is no second speed table
+ *  to drift from. */
+function waySpeedKmh(tags: Record<string, string>): number | null {
+  return parseMaxspeedKmh(tags.maxspeed) ?? speedDefaultForClass(tags.highway ?? '')
+}
+
+/** The major-road links incident to each node, for nodes that have any. A node
+ *  missing from the map has none. Cached per graph: the graph is rebuilt
+ *  whenever the tile set or mode changes. The links, not just their way ids,
+ *  because the crossing test needs the bearing of each arm. */
+const majorLinksCache = new WeakMap<
+  Graph<NodeData, EdgeData>,
+  Map<NodeId, Array<Link<EdgeData>>>
+>()
+
+function majorLinksByNode(graph: Graph<NodeData, EdgeData>): Map<NodeId, Array<Link<EdgeData>>> {
+  const cached = majorLinksCache.get(graph)
+  if (cached) return cached
+  const out = new Map<NodeId, Array<Link<EdgeData>>>()
+  graph.forEachNode((node) => {
+    const links = graph.getLinks(node.id)
+    if (!links) return
+    for (const link of links) {
+      const tags = link.data.wayTags
+      if (!MAJOR_CROSSING_CLASSES.has(tags.highway ?? '')) continue
+      const speed = waySpeedKmh(tags)
+      if (speed == null || speed < MAJOR_CROSSING_MIN_KMH) continue
+      const arms = out.get(node.id)
+      if (arms) arms.push(link)
+      else out.set(node.id, [link])
+    }
+  })
+  majorLinksCache.set(graph, out)
+  return out
+}
+
+/** Bearing from `nodeId` out along `link`, whichever end of it the node is. */
+function armBearing(
+  graph: Graph<NodeData, EdgeData>,
+  nodeId: NodeId,
+  link: Link<EdgeData>,
+): number | null {
+  const here = graph.getNode(nodeId)
+  const otherId = link.fromId === nodeId ? link.toId : link.fromId
+  const other = graph.getNode(otherId)
+  if (!here || !other) return null
+  return bearingDeg(here.data.lat, here.data.lng, other.data.lat, other.data.lng)
+}
+
+/** The major road has to PASS THROUGH the node for a crossing to be possible:
+ *  two of its arms pointing roughly opposite ways. Returns the bearing of one
+ *  of them, which is the axis to measure sides against, or null when the road
+ *  merely ends here. A T-junction where a primary terminates cannot be
+ *  crossed, and charging it was the first version's most common false
+ *  positive. */
+const MAJOR_THROUGH_MIN_DEG = 135
+
+function majorAxisDeg(bearings: number[]): number | null {
+  for (let i = 0; i < bearings.length; i++) {
+    for (let j = i + 1; j < bearings.length; j++) {
+      if (Math.abs(turnDelta(bearings[i], bearings[j])) >= MAJOR_THROUGH_MIN_DEG) return bearings[i]
+    }
+  }
+  return null
+}
+
+/** How far off the axis a leg must lie before it counts as being on one side
+ *  of the road rather than running along it. sin 25° — generous on purpose:
+ *  ambiguous geometry goes uncharged, because a false crossing charge
+ *  distorts the route while a missed one only leaves the previous behaviour. */
+const SIDE_MIN_SIN = Math.sin((25 * Math.PI) / 180)
+
+/** Which side of `axisDeg` the point at `bearingDeg` lies on: +1, -1, or 0 for
+ *  "too close to the axis to call". */
+function sideOfAxis(bearing: number, axisDeg: number): number {
+  const s = Math.sin((turnDelta(axisDeg, bearing) * Math.PI) / 180)
+  return Math.abs(s) < SIDE_MIN_SIN ? 0 : Math.sign(s)
+}
 
 // Unique-neighbour count per node, cached per graph instance. A node is a
 // junction (a place where a navigating human makes a decision) iff it has
@@ -190,6 +281,57 @@ export function edgeAStar(
     } else if (node.data.control === 'stop' && rule.stopSignWaitSec) {
       cost += rule.stopSignWaitSec
       dur += rule.stopSignWaitSec
+    } else if (
+      node.data.control == null &&
+      rule.unsignalizedMajorCrossingSec &&
+      !l1.data.isWalking &&
+      !l2.data.isWalking
+    ) {
+      // `control == null` is the whole point of this branch and is tested
+      // explicitly rather than inferred from falling off the chain above: a
+      // mode that mapped no `signalWaitSec` would otherwise reach here AT a
+      // signalised junction and be charged the unsignalised wait, which is
+      // backwards. Every mode prices signals today, so this guard changes no
+      // current route; it stops a future mode or city profile from inverting
+      // the cost by omission.
+      //
+      // A rider who crosses a major road here waits for a gap in 50 km/h
+      // traffic — real time, and the reason to detour a block to a signal.
+      //
+      // Incidence is NOT enough to establish a crossing, and treating it as
+      // enough over-charges two common geometries. A T-junction where the
+      // major road ends: every turn between the other arms was charged though
+      // nothing is crossed. Worse, a Berlin Hauptstrasse sidepath is a
+      // SEPARATE way from the road it follows, so riding ALONG one was charged
+      // at every side street — exactly the "riding along, not across" case the
+      // cost is supposed to exclude, missed because the exclusion compared way
+      // ids. Both need geometry: the road must pass through the node, and the
+      // legs either side of the node must lie on opposite sides of it.
+      //
+      // Walking edges are exempt. A bridge-walk is the designed escape when an
+      // edge is too stressful to ride, and charging it the same crossing wait
+      // removes the escape instead of shaping the route — the 2026-04-29 first
+      // cut did exactly that and deepened the regression it was meant to
+      // avoid.
+      const arms = majorLinksByNode(graph).get(nodeId)
+      if (arms) {
+        const bearings: number[] = []
+        for (const arm of arms) {
+          const b = armBearing(graph, nodeId, arm)
+          if (b != null) bearings.push(b)
+        }
+        const axis = majorAxisDeg(bearings)
+        if (axis != null) {
+          // Sides of where the rider came FROM and where they go TO, as seen
+          // from this node. bIn points prev → node, so reverse it.
+          const sidePrev = sideOfAxis((bIn + 180) % 360, axis)
+          const sideNext = sideOfAxis(bOut, axis)
+          if (sidePrev !== 0 && sideNext !== 0 && sidePrev !== sideNext) {
+            cost += rule.unsignalizedMajorCrossingSec
+            dur += rule.unsignalizedMajorCrossingSec
+          }
+        }
+      }
     }
 
     // Turn costs. A bend is an *instruction* ("turn onto X") when the way

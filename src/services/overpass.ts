@@ -6,6 +6,7 @@ import {
   CYCLEWAY_BUSWAY_VALUES,
   CYCLEWAY_LANE_VALUES,
   CYCLEWAY_TRACK_VALUES,
+  isSeparatedTrackBesideFastTraffic,
 } from '../utils/lts'
 import type { ClassificationRule } from './rules'
 // Structural bounds — anything that exposes the four directions works
@@ -420,6 +421,10 @@ export function classifyOsmTagsToItem(
         // confident, which drops the segment to slowSpeedKmh in routing
         // (the same nudge any non-preferred item gets) and renders orange
         // on the route.
+        // Still reachable after the arterial demote: a separated track on a
+        // CALMED tertiary stays 1a (class default 40 km/h, which is at the
+        // ceiling, not above it) while trafficDensity reads 'moderate' off the
+        // road class. Same label, one tier up.
         if (trafficDensity === 'moderate' || trafficDensity === 'high') {
           return 'Protected bike lane on major road'
         }
@@ -432,6 +437,13 @@ export function classifyOsmTagsToItem(
       if (highway === 'residential' && isLocalAccessOnly) return 'Bike boulevard'
       return 'Fahrradstrasse'
     case '2a':
+      // A way reaches 2a either as genuine bike infra on a calmed street, or
+      // because it is a separated track beside fast traffic that classifyEdge
+      // demoted out of 1a. Ask the same predicate classifyEdge asked, so the
+      // label cannot disagree with the tier: calling a curb-separated track on
+      // a 50 km/h Hauptstrasse a "Painted bike lane on quiet street" would be
+      // wrong twice, since it is neither painted nor on a quiet street.
+      if (isSeparatedTrackBesideFastTraffic(tags)) return 'Protected bike lane on major road'
       if (hasBusLaneTag) return 'Shared bus lane on quiet street'
       return 'Painted bike lane on quiet street'
     case '2b':
