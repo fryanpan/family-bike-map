@@ -116,7 +116,7 @@ class, and the rest cannot be joined to a parent without geometry.
 | kid-confident     | 22/22 → 22/22 | 69% → **57%** (−12pp) | 29% → **42%** | 75 → 90 min | 11.0 → 15.1 |
 | kid-traffic-savvy | 22/22 → 22/22 | 70% → 68% (−2pp) | 13% → 15% | 37 → 38 min | 12.3 → 13.3 |
 | carrying-kid      | 22/22 → 22/22 | 61% → 60% (−1pp) | 20% → 22% | 37 → 38 min | 15.0 → 16.9 |
-| training          | 22/22 → 22/22 | 47% → **49%** (+2pp) | 7% → 8% | 21 → 21 min | 11.7 → 13.6 |
+| training          | 22/22 → 22/22 | 47% → **50%** (+3pp) | 7% → 8% | 21 → 21 min | 11.7 → 13.3 |
 
 ## SF (17 pairs)
 
@@ -127,6 +127,16 @@ class, and the rest cannot be joined to a parent without geometry.
 | kid-traffic-savvy | 17/17 → 17/17 | 61% → **62%** (+1pp) | 0% → 1% | 27 → 28 min | 8.3 → 9.3 |
 | carrying-kid      | 17/17 → 17/17 | 53% → **55%** (+2pp) | 0% → 1% | 23 → 25 min | 7.3 → 10.6 |
 | training          | 17/17 → 17/17 | 54% → **55%** (+1pp) | 0% → 0% | 15 → 15 min | 7.0 → 8.4 |
+
+Both cities were re-run after a code-review fix to change #4 (`a6e5727`:
+a crossing now requires the major road to pass through the node and the legs
+either side to be on opposite sides of it, replacing a test that fired on mere
+incidence). The re-run moved **two cells out of fifty**: Berlin training
+preferred 49% → 50% and its turn count 13.6 → 13.3. Every walk share, every
+routes-found and both cities' other eighteen preferred figures are identical.
+That falsifies the guess I had written down before measuring — that the
+over-charge was inflating the Berlin walk shares. It was not; the walk shares
+come from the demote alone. The tables above are the post-fix run.
 
 Turn counts rise in 9 of 10 mode/city figures. That is change #4 doing what it
 was built to do: the router detours to a signalised crossing rather than take an
@@ -215,11 +225,30 @@ baseline and I do not know what drove them.
 
 ## Also run
 
-`bunx tsc --noEmit` clean. `bun test` **833 pass / 0 fail**, including 22 new
-cases. Falsification: 9 of them fail on the pre-change `lts.ts` / `overpass.ts` /
-`modes.ts`. Only 1 of the 6 new `edgeAStar` cases fails on the pre-change
-`edgeAStar.ts` — the other five assert that the crossing penalty does *not* fire
+`bunx tsc --noEmit` clean. `bun test` **835 pass / 0 fail**, including 24 new
+cases. Falsification, by restoring each pre-change file under the new tests:
+
+| Cases | Fail on the pre-change file |
+|---|---|
+| 11 in `lts.test.ts`, 5 in `overpass.test.ts` (the demote and its labels) | 9 |
+| 8 in `edgeAStar.test.ts` (the crossing cost) | 3 — 1 without the feature at all, 2 on the incidence version `a6e5727` replaced |
+
+The other five `edgeAStar` cases assert the crossing charge does **not** fire
 (secondary road, calmed primary, riding along, walking, signal already mapped),
-so they pass with or without it by construction. That is the right structure
-anyway, since over-firing is what the 2026-04-29 draft got wrong, but it means
-one test pins the feature and five pin its exclusions.
+so they pass with or without the cost by construction. That is the right shape
+— over-firing is what both the 2026-04-29 draft and the first version of this
+one got wrong, and it is what the code review caught — but it means the feature
+itself is pinned by one test and its exclusions by seven.
+
+## Code review
+
+`codex review` (default model; the `-c 'model="gpt-5.4"'` in the ship-it skill
+is rejected outright on a ChatGPT account) returned one P2 finding on change #4:
+the crossing cost fired wherever a major road was *incident* to a junction,
+which is not the same as the route crossing it. Its example was a T-junction
+where a primary terminates. The costlier instance, which it did not name, is a
+Berlin Hauptstraße sidepath: it is a separate OSM way from the road it follows,
+so the way-id exclusion meant to spare a rider going *along* the arterial never
+fired for it, and riding along a sidepath was charged 50 s at every node it
+shares with the carriageway. Fixed geometrically in `a6e5727`; see the re-run
+note under the SF table for its measured effect.
