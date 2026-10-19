@@ -151,12 +151,20 @@ protected lanes, within the same preferred set.
 
 The review item Bryan answered quoted
 `docs/research/2026-04-29-routing-benchmark-after-joanna-routing-changes.md`.
-That file measured a different implementation of change #3 against a `main` six
-months older — since then `main` gained the BRouter-style ascent cost,
-`carFreeBonus`, per-side cycleway reads and a 40 km/h 2a ceiling, each of which
-moves preferred-% on its own. **Its deltas and these cannot be subtracted**, and
-nothing below should be read as "the change got gentler." Both columns are
-printed because the decision was made on the left one.
+That file measured a different implementation of change #3 against a `main` that
+has since taken four merged changes to the same cost function, each dated after
+that run (`git log -S` against `src/`):
+
+| PR | Merged | What it changed |
+|---|---|---|
+| #192 | 2026-05-26 | BRouter-style ascent cost |
+| #203 | 2026-06-26 | `carFreeBonus`; ascent charged on walking edges too |
+| #231 | 2026-10-18 | `maxspeed` units parsed; calmed-street ceiling 30 → 40 km/h |
+| #244 | 2026-10-18 | both classifiers read all four cycleway sides (this branch's base) |
+
+Each of those moves preferred-% on its own. **The old deltas and these cannot be
+subtracted**, and nothing below should be read as "the change got gentler." Both
+columns are printed because the decision was made on the left one.
 
 | Figure | 2026-04-29 file | This run |
 |---|---|---|
