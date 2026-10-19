@@ -234,8 +234,21 @@ export function edgeAStar(
     } else if (node.data.control === 'stop' && rule.stopSignWaitSec) {
       cost += rule.stopSignWaitSec
       dur += rule.stopSignWaitSec
-    } else if (rule.unsignalizedMajorCrossingSec && !l1.data.isWalking && !l2.data.isWalking) {
-      // No control node here. If a major road meets this junction and the
+    } else if (
+      node.data.control == null &&
+      rule.unsignalizedMajorCrossingSec &&
+      !l1.data.isWalking &&
+      !l2.data.isWalking
+    ) {
+      // `control == null` is the whole point of this branch and is tested
+      // explicitly rather than inferred from falling off the chain above: a
+      // mode that mapped no `signalWaitSec` would otherwise reach here AT a
+      // signalised junction and be charged the unsignalised wait, which is
+      // backwards. Every mode prices signals today, so this guard changes no
+      // current route; it stops a future mode or city profile from inverting
+      // the cost by omission.
+      //
+      // If a major road meets this junction and the
       // rider is on neither side of it, they are crossing it on a gap in
       // 50 km/h traffic — real time, and the reason to detour a block to a
       // signal. The two ways being traversed are excluded because a rider
