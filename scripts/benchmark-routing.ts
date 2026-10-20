@@ -10,7 +10,7 @@
  */
 
 import { buildRoutingGraph, routeOnGraph, haversineM } from '../src/services/clientRouter'
-import { classifyOsmTagsToItem, buildQuery } from '../src/services/overpass'
+import { classifyOsmTagsToItem, buildQuery, isEnrichedTilePayload, parseEnrichedTileResponse } from '../src/services/overpass'
 import { getDefaultPreferredItems } from '../src/utils/classify'
 import { classifyEdge } from '../src/utils/lts'
 import type { PathLevel } from '../src/utils/lts'
@@ -157,7 +157,27 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
     return []
   }
 
-  const data = await resp.json() as { elements: Array<{ type: string; id: number; tags?: Record<string, string>; geometry?: Array<{ lat: number; lon: number }>; lat?: number; lon?: number }> }
+  const payload = await resp.json() as unknown
+
+  // The Worker serves TWO shapes on /api/overpass: the raw Overpass proxy
+  // response, and — for tiles in the active R2 tileset — the enriched
+  // {meta, ways} pipeline shape. Since enriched tiles were activated for the
+  // SF Bay core (2026-07-11) this script crashed on `data.elements` for every
+  // SF tile, which silently took the SF half of the routing gate offline.
+  // Detect the shape per response with the SAME production helpers the client
+  // uses, so the benchmark measures what real users are actually served.
+  if (isEnrichedTilePayload(payload)) {
+    const enriched = parseEnrichedTileResponse(payload)
+    tileCache.set(key, enriched)
+    return enriched
+  }
+
+  const data = payload as { elements: Array<{ type: string; id: number; tags?: Record<string, string>; geometry?: Array<{ lat: number; lon: number }>; lat?: number; lon?: number }> }
+  if (!Array.isArray(data?.elements)) {
+    console.warn(`[Overpass] Tile ${row}:${col} — unrecognised payload shape, treating as empty`)
+    tileCache.set(key, [])
+    return []
+  }
   const ways: OsmWay[] = data.elements
     .filter((el) => el.type === 'way' && el.geometry != null)
     .map((el) => ({

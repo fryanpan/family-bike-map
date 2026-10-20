@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { computeLts, computeLtsBreakdown, familySafetyScore } from '../src/utils/lts'
+import { computeLts, computeLtsBreakdown, familySafetyScore, classifyEdge, parseMaxspeedKmh, UNKNOWN_POSTED_SPEED_KMH, QUIET_STREET_MAX_KMH } from '../src/utils/lts'
 import type { LtsBreakdown } from '../src/utils/lts'
 
 // ── computeLts ──────────────────────────────────────────────────────────────
@@ -246,5 +246,101 @@ describe('familySafetyScore', () => {
       worstLts: 4, familySafetyScore: 0,
     }
     expect(familySafetyScore(bd)).toBeLessThanOrEqual(40)
+  })
+})
+
+// ── maxspeed unit parsing ───────────────────────────────────────────────────
+// Regression cover for the SF "missing Folsom and 17th" bug (2026-08-22):
+// `parseInt('25 mph')` silently read mph values as km/h, so a 30 mph (48 km/h)
+// arterial classified as a quiet street while untagged connectors fell back to
+// a 50 km/h road-class guess and dropped off the overlay entirely.
+
+describe('parseMaxspeedKmh', () => {
+  it('reads a bare number as km/h', () => {
+    expect(parseMaxspeedKmh('50')).toBe(50)
+    expect(parseMaxspeedKmh('30')).toBe(30)
+  })
+
+  it('converts mph to km/h instead of dropping the unit', () => {
+    expect(parseMaxspeedKmh('25 mph')).toBe(40)
+    expect(parseMaxspeedKmh('30 mph')).toBe(48)
+    expect(parseMaxspeedKmh('20mph')).toBe(32)
+  })
+
+  it('accepts explicit km/h suffixes', () => {
+    expect(parseMaxspeedKmh('50 km/h')).toBe(50)
+    expect(parseMaxspeedKmh('50 kph')).toBe(50)
+  })
+
+  it('maps walking pace and derestricted values', () => {
+    expect(parseMaxspeedKmh('walk')).toBe(7)
+    expect(parseMaxspeedKmh('none')).toBe(130)
+  })
+
+  it('returns null ONLY when the tag is absent', () => {
+    expect(parseMaxspeedKmh(undefined)).toBeNull()
+    expect(parseMaxspeedKmh('')).toBeNull()
+    expect(parseMaxspeedKmh('   ')).toBeNull()
+  })
+
+  it('resolves implicit country-coded values to statutory speeds', () => {
+    expect(parseMaxspeedKmh('DE:urban')).toBe(50)
+    expect(parseMaxspeedKmh('US:rural')).toBe(100)
+    expect(parseMaxspeedKmh('DE:living_street')).toBe(7)
+    expect(parseMaxspeedKmh('DE:zone30')).toBe(30)
+    expect(parseMaxspeedKmh('DE:zone:30')).toBe(30)
+  })
+
+  it('treats a PRESENT but unreadable value as fast, never as calm', () => {
+    // The dangerous direction. A way whose maxspeed we cannot parse must
+    // not fall through to "quiet street" -- someone posted a limit here.
+    // Mirrors the pre-fix parseInt->NaN behaviour, where NaN failed every
+    // `<=` comparison.
+    expect(parseMaxspeedKmh('signals')).toBe(UNKNOWN_POSTED_SPEED_KMH)
+    expect(parseMaxspeedKmh('variable')).toBe(UNKNOWN_POSTED_SPEED_KMH)
+    expect(parseMaxspeedKmh('0')).toBe(UNKNOWN_POSTED_SPEED_KMH)
+    expect(UNKNOWN_POSTED_SPEED_KMH).toBeGreaterThan(QUIET_STREET_MAX_KMH)
+  })
+
+  it('does not let an unreadable maxspeed promote a painted lane to 2a', () => {
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', maxspeed: 'signals', lanes: '2' }).pathLevel).toBe('3')
+    // ...while the same way with no maxspeed tag at all still reaches 2a
+    // via the tertiary road-class default (the Folsom/17th case).
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', lanes: '2' }).pathLevel).toBe('2a')
+  })
+})
+
+// ── pathLevel 2a: "bike infra on a calmed street" ───────────────────────────
+
+describe('pathLevel 2a — calmed-street ceiling', () => {
+  it('admits a US 25 mph street with a painted lane', () => {
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', maxspeed: '25 mph', lanes: '3' }).pathLevel).toBe('2a')
+  })
+
+  it('admits a US 20 mph slow street with a painted lane', () => {
+    expect(classifyEdge({ highway: 'residential', cycleway: 'lane', maxspeed: '20 mph' }).pathLevel).toBe('2a')
+  })
+
+  it('admits a European Tempo-30 street with a painted lane', () => {
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', maxspeed: '30', lanes: '2' }).pathLevel).toBe('2a')
+  })
+
+  it('rejects a US 30 mph arterial — 48 km/h is not a quiet street', () => {
+    expect(classifyEdge({ highway: 'secondary', cycleway: 'lane', maxspeed: '30 mph', lanes: '2' }).pathLevel).toBe('3')
+  })
+
+  it('rejects a European 50 km/h Hauptstraße with a painted lane', () => {
+    expect(classifyEdge({ highway: 'secondary', cycleway: 'lane', maxspeed: '50', lanes: '2' }).pathLevel).toBe('3')
+  })
+
+  it('admits an UNTAGGED tertiary with a painted lane (Folsom St, 17th St)', () => {
+    // Neither carries a maxspeed tag in OSM; the old tertiary default of
+    // 50 km/h put them above the ceiling and they painted nothing.
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', lanes: '2' }).pathLevel).toBe('2a')
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', lanes: '3' }).pathLevel).toBe('2a')
+  })
+
+  it('still rejects an untagged secondary — arterials keep the 50 km/h guess', () => {
+    expect(classifyEdge({ highway: 'secondary', cycleway: 'lane' }).pathLevel).toBe('3')
   })
 })

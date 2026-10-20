@@ -70,12 +70,24 @@ jobs:
           # stacks share a release identifier. (--var overrides the
           # placeholder in wrangler.toml's [vars] block.)
           command: deploy --var "APP_VERSION:0.1.${{ github.run_number }}"
-          secrets: |
-            MAPILLARY_TOKEN
-            SENTRY_DSN
-        env:
-          MAPILLARY_TOKEN: ${{ secrets.MAPILLARY_TOKEN }}
-          # Sentry DSN reuses the same value as the frontend secret (DSNs
-          # are public client-keys per Sentry docs). One Sentry project,
-          # tagged by `runtime` to distinguish worker vs browser.
-          SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          # No `secrets:` input on purpose. wrangler-action implements it as
+          # `wrangler secret bulk`, a script-SETTINGS edit that Cloudflare
+          # rejects with error 10214 whenever the newest uploaded version of
+          # the Worker is not the deployed one:
+          #
+          #   "You attempted to deploy the latest version with modified
+          #    settings, but the latest version isn't currently deployed."
+          #
+          # Any out-of-band `wrangler versions upload` — staging a build to
+          # inspect it, say — leaves exactly that state behind and jams every
+          # later CI deploy here, BEFORE `wrangler deploy` runs. main lands
+          # and prod never moves. That cost an outage on 2026-10-16: #236
+          # merged, deploy run 38946833864 failed at this step, and prod sat
+          # on 0.1.267 with the Overpass fallback unshipped. `wrangler deploy`
+          # uploads and deploys in one call, so dropping this step also makes
+          # the deploy self-healing from that state.
+          #
+          # Worker secrets are script-level and survive every deploy, so
+          # re-pushing them on each one bought nothing. MAPILLARY_TOKEN,
+          # SENTRY_DSN and GOOGLE_MAPS_API_KEY are set out-of-band with
+          # `wrangler secret put <NAME>`; rotate them the same way.
