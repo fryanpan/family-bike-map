@@ -128,10 +128,22 @@ export const OVERPASS_ENDPOINTS = [
 ] as const
 
 /** Per-attempt cap. The dense central-SF tile takes ~19 s and Boston measured
- *  28-36 s, so this has to be generous; the failure we're guarding against
- *  (a Cloudflare connect error) returns in ~3 s, so the realistic worst case
- *  is one slow success, not the sum of the caps. */
+ *  28-36 s, so this has to be generous. */
 const OVERPASS_ATTEMPT_TIMEOUT_MS = 40_000
+
+/**
+ * Cap on the WHOLE fallback chain, not one attempt. The per-attempt cap alone
+ * is not a bound: three endpoints at 40 s is 120 s, and the browser gives up
+ * first — `FETCH_TIMEOUT_MS` in `src/services/overpass.ts` is 35 s. A client
+ * abort is the worst way to lose, because the client never receives the
+ * `X-Overpass-Attempts` trail and its own retry re-walks the same dead chain
+ * from the top. Answering inside the client's patience turns that into an
+ * honest HTTP error it already knows how to handle.
+ *
+ * This has to stay BELOW the client's cap; `workerOverpassFallback.test.ts`
+ * asserts the ordering so the two numbers cannot drift apart again.
+ */
+export const OVERPASS_TOTAL_BUDGET_MS = 30_000
 
 /**
  * POST `body` to each Overpass instance until one answers with a usable
@@ -145,7 +157,10 @@ const OVERPASS_ATTEMPT_TIMEOUT_MS = 40_000
  * bike infrastructure, so it is NOT treated as a failure; the guard against
  * regional instances is the endpoint list above, not a runtime check.
  */
-export async function fetchOverpass(body: ArrayBuffer): Promise<{
+export async function fetchOverpass(
+  body: ArrayBuffer,
+  opts: { budgetMs?: number } = {},
+): Promise<{
   resp: Response
   respBody: ArrayBuffer
   endpoint: string
@@ -153,8 +168,17 @@ export async function fetchOverpass(body: ArrayBuffer): Promise<{
 }> {
   const attempts: { endpoint: string; status: number | string }[] = []
   let last: { resp: Response; respBody: ArrayBuffer; endpoint: string } | null = null
+  const deadline = Date.now() + (opts.budgetMs ?? OVERPASS_TOTAL_BUDGET_MS)
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    // Whatever is left of the shared budget, never more than one attempt's
+    // cap. A slow first instance shortens the later ones rather than pushing
+    // the whole chain past the point where the client is still listening.
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) {
+      attempts.push({ endpoint, status: 'skipped: budget spent' })
+      continue
+    }
     try {
       const resp = await fetch(endpoint, {
         method: 'POST',
@@ -163,7 +187,7 @@ export async function fetchOverpass(body: ArrayBuffer): Promise<{
           'User-Agent': 'FamilyBikeMap/0.1 (github.com/fryanpan/family-bike-map)',
         },
         body,
-        signal: AbortSignal.timeout(OVERPASS_ATTEMPT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(Math.min(OVERPASS_ATTEMPT_TIMEOUT_MS, remainingMs)),
       })
       const respBody = await resp.arrayBuffer()
       attempts.push({ endpoint, status: resp.status })

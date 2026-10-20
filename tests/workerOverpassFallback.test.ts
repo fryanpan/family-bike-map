@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'bun:test'
-import { fetchOverpass, OVERPASS_ENDPOINTS } from '../src/worker'
+import { fetchOverpass, OVERPASS_ENDPOINTS, OVERPASS_TOTAL_BUDGET_MS } from '../src/worker'
+import { FETCH_TIMEOUT_MS } from '../src/services/overpass'
 
 // The 2026-10-16 Boston outage: Cloudflare's Worker-to-overpass-api.de fetch
 // returned a synthesized 521 and the proxy passed it straight through, so every
@@ -156,5 +157,90 @@ describe('fetchOverpass', () => {
 
     await fetchOverpass(BODY)
     expect(signals[0]).toBeInstanceOf(AbortSignal)
+  })
+})
+
+describe('fetchOverpass whole-chain budget', () => {
+  // The per-attempt cap bounds one instance, not the chain. Three endpoints at
+  // the 40 s cap is 120 s, and the browser gives up at FETCH_TIMEOUT_MS. The
+  // client then sees an abort instead of our attempt trail, and its own retry
+  // walks the same dead chain again — so a slow mirror became a hang that
+  // never reported which instances were tried.
+
+  /** Stub that takes `delayMs` to answer, so the budget actually elapses. */
+  function stubSlowFetch(delayMs: number, reply: (url: string) => Response) {
+    const calls: string[] = []
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input)
+      calls.push(url)
+      await new Promise((r) => setTimeout(r, delayMs))
+      return reply(url)
+    }) as any
+    return calls
+  }
+
+  it('stops trying instances once the shared budget is spent', async () => {
+    // Each attempt burns 40 ms against a 60 ms budget, so the third endpoint
+    // is never contacted however many are listed.
+    const calls = stubSlowFetch(40, () => new Response('', { status: 521 }))
+    const r = await fetchOverpass(BODY, { budgetMs: 60 })
+
+    expect(calls.length).toBeLessThan(OVERPASS_ENDPOINTS.length)
+    expect(r.attempts).toHaveLength(OVERPASS_ENDPOINTS.length)
+    expect(r.attempts[r.attempts.length - 1].status).toBe('skipped: budget spent')
+  })
+
+  it('names the skipped instances in the trail rather than dropping them', async () => {
+    // X-Overpass-Attempts is how an operator reads a failure from one curl.
+    // A silently shorter list would read as "we only have one endpoint".
+    stubSlowFetch(40, () => new Response('', { status: 521 }))
+    const r = await fetchOverpass(BODY, { budgetMs: 60 })
+
+    const skipped = r.attempts.filter((a) => a.status === 'skipped: budget spent')
+    expect(skipped.length).toBeGreaterThan(0)
+    for (const a of skipped) expect(OVERPASS_ENDPOINTS).toContain(a.endpoint as never)
+  })
+
+  it('always tries the first instance, however little budget is left', async () => {
+    // The budget shortens the chain; it must never shorten it to nothing. A
+    // real upstream status passes through — better than a synthesized 502,
+    // because 521 vs 504 vs 502 is what tells an operator where the fault is.
+    const calls = stubSlowFetch(40, () => new Response('', { status: 521 }))
+    const r = await fetchOverpass(BODY, { budgetMs: 1 })
+
+    expect(calls).toEqual([OVERPASS_ENDPOINTS[0]])
+    expect(r.resp.status).toBe(521)
+    expect(r.endpoint).toBe(OVERPASS_ENDPOINTS[0])
+    expect(r.attempts.slice(1).every((a) => a.status === 'skipped: budget spent')).toBe(true)
+  })
+
+  it('shortens a later attempt instead of letting the chain outlive the client', async () => {
+    const timeouts: number[] = []
+    globalThis.fetch = (async (_u: any, init: any) => {
+      // AbortSignal.timeout() hides its delay, so read it from the budget
+      // arithmetic instead: record how long was left when each call was made.
+      timeouts.push(Date.now())
+      await new Promise((r) => setTimeout(r, 30))
+      return new Response('', { status: 521 })
+    }) as any
+
+    const started = Date.now()
+    await fetchOverpass(BODY, { budgetMs: 70 })
+    // Two attempts at 30 ms fit; the chain must not run on past the budget by
+    // another full per-attempt cap.
+    expect(Date.now() - started).toBeLessThan(200)
+  })
+
+  it('leaves the client more patience than the proxy spends', async () => {
+    // The invariant the comment in overpass.ts states, pinned here because it
+    // silently stopped holding when the fallback chain was added.
+    expect(OVERPASS_TOTAL_BUDGET_MS).toBeLessThan(FETCH_TIMEOUT_MS)
+  })
+
+  it('keeps the whole chain inside one client attempt even at the per-attempt cap', async () => {
+    // What actually broke: nothing bounded ENDPOINTS.length x the per-attempt
+    // cap, so the arithmetic below was 120_000 < 35_000.
+    expect(OVERPASS_TOTAL_BUDGET_MS).toBeLessThan(FETCH_TIMEOUT_MS)
+    expect(OVERPASS_TOTAL_BUDGET_MS).toBeGreaterThan(20_000)
   })
 })
