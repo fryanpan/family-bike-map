@@ -31,9 +31,9 @@ export interface ServedApp {
   stop: () => Promise<void>
 }
 
-function runToCompletion(cmd: string, args: string[]): Promise<{ ok: boolean; output: string }> {
+function runToCompletion(cmd: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { cwd: REPO_ROOT, env: process.env })
+    const proc = spawn(cmd, args, { cwd: REPO_ROOT, env })
     let output = ''
     proc.stdout?.on('data', (d) => { output += d.toString() })
     proc.stderr?.on('data', (d) => { output += d.toString() })
@@ -109,7 +109,8 @@ async function serveViaViteDevFallback(vitePort: number, workerPort: number): Pr
     cwd: REPO_ROOT,
     // vite.config.ts's server.proxy already routes /api -> localhost:8791;
     // only override the port if the caller asked for a non-default one.
-    env: { ...process.env },
+    // Same engine-forcing overrides as the build path — see HERMETIC_BUILD_ENV.
+    env: HERMETIC_BUILD_ENV,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const url = `http://localhost:${vitePort}`
@@ -123,6 +124,28 @@ async function serveViaViteDevFallback(vitePort: number, workerPort: number): Pr
       await killTree(workerProc)
     },
   }
+}
+
+/**
+ * Env overrides applied to the harness's build so the app resolves to the
+ * Leaflet/OSM-Carto engine — the ONE engine lib/pixels.ts is calibrated
+ * against.
+ *
+ * pixels.ts assumed "CI/local render-check runs never set those secrets."
+ * That is false on a dev machine with a local `.env`: Vite bakes
+ * VITE_GOOGLE_MAPS_KEY into the bundle, resolveEngine picks Google, and
+ * Google Maps then refuses to initialize on http://localhost (the key is
+ * referer-locked to the prod domain) with RefererNotAllowedMapError. The
+ * result is not a loud failure — it is a map that never renders at all,
+ * stuck at center [0,0] zoom 0, while every check happily "passes" by
+ * measuring ~154 px of static app chrome inside the map container.
+ * Setting these empty makes the harness hermetic w.r.t. whatever `.env`
+ * the developer happens to have. Discovered 2026-08-22.
+ */
+const HERMETIC_BUILD_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  VITE_GOOGLE_MAPS_KEY: '',
+  VITE_MAPTILER_KEY: '',
 }
 
 /**
@@ -144,7 +167,7 @@ export async function serveApp(opts: { port?: number; workerPort?: number } = {}
   const workerPort = opts.workerPort ?? 8791
 
   const distIndex = join(REPO_ROOT, 'dist', 'index.html')
-  const build = await runToCompletion('bun', ['run', 'build'])
+  const build = await runToCompletion('bun', ['run', 'build'], HERMETIC_BUILD_ENV)
   if (build.ok && existsSync(distIndex)) {
     console.log('[render-checks/serve] build OK -> wrangler dev (dist/ + live /api on one port)')
     return serveViaWranglerDev(port)

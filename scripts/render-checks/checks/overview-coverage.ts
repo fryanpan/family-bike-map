@@ -30,6 +30,7 @@ import { gotoView, waitForTilesSettled, type ViewState } from '../lib/mapControl
 import { screenshotMapCanvas } from '../lib/screenshot'
 import { paintedMask, countPainted, type DecodedImage } from '../lib/pixels'
 import { latLngToOverviewCell } from '../../../src/services/overviewTiles'
+import { closeBrowser } from '../lib/bounds'
 import type { CheckResult } from '../lib/types'
 
 // Bay Area → Sacramento Delta. Deliberately land in every quadrant (a viewport
@@ -140,7 +141,7 @@ export async function runOverviewCoverageCheck(baseUrl: string): Promise<CheckRe
       })),
     }
   } finally {
-    await browser.close()
+    await closeBrowser(browser)
   }
 }
 
