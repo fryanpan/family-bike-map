@@ -14,6 +14,7 @@ import { serveApp } from '../lib/serve'
 import { gotoView, panAwayAndReturn, waitForTilesSettled } from '../lib/mapControl'
 import { screenshotWhenPaintSettles } from '../lib/screenshot'
 import { paintedMask, comparePaintedMasks } from '../lib/pixels'
+import { closeBrowser } from '../lib/bounds'
 import type { CheckResult } from '../lib/types'
 
 const TARGET_VIEW = { lat: 37.7649, lng: -122.4294, zoom: 14 }
@@ -79,7 +80,7 @@ export async function runDeterminismCheck(baseUrl: string): Promise<CheckResult>
       ],
     }
   } finally {
-    await browser.close()
+    await closeBrowser(browser)
   }
 }
 

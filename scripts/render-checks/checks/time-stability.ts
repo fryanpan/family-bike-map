@@ -11,6 +11,7 @@ import { serveApp } from '../lib/serve'
 import { gotoView, waitForTilesSettled } from '../lib/mapControl'
 import { screenshotMapCanvas, screenshotWhenPaintSettles } from '../lib/screenshot'
 import { paintedMask, comparePaintedMasks } from '../lib/pixels'
+import { closeBrowser } from '../lib/bounds'
 import type { CheckResult, CheckDetail } from '../lib/types'
 
 const TRAVEL_MODE = 'kid-confident'
@@ -96,7 +97,7 @@ export async function runTimeStabilityCheck(baseUrl: string): Promise<CheckResul
       details,
     }
   } finally {
-    await browser.close()
+    await closeBrowser(browser)
   }
 }
 

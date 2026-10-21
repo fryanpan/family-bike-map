@@ -11,6 +11,7 @@
 import { chromium, type Page } from 'playwright'
 import { serveApp } from '../lib/serve'
 import { gotoView, setEngineView, waitForTilesSettled } from '../lib/mapControl'
+import { closeBrowser } from '../lib/bounds'
 import type { CheckResult, CheckDetail } from '../lib/types'
 
 const CENTER = { lat: 37.7649, lng: -122.4294, zoom: 14 }
@@ -154,7 +155,7 @@ export async function runPerfBudgetCheck(baseUrl: string): Promise<CheckResult> 
       details,
     }
   } finally {
-    await browser.close()
+    await closeBrowser(browser)
   }
 }
 

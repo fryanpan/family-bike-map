@@ -14,6 +14,7 @@ import { runAlwaysVisibleCheck } from './checks/always-visible'
 import { runPerfBudgetCheck } from './checks/perf-budget'
 import { runOverviewCoverageCheck } from './checks/overview-coverage'
 import { KNOWN_FAILS } from './known-fails'
+import { CHECK_TIMEOUT_MS, TimeoutError, isHardFailure, withTimeout } from './lib/bounds'
 import type { CheckResult } from './lib/types'
 
 const CHECKS: Record<string, (baseUrl: string) => Promise<CheckResult>> = {
@@ -31,6 +32,9 @@ function printResult(result: CheckResult): void {
   let status: string
   if (result.passed) {
     status = known ? 'PASS (known-fail entry now stale!)' : 'PASS'
+  } else if (result.timedOut) {
+    // Deliberately not XFAIL even when listed: see CheckResult.timedOut.
+    status = 'TIMEOUT'
   } else {
     status = known ? 'XFAIL (known)' : 'FAIL'
   }
@@ -42,8 +46,37 @@ function printResult(result: CheckResult): void {
     console.log(`    Reason on file: ${known}`)
     console.log(`    Delete this entry from scripts/render-checks/known-fails.ts.`)
   }
-  if (known && !result.passed) {
+  if (known && !result.passed && !result.timedOut) {
     console.log(`  (expected failure — see scripts/render-checks/known-fails.ts: ${known})`)
+  }
+}
+
+/**
+ * Run one check under a wall-clock cap, turning a hang into a reported
+ * failure. Before this, `await CHECKS[name](...)` was unbounded: on
+ * 2026-10-20 a dead browser left `always-visible` pending for 71 minutes
+ * with no output at all, which reads exactly like a slow check.
+ *
+ * A timeout is reported, not thrown, so the checks after it still run —
+ * one wedged check should cost its own result, not the whole suite's.
+ */
+async function runBounded(name: string, baseUrl: string): Promise<CheckResult> {
+  try {
+    return await withTimeout(`check "${name}"`, CHECK_TIMEOUT_MS, CHECKS[name](baseUrl))
+  } catch (err) {
+    if (err instanceof TimeoutError) {
+      return {
+        name,
+        passed: false,
+        timedOut: true,
+        summary: err.message,
+        details: [
+          { label: 'cap', value: `${CHECK_TIMEOUT_MS}ms (override with RENDER_CHECK_TIMEOUT_MS)` },
+          { label: 'note', value: 'a hang is an infrastructure failure — known-fails.ts cannot mask it' },
+        ],
+      }
+    }
+    throw err
   }
 }
 
@@ -65,7 +98,7 @@ async function main(): Promise<void> {
   try {
     for (const name of names) {
       console.log(`\n[render-checks] running ${name}...`)
-      const result = await CHECKS[name](app.url)
+      const result = await runBounded(name, app.url)
       results.push(result)
       printResult(result)
     }
@@ -76,7 +109,7 @@ async function main(): Promise<void> {
   // Suite fails only on a non-known-fail check failing. A known-fail
   // check passing is loudly flagged above but doesn't fail the suite —
   // it's good news that needs a follow-up edit, not a blocker.
-  const hardFailures = results.filter((r) => !r.passed && !KNOWN_FAILS[r.name])
+  const hardFailures = results.filter((r) => isHardFailure(r, KNOWN_FAILS[r.name]))
 
   console.log(`\n${'='.repeat(60)}`)
   console.log(`[render-checks] ${results.length} check(s) run, ${hardFailures.length} hard failure(s)`)
