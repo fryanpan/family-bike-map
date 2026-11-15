@@ -134,6 +134,15 @@ export const PROFILE_LEGEND: Record<string, LegendGroup[]> = {
       { icon: '🚌', name: 'Shared bus lane on quiet street',    defaultPreferred: true, level: '2a' },
     ]},
     { defaultPreferred: false, items: [
+      // "Elevated sidewalk path" is level 1a — car-free — and still belongs
+      // in the non-preferred pile for THIS mode, which is why it sits here
+      // rather than with the other 1a items above. A trailer or cargo bike
+      // amplifies the two things wrong with these paths: tree-root heaves
+      // bounce a passenger much harder than they jolt a single rider, and
+      // the width forces uncomfortably close passes of pedestrians. Joanna
+      // asked for this on 2026-04-29 and it was already correct; the note
+      // is here so a later "these 1a items are inconsistent, tidy them up"
+      // pass does not move it back up.
       { icon: '🛡️', name: 'Elevated sidewalk path',      defaultPreferred: false, level: '1a' },
       { icon: '🏠', name: 'Quiet street',                defaultPreferred: false, level: '2b' },
       { icon: '🛣️', name: 'Painted bike lane on major road',   defaultPreferred: false, level: '3' },

@@ -18,6 +18,8 @@ import type { OsmWay } from '../src/utils/types'
 import { CITIES as SHARED_CITIES, verifyFixtures, printVerifyReport, hasVerifyErrors } from './lib/fixtures'
 import { prefetchElevation, setElevationDecoder, setElevationReferer, getElevationSource } from '../src/services/elevation'
 import { PNG } from 'pngjs'
+import * as fs from 'node:fs'
+import * as nodePath from 'node:path'
 
 // ── Elevation decoder injection ─────────────────────────────────────────
 // Bun doesn't ship OffscreenCanvas / createImageBitmap, so terrain-RGB
@@ -48,7 +50,7 @@ setElevationReferer('https://bike-map.fryanpan.com/')
 
 // ── Config ──────────────────────────────────────────────────────────────
 
-const OVERPASS_URL = 'https://bike-map.fryanpan.com/api/overpass'
+const OVERPASS_URL = process.env.OVERPASS_URL ?? 'https://bike-map.fryanpan.com/api/overpass'
 const TILE_DEGREES = 0.1
 
 // All 5 modes after the Layer 1.5 refactor.
@@ -120,9 +122,66 @@ const BROUTER_PROFILES: Record<ModeKey, string> = {
 
 const tileCache = new Map<string, OsmWay[]>()
 
+/** Tiles whose fetch failed every retry. A failed tile yields an empty way
+ *  list, so letting a run continue past one reports routing numbers measured
+ *  on data that was never fetched. `fetchTilesForCity` aborts on a non-empty
+ *  list rather than scoring a hole in the graph. */
+const FAILED_TILES: string[] = []
+
+/** Opt-in on-disk tile cache, shared across runs AND across arms.
+ *
+ *  Set `BENCH_TILE_CACHE=<dir>` to enable; unset, behaviour is exactly as before.
+ *  Two reasons it exists, the second mattering more than the speed:
+ *
+ *  1. A public Overpass mirror rate-limits a 36-tile city hard enough to fail
+ *     some tiles outright (measured 2026-11-14: 3/36 Berlin tiles lost to 429/502
+ *     after three retries each). A cache lets a re-run fetch only the misses
+ *     instead of re-rolling the dice on all 36.
+ *  2. Both arms of a comparison then read the SAME bytes. Without it each arm
+ *     fetches independently from a flaky upstream, so the base and the branch can
+ *     silently measure different input and the delta stops meaning anything.
+ *
+ *  Keyed by `TILE_BUST` as well as row/col, so a `buildQuery()` change that alters
+ *  which ways a tile contains does not serve a stale pre-change tile.
+ */
+const TILE_CACHE_DIR = process.env.BENCH_TILE_CACHE ?? null
+
+function diskCachePath(row: number, col: number): string | null {
+  if (!TILE_CACHE_DIR) return null
+  const bust = process.env.TILE_BUST ? `${process.env.TILE_BUST}-` : ''
+  return nodePath.join(TILE_CACHE_DIR, `${bust}${row}_${col}.json`)
+}
+
+function readDiskCache(row: number, col: number): OsmWay[] | null {
+  const p = diskCachePath(row, col)
+  if (!p) return null
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf-8')) as OsmWay[]
+  } catch {
+    return null
+  }
+}
+
+function writeDiskCache(row: number, col: number, ways: OsmWay[]): void {
+  const p = diskCachePath(row, col)
+  if (!p) return
+  try {
+    fs.mkdirSync(nodePath.dirname(p), { recursive: true })
+    fs.writeFileSync(p, JSON.stringify(ways))
+  } catch (err) {
+    console.warn(`[cache] could not write ${p}: ${String(err)}`)
+  }
+}
+
 async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
   const key = `${row}:${col}`
   if (tileCache.has(key)) return tileCache.get(key)!
+
+  const cached = readDiskCache(row, col)
+  if (cached) {
+    tileCache.set(key, cached)
+    return cached
+  }
 
   const bbox = {
     south: row * TILE_DEGREES,
@@ -140,7 +199,7 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
   const bust = process.env.TILE_BUST ? `${process.env.TILE_BUST}-` : ''
 
   let resp: Response | null = null
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     resp = await fetch(`${OVERPASS_URL}?row=${bust}${row}&col=${col}`, {
       method: 'POST',
       body: `data=${encodeURIComponent(query)}`,
@@ -148,11 +207,12 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
     })
     if (resp.ok) break
     console.warn(`[Overpass] Tile ${row}:${col} HTTP ${resp.status}, retry ${attempt + 1}`)
-    await new Promise((r) => setTimeout(r, (attempt + 1) * 3000))
+    await new Promise((r) => setTimeout(r, (attempt + 1) * 5000))
   }
 
   if (!resp || !resp.ok) {
     console.warn(`[Overpass] Tile ${row}:${col} FAILED after retries`)
+    FAILED_TILES.push(`${row}:${col}`)
     tileCache.set(key, [])
     return []
   }
@@ -169,12 +229,20 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
   if (isEnrichedTilePayload(payload)) {
     const enriched = parseEnrichedTileResponse(payload)
     tileCache.set(key, enriched)
+    writeDiskCache(row, col, enriched)
     return enriched
   }
 
   const data = payload as { elements: Array<{ type: string; id: number; tags?: Record<string, string>; geometry?: Array<{ lat: number; lon: number }>; lat?: number; lon?: number }> }
   if (!Array.isArray(data?.elements)) {
-    console.warn(`[Overpass] Tile ${row}:${col} — unrecognised payload shape, treating as empty`)
+    // NOT merely empty: a shape we cannot parse is what a mirror's HTML error
+    // page and a regional instance's out-of-area answer both look like, and
+    // learnings.md records that as strictly worse than an error because every
+    // layer above reads it as "no bike infrastructure here". Record it as a
+    // failure so the run aborts instead of scoring the hole. A genuinely empty
+    // tile sends `{elements: []}`, which is an array and does not land here.
+    console.warn(`[Overpass] Tile ${row}:${col} — unrecognised payload shape, treating as FAILED`)
+    FAILED_TILES.push(`${row}:${col} (unrecognised payload)`)
     tileCache.set(key, [])
     return []
   }
@@ -196,6 +264,7 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
   }
 
   tileCache.set(key, ways)
+  writeDiskCache(row, col, ways)
   return ways
 }
 
@@ -212,7 +281,7 @@ async function fetchTilesForCity(cityName: string, bbox: CityBbox): Promise<OsmW
     for (let c = minCol; c <= maxCol; c++)
       tiles.push({ row: r, col: c })
 
-  console.log(`Fetching ${tiles.length} tiles for ${cityName}...`)
+  console.log(`Fetching ${tiles.length} tiles for ${cityName} via ${OVERPASS_URL}...`)
   const allWays: OsmWay[] = []
 
   for (let i = 0; i < tiles.length; i += 2) {
@@ -223,6 +292,17 @@ async function fetchTilesForCity(cityName: string, bbox: CityBbox): Promise<OsmW
     if (i + 2 < tiles.length) await new Promise((r) => setTimeout(r, 500))
   }
   console.log(`\n  Total: ${allWays.length} ways`)
+
+  // Abort rather than score a partial graph. An empty tile is indistinguishable
+  // from "no bike infrastructure here" by the time the numbers are printed.
+  if (FAILED_TILES.length > 0) {
+    throw new Error(
+      `${FAILED_TILES.length}/${tiles.length} tiles failed for ${cityName} ` +
+        `(${FAILED_TILES.join(', ')}). Refusing to report numbers measured on ` +
+        `a partial graph. Endpoint: ${OVERPASS_URL}`,
+    )
+  }
+
   return allWays
 }
 
@@ -712,4 +792,10 @@ async function main() {
   }
 }
 
-main().catch(console.error)
+main().catch((err) => {
+  console.error(err)
+  // Exit non-zero. `main().catch(console.error)` printed the error and exited 0,
+  // so a crashed run -- including the partial-graph abort above -- looked like a
+  // pass to any caller that checks the status instead of reading the output.
+  process.exit(1)
+})

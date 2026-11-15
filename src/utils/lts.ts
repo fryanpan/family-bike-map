@@ -287,6 +287,37 @@ export interface LtsClassification {
 }
 
 /**
+ * Assumed speed for a road class when the way carries no `maxspeed`.
+ *
+ * Null for car-free classes (cycleway, path, footway, pedestrian): they have
+ * no motor traffic to assume a speed for, and `derivePathLevel` treats a null
+ * speed as "no evidence this is fast" rather than guessing.
+ *
+ * Exported because the unsignalized-crossing cost in `edgeAStar` needs the
+ * speed of a road it is NOT classifying — the arms incident to a junction, to
+ * decide which of them count as major — and a second copy of this table is how
+ * routing and display drift apart.
+ */
+export function speedDefaultForClass(highway: string): number | null {
+  switch (highway) {
+    case 'living_street': return 15
+    case 'residential': return 30
+    case 'unclassified': return 30
+    // A tertiary is a minor connector, not an arterial. Guessing 50 here put
+    // every untagged tertiary above the 2a ceiling, which silently deleted
+    // whole painted-lane corridors from the overlay in cities that don't tag
+    // maxspeed densely (SF: Folsom St, 17th St). 40 is the more honest guess
+    // for an urban connector; secondary and above keep 50+ because those
+    // genuinely are arterials.
+    case 'tertiary': return 40
+    case 'secondary': return 50
+    case 'primary': return 60
+    case 'trunk': return 80
+    default: return null
+  }
+}
+
+/**
  * Derive pathLevel from the other LtsClassification fields. Captures our two
  * departures from strict Furth:
  *   - Quiet residential (LTS 1 per Furth) demotes to '2b' when it has no bike
@@ -434,26 +465,7 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
     hasBusLane
 
   // Speed: from maxspeed tag if present, otherwise from road-class defaults.
-  const speedKmh: number | null = (() => {
-    if (maxspeed > 0) return maxspeed
-    if (isCycleway || isPath || isFootway || isPedestrian) return null
-    if (isLivingStreet) return 15
-    if (isResidential) return 30
-    switch (highway) {
-      case 'unclassified': return 30
-      // A tertiary is a minor connector, not an arterial. Guessing 50 here
-      // put every untagged tertiary above the 2a ceiling, which silently
-      // deleted whole painted-lane corridors from the overlay in cities that
-      // don't tag maxspeed densely (SF: Folsom St, 17th St). 40 is the more
-      // honest guess for an urban connector; secondary and above keep 50+
-      // because those genuinely are arterials.
-      case 'tertiary': return 40
-      case 'secondary': return 50
-      case 'primary': return 60
-      case 'trunk': return 80
-      default: return null
-    }
-  })()
+  const speedKmh: number | null = maxspeed > 0 ? maxspeed : speedDefaultForClass(highway)
 
   // Traffic density heuristic from road class. Null for car-free infra.
   const trafficDensity: TrafficDensity | null = (() => {
