@@ -1,5 +1,10 @@
 import { describe, it, expect, afterEach } from 'bun:test'
-import { fetchOverpass, OVERPASS_ENDPOINTS, OVERPASS_TOTAL_BUDGET_MS } from '../src/worker'
+import {
+  fetchOverpass,
+  OVERPASS_ENDPOINTS,
+  OVERPASS_TOTAL_BUDGET_MS,
+  SLOWEST_MEASURED_SUCCESS_MS,
+} from '../src/worker'
 import { FETCH_TIMEOUT_MS } from '../src/services/overpass'
 
 // The 2026-10-16 Boston outage: Cloudflare's Worker-to-overpass-api.de fetch
@@ -162,7 +167,7 @@ describe('fetchOverpass', () => {
 
 describe('fetchOverpass whole-chain budget', () => {
   // The per-attempt cap bounds one instance, not the chain. Three endpoints at
-  // the 40 s cap is 120 s, and the browser gives up at FETCH_TIMEOUT_MS. The
+  // the per-attempt cap outlives FETCH_TIMEOUT_MS, so the browser quits. The
   // client then sees an abort instead of our attempt trail, and its own retry
   // walks the same dead chain again — so a slow mirror became a hang that
   // never reported which instances were tried.
@@ -241,6 +246,21 @@ describe('fetchOverpass whole-chain budget', () => {
     // What actually broke: nothing bounded ENDPOINTS.length x the per-attempt
     // cap, so the arithmetic below was 120_000 < 35_000.
     expect(OVERPASS_TOTAL_BUDGET_MS).toBeLessThan(FETCH_TIMEOUT_MS)
-    expect(OVERPASS_TOTAL_BUDGET_MS).toBeGreaterThan(20_000)
+  })
+
+  it('gives the chain longer than the slowest answer we have ever measured', async () => {
+    // The other half of the bound, and the half that was wrong. The budget
+    // shipped at 30_000 while the only upstream that answers a full
+    // production query took 38.5 s (Berlin, overpass-api.de, 2026-11-14). A
+    // cap under a measured success is not a timeout, it is an outage: the
+    // chain aborts the one instance that would have served the tile. Keep
+    // headroom, because 38.5 s is the slowest success SEEN, not a ceiling.
+    expect(OVERPASS_TOTAL_BUDGET_MS).toBeGreaterThan(SLOWEST_MEASURED_SUCCESS_MS)
+  })
+
+  it('leaves the client patience for the slowest answer too', async () => {
+    // Both caps have to clear it, not just the proxy's. A 35 s client cap
+    // made the 38.5 s success unreachable no matter what the proxy allowed.
+    expect(FETCH_TIMEOUT_MS).toBeGreaterThan(SLOWEST_MEASURED_SUCCESS_MS)
   })
 })
