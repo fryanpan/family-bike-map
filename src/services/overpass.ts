@@ -1,6 +1,12 @@
 import type { OsmWay } from '../utils/types'
 import { BAD_SURFACES, BAD_SMOOTHNESS, UNRIDEABLE_SURFACES } from '../utils/classify'
-import { classifyEdge } from '../utils/lts'
+import {
+  anyCyclewaySide,
+  classifyEdge,
+  CYCLEWAY_BUSWAY_VALUES,
+  CYCLEWAY_LANE_VALUES,
+  CYCLEWAY_TRACK_VALUES,
+} from '../utils/lts'
 import type { ClassificationRule } from './rules'
 // Structural bounds — anything that exposes the four directions works
 // (Leaflet's L.LatLngBounds, our engine bounds, or a small literal in
@@ -388,25 +394,15 @@ export function classifyOsmTagsToItem(
   const { pathLevel, trafficDensity } = classifyEdge(tags)
 
   const highway     = tags.highway ?? ''
-  const cycleway    = tags.cycleway ?? ''
   const bicycleRoad = tags.bicycle_road === 'yes' || tags.cyclestreet === 'yes'
 
-  const cRight = tags['cycleway:right'] ?? ''
-  const cLeft  = tags['cycleway:left']  ?? ''
-  const cBoth  = tags['cycleway:both']  ?? ''
-
-  const isSeparatedTrack =
-    cycleway === 'track' || cycleway === 'opposite_track' ||
-    cRight === 'track' || cLeft === 'track' || cBoth === 'track'
-
-  const hasPaintedLaneTag =
-    cycleway === 'lane' || cycleway === 'opposite_lane' ||
-    cRight === 'lane' || cLeft === 'lane' || cBoth === 'lane'
-
+  // Read the sides through the same helper classifyEdge uses. This function
+  // derives its pathLevel from classifyEdge, so a facility classifyEdge sees
+  // and this one does not produces a label that contradicts the routing score.
+  const isSeparatedTrack = anyCyclewaySide(tags, CYCLEWAY_TRACK_VALUES)
+  const hasPaintedLaneTag = anyCyclewaySide(tags, CYCLEWAY_LANE_VALUES)
   const isPhysicallySeparatedLane = hasPaintedLaneTag && hasSeparation(tags)
-  const hasBusLaneTag =
-    cycleway === 'share_busway' || cRight === 'share_busway' ||
-    cLeft === 'share_busway' || cBoth === 'share_busway'
+  const hasBusLaneTag = anyCyclewaySide(tags, CYCLEWAY_BUSWAY_VALUES)
 
   const isLocalAccessOnly = tags.motor_vehicle === 'destination' || tags.motor_vehicle === 'permissive'
 
