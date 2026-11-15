@@ -321,6 +321,26 @@ describe('classifyOsmTagsToItem', () => {
   })
 
 
+  it('reads cycleway:left, which the plain-key-only reads used to miss', () => {
+    expect(classifyOsmTagsToItem({ highway: 'tertiary', 'cycleway:left': 'track' }, 'kid-confident')).toBe('Protected bike lane on major road')
+    expect(classifyOsmTagsToItem({ highway: 'residential', 'cycleway:left': 'lane' }, 'kid-starting-out')).toBe('Painted bike lane on quiet street')
+  })
+
+  it('labels per-side opposite_track/opposite_lane the same as the plain-side equivalent', () => {
+    // The drift this pins: the display reads used to test opposite_* on the
+    // plain `cycleway` key only, while classifyEdge read it on every side. A
+    // residential `cycleway:left=opposite_track` therefore scored as a
+    // curb-separated track in routing but labelled "Bike path" — preferred for
+    // every mode, where "Elevated sidewalk path" is not. Both now go through
+    // anyCyclewaySide, so the label cannot contradict the routing tier.
+    for (const side of ['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'] as const) {
+      expect(classifyOsmTagsToItem({ highway: 'residential', [side]: 'opposite_track' }, 'carrying-kid'))
+        .toBe(classifyOsmTagsToItem({ highway: 'residential', [side]: 'track' }, 'carrying-kid'))
+      expect(classifyOsmTagsToItem({ highway: 'residential', [side]: 'opposite_lane' }, 'kid-starting-out'))
+        .toBe(classifyOsmTagsToItem({ highway: 'residential', [side]: 'lane' }, 'kid-starting-out'))
+    }
+  })
+
   it('returns Painted bike lane on quiet street for cycleway=lane on residential', () => {
     expect(classifyOsmTagsToItem({ highway: 'residential', cycleway: 'lane' }, 'kid-starting-out')).toBe('Painted bike lane on quiet street')
   })
