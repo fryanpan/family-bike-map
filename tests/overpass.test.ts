@@ -646,3 +646,29 @@ describe('isOverlayCrossing', () => {
     expect(isOverlayCrossing({ highway: 'path', bicycle: 'designated' })).toBe(false)
   })
 })
+
+// Display-surface cover for the 2026-08-22 "missing Folsom and 17th" bug.
+// These are the exact tag shapes those two corridors carry in OSM: tertiary
+// with a painted lane and NO maxspeed tag at all. The user-visible symptom was
+// the item name — they resolved to the level-3 "major road" item, which is
+// non-preferred for every profile and so painted nothing.
+describe('classifyOsmTagsToItem — untagged-speed painted lanes (Folsom St, 17th St)', () => {
+  const folsom = { highway: 'tertiary', cycleway: 'lane', lanes: '3', name: 'Folsom Street' }
+  const seventeenth = { highway: 'tertiary', cycleway: 'lane', lanes: '2', name: '17th Street' }
+
+  it('names them as a quiet-street lane for kid-traffic-savvy', () => {
+    expect(classifyOsmTagsToItem(folsom, 'kid-traffic-savvy')).toBe('Painted bike lane on quiet street')
+    expect(classifyOsmTagsToItem(seventeenth, 'kid-traffic-savvy')).toBe('Painted bike lane on quiet street')
+  })
+
+  it('is profile-independent — the item name comes from the tags, not the rider', () => {
+    for (const profile of ['kid-starting-out', 'kid-confident', 'carrying-kid', 'training']) {
+      expect(classifyOsmTagsToItem(folsom, profile)).toBe('Painted bike lane on quiet street')
+    }
+  })
+
+  it('still names a 30 mph arterial lane a major-road lane', () => {
+    const arterial = { highway: 'secondary', cycleway: 'lane', maxspeed: '30 mph', lanes: '2' }
+    expect(classifyOsmTagsToItem(arterial, 'kid-traffic-savvy')).toBe('Painted bike lane on major road')
+  })
+})

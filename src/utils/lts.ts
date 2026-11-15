@@ -13,16 +13,99 @@
 export type LtsLevel = 1 | 2 | 3 | 4
 
 /**
+ * Ceiling for the "calmed street" tier (pathLevel 2a). A painted lane or bus
+ * lane at or below this speed counts as a bike route beside *slow* cars; above
+ * it the lane is beside arterial traffic and demotes to '3'.
+ *
+ * 40 km/h is chosen so the two real-world regimes that mean "calmed urban
+ * street" both land inside it: a European Tempo-30 zone (30 km/h) and a US
+ * 25 mph street (40.2 km/h → 40). A US 30 mph street (48 km/h) is an arterial
+ * and stays out, as does a European 50 km/h Hauptstraße.
+ *
+ * Verified against live OSM (2026-08-22): moving this from 30 to 40 changes
+ * ZERO ways in central Berlin — Berlin streets are posted 30 or 50, nothing
+ * sits between — while it is the difference between "reachable" and
+ * "unreachable" for essentially every calmed street in San Francisco.
+ */
+export const QUIET_STREET_MAX_KMH = 40
+
+/**
+ * Parse an OSM `maxspeed` value to km/h.
+ *
+ * OSM stores speeds unit-suffixed: bare numbers are km/h by convention, and
+ * US/UK ways carry an explicit `mph` suffix. Reading these with a bare
+ * `parseInt` drops the unit and silently treats `"25 mph"` as 25 km/h — an
+ * error in the *dangerous* direction for a family-safety product, because it
+ * makes a 30 mph (48 km/h) arterial look like a quiet street.
+ *
+ * Returns null ONLY when the tag is absent — "we have no information," which
+ * callers may treat permissively. A tag that is PRESENT but unrecognized
+ * returns UNKNOWN_POSTED_SPEED_KMH instead, deliberately high, so it can
+ * never satisfy a "calmed street" test. Someone bothered to post a speed
+ * limit on this way; assuming it is quiet because we failed to read it is
+ * the one failure mode this whole function exists to prevent. (It also
+ * preserves the pre-2026-08-22 behaviour, where `parseInt` returned NaN for
+ * these and NaN failed every `<=` comparison.)
+ *
+ * Implicit country-coded values (`DE:urban`, `US:rural`, `DE:zone30`, …) are
+ * mapped to their statutory speeds rather than dumped into the unknown
+ * bucket, so a Berlin Tempo-30 zone still reads as 30.
+ */
+export const UNKNOWN_POSTED_SPEED_KMH = 999
+
+/** Statutory speeds for OSM's implicit `COUNTRY:category` maxspeed values. */
+const IMPLICIT_MAXSPEED_KMH: Record<string, number> = {
+  living_street: 7,
+  walk: 7,
+  urban: 50,
+  rural: 100,
+  motorway: 130,
+  trunk: 100,
+  nsl_single: 96, // UK national speed limit, single carriageway (60 mph)
+  nsl_dual: 112, // UK national speed limit, dual carriageway (70 mph)
+}
+
+export function parseMaxspeedKmh(raw: string | undefined): number | null {
+  if (raw == null || raw.trim() === '') return null
+  const value = raw.trim().toLowerCase()
+
+  // Walking pace — living streets and shared spaces.
+  if (value === 'walk' || value === 'walking') return 7
+  // Explicitly derestricted (autobahn). Definitely not calm.
+  if (value === 'none' || value === 'unlimited') return 130
+
+  const numeric = /^(\d+(?:\.\d+)?)\s*(mph|km\/h|kmh|kph)?$/.exec(value)
+  if (numeric) {
+    const n = parseFloat(numeric[1])
+    if (!Number.isFinite(n) || n <= 0) return UNKNOWN_POSTED_SPEED_KMH
+    return numeric[2] === 'mph' ? Math.round(n * 1.609344) : Math.round(n)
+  }
+
+  // Implicit forms: "DE:urban", "US:rural", "DE:zone30", "DE:zone:30".
+  const zone = /(?:^|:)zone:?(\d+)$/.exec(value)
+  if (zone) {
+    const n = parseInt(zone[1], 10)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  const category = value.includes(':') ? value.slice(value.lastIndexOf(':') + 1) : value
+  const implicit = IMPLICIT_MAXSPEED_KMH[category]
+  if (implicit != null) return implicit
+
+  // Present, but we could not read it. Assume fast, never calm.
+  return UNKNOWN_POSTED_SPEED_KMH
+}
+
+/**
  * Path Level — our extension of Furth's LTS framework with a/b sub-tiers
  * splitting LTS 1 and LTS 2 by bike-infra presence.
  *
  *   1a = physically car-free (cycleway, bike path, curb-separated track)
  *   1b = bike-prioritized shared surface (Fahrradstraße, living street,
  *        bike boulevard / SF Slow Street pattern)
- *   2a = bike infra on a quiet street (painted lane or bus lane on
- *        maxspeed ≤ 30 km/h)
+ *   2a = bike infra on a calmed street (painted lane or bus lane on a
+ *        street at or below QUIET_STREET_MAX_KMH)
  *   2b = quiet residential without bike infra OR LTS 2 without infra
- *   3  = LTS 3 (busy residentials, painted lane on 31–50 km/h, tertiary)
+ *   3  = LTS 3 (busy residentials, painted lane above the calmed ceiling)
  *   4  = LTS 4 (primary, secondary ≥50 km/h without infra, trunk)
  *
  * See docs/product/plans/2026-04-21-path-categories-plan.md.
@@ -82,7 +165,7 @@ export const PATH_LEVEL_LABELS: Record<PathLevel, {
   '2a': {
     short: 'Lane + quiet street',
     legendTitle: 'Bike route beside cars',
-    description: 'Painted bike lane or shared bus lane on a street capped ≤30 km/h.',
+    description: 'Painted bike lane or shared bus lane on a calmed street — up to 40 km/h (25 mph).',
     displayDescription: 'Painted bike lane or shared bus lane on quiet streets',
     defaultColor: '#2b8cbe',
     defaultWeight: 0.75,
@@ -91,15 +174,15 @@ export const PATH_LEVEL_LABELS: Record<PathLevel, {
     short: 'Quiet residential',
     legendTitle: 'Quiet residential street',
     description: 'Residential street without bike infra, low speed / low volume.',
-    displayDescription: 'Residential street, no bike infra, speed ≤ 30 km/h',
+    displayDescription: 'Residential street, no bike infra, up to 40 km/h (25 mph)',
     defaultColor: '#e78ac3',
     defaultWeight: 0.75,
   },
   '3': {
     short: 'Busy street',
     legendTitle: 'Higher traffic street',
-    description: 'Tertiary, busy residentials, painted lane on 31-50 km/h — cyclist-in-traffic.',
-    displayDescription: 'Streets 30–50 km/h, ≤ 3 lanes, with or without painted lane',
+    description: 'Tertiary, busy residentials, painted lane above the calmed ceiling — cyclist-in-traffic.',
+    displayDescription: 'Streets above 40 km/h (25 mph), ≤ 3 lanes, with or without painted lane',
     defaultColor: '#ffd92f',
     defaultWeight: 0.75,
   },
@@ -209,8 +292,9 @@ export interface LtsClassification {
  *   - Quiet residential (LTS 1 per Furth) demotes to '2b' when it has no bike
  *     infra or priority — the kid-first framing treats "quiet street" as
  *     meaningfully different from "bike-prioritized street."
- *   - Painted lane on >30 km/h demotes to '3' — Furth allows up to ~48 km/h;
- *     we tighten so '2a' genuinely represents "quiet street with bike infra."
+ *   - Painted lane above QUIET_STREET_MAX_KMH demotes to '3' — Furth allows
+ *     up to ~48 km/h; we tighten so '2a' genuinely represents "bike infra on
+ *     a calmed street."
  *
  * See docs/product/plans/2026-04-21-path-categories-plan.md §2.
  */
@@ -227,8 +311,9 @@ function derivePathLevel(params: {
   if (carFree) return '1a'
   if (bikePriority) return '1b'
   // LTS 1 or 2, shared surface without bike priority.
-  // 2a requires bike infra AND quiet (maxspeed ≤ 30 or unset).
-  if (bikeInfra && (speedKmh == null || speedKmh <= 30)) return '2a'
+  // 2a requires bike infra AND a calmed street (at or below
+  // QUIET_STREET_MAX_KMH, or speed unknown).
+  if (bikeInfra && (speedKmh == null || speedKmh <= QUIET_STREET_MAX_KMH)) return '2a'
   // Bike infra on a faster road demotes to LTS 3 per our kid-first framing.
   if (bikeInfra) return '3'
   // Everything else (quiet residential, LTS 2 mixed traffic) → 2b.
@@ -247,7 +332,8 @@ export type TrafficDensity = 'low' | 'moderate' | 'high'
 export function classifyEdge(tags: Record<string, string>): LtsClassification {
   const highway = tags.highway ?? ''
   const cycleway = tags.cycleway ?? tags['cycleway:right'] ?? tags['cycleway:both'] ?? ''
-  const maxspeed = parseInt(tags.maxspeed ?? '0', 10)
+  // 0 = untagged, the sentinel the comparisons below already expect.
+  const maxspeed = parseMaxspeedKmh(tags.maxspeed) ?? 0
   const lanes = parseInt(tags.lanes ?? '0', 10)
   const surface = tags.surface ?? null
   const smoothness = tags.smoothness ?? null
@@ -310,7 +396,13 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
     if (isResidential) return 30
     switch (highway) {
       case 'unclassified': return 30
-      case 'tertiary': return 50
+      // A tertiary is a minor connector, not an arterial. Guessing 50 here
+      // put every untagged tertiary above the 2a ceiling, which silently
+      // deleted whole painted-lane corridors from the overlay in cities that
+      // don't tag maxspeed densely (SF: Folsom St, 17th St). 40 is the more
+      // honest guess for an urban connector; secondary and above keep 50+
+      // because those genuinely are arterials.
+      case 'tertiary': return 40
       case 'secondary': return 50
       case 'primary': return 60
       case 'trunk': return 80
@@ -347,11 +439,11 @@ export function classifyEdge(tags: Record<string, string>): LtsClassification {
     }
 
     // Residential with low speed and narrow = LTS 1 (Furth's "quiet mixed")
-    if (isResidential && (maxspeed <= 30 || maxspeed === 0) && lanes <= 2) return 1
+    if (isResidential && maxspeed <= QUIET_STREET_MAX_KMH && lanes <= 2) return 1
 
     // Painted bike lane
     if (hasPaintedLane) {
-      if (maxspeed <= 30 && lanes <= 2) return 2
+      if (maxspeed <= QUIET_STREET_MAX_KMH && lanes <= 2) return 2
       if (maxspeed <= 50 && lanes <= 3) return 2
       return 3
     }

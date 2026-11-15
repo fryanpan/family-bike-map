@@ -380,6 +380,119 @@
 
 ---
 
+## 2026-04-22: Surface roughness — single binary classifier
+
+**Context**: We had two parallel surface lists: `BAD_SURFACES` for the display overlay and a separate routing penalty knob via Valhalla's `avoid_bad_surfaces`. They drifted — the display flagged paving_stones as rough but the router still picked routes through them, frustrating the "what you see is what you ride" invariant.
+
+**Decision**: One binary `isRoughSurface(tags, profileKey)` function in `overpass.ts` answers both questions. `paving_stones` is OK for slow kid modes (kid-starting-out, kid-confident), rough for higher-speed modes. `cobblestone`/`gravel`/`dirt`/`sand` are universally rough. `smoothness=horrible|very_bad|bad` rejects regardless of `surface=*`. Router applies a 5× cost multiplier to rough edges; overlay greys them out for higher-speed modes.
+
+**Status**: Shipped. Single source of truth.
+
+---
+
+## 2026-04-23: Width / est_width tags too sparsely tagged to filter on
+
+**Context**: Bryan asked whether kid-starting-out should reject narrow cycleways via OSM `width` / `est_width` tags. Spot-checks of Berlin's cycleway corpus showed single-digit percent of ways with a `width=*` tag.
+
+**Decision**: Keep width unread by the router. A filter would only catch the small minority of narrow ways that *are* tagged narrow, create visible "this unmarked one is fine but that 1.2m one is rejected?" inconsistency, and drive very little routing change. Revisit only if OSM coverage materially improves.
+
+**Status**: Deferred. See `docs/process/learnings.md` ("OSM tag coverage").
+
+---
+
+## 2026-04-24: Versioning, frozen benchmarks, /version.json
+
+**Context**: Pre-launch we needed (a) Sentry source-map releases to line up across both stacks, (b) benchmark folders traceable to the exact bundle that produced them, (c) blog-post screenshots that don't drift when the live app keeps getting deployed.
+
+**Decisions**:
+
+1. **Version semantics**: CI builds tag with `0.1.<github_run_number>` via `VITE_APP_VERSION`. Local dev gets `0.1.0-dev-<sha>[-dirty]`. Same constant `APP_VERSION` exported from `src/version.ts`, threaded into Sentry release tags, PostHog `app_version` superproperty, Userback `custom_data.app_version`.
+2. **`/version.json` emitted at site root** by a Vite plugin, so any tool can ask "what's deployed?" without downloading the main bundle. Benchmark scripts read this to prefix locally-generated folders with the *live prod* version (`<prod-version>-local-<sha>`) instead of a dev sha — less confusing.
+3. **Benchmark folder = `<YYYY-MM-DD>-<version>`**. Each run writes to its own folder under `public/route-compare/`. Old folders are never overwritten.
+4. **Launch reference is frozen**: `2026-04-24-0.1.184-local-5478dd5-dirty/` is pinned to the launch blog post; future runs go to fresh folders. Live-current admin view is fine to drift; the post's screenshots stay in lockstep with the version that produced them. Live "always current" benchmark page is deferred to "if users care" (see `docs/process/learnings.md` → "Frozen artifacts").
+
+**Status**: Shipped.
+
+---
+
+## 2026-04-24: findNearestNode role-aware + reachability-restricted
+
+**Context**: Client router was failing 45/195 benchmark samples (23% — 41% of SF) returning null, even when a viable endpoint sat 20–100 m away. Two bugs: (i) end-snap could land on the upstream terminus of a one-way (1 outgoing, 0 incoming edges); (ii) snap could pick a node on a tiny directed island unreachable from the start.
+
+**Decision**: Make `findNearestNode` role-aware (`role: 'start' | 'end'`) and reachability-restricted. Pre-compute the directed-reachable set from the start node via BFS (O(V+E), ~10 ms) and constrain the end-snap to that set. Cap max snap distance at 1 km (the disconnected-graph test relies on null when the endpoint is genuinely off the network).
+
+**Result**: Client router success rate 77% → 100% (Berlin: 91% → 100%, SF: 59% → 100%). Berlin preferred-% essentially unchanged on previously-passing routes (compositional shift only on newly-successful routes).
+
+**Status**: Shipped (PR #138). Benchmark in `docs/research/2026-04-24-findnearestnode-reachability-fix.md`.
+
+---
+
+## 2026-04-26: Sentry on the Worker — one project, runtime-tagged
+
+**Context**: A "routes broken" episode mid-launch-week produced zero Sentry signal because the Cloudflare Worker had no error reporting. Bryan asked whether Worker errors should land in the same Sentry project as the frontend or a separate one.
+
+**Decision**: **Same Sentry project, distinguished by `tags.runtime: 'worker' | 'browser'`**, not by environment. Wins on: cross-stack correlation (browser + Worker errors under the same release), one DSN to rotate, shared release semantics — both stacks deploy from the same commit so `release: APP_VERSION` lines up.
+
+**Wiring**: `@sentry/cloudflare`'s `withSentry()` wraps the Worker default export; auto-captures uncaught throws. `Sentry.captureException` added to the silent /api/route-log D1 catch. Bundle: 460 KiB (well under the 1 MiB free-tier limit). Existing `VITE_SENTRY_DSN` GitHub secret reused as the Worker's `SENTRY_DSN` (DSNs are public client-keys per Sentry docs); CI passes `--var APP_VERSION:0.1.<run_number>` to wrangler so the Worker's release matches the frontend bundle.
+
+**Status**: Shipped (PR #141).
+
+---
+
+## 2026-04-26: Quality bar — distance-weighted, not coord-count
+
+**Context**: Bryan reported a Berlin route showing mostly green on the polyline but 53% non-preferred in the route panel bar. `computeRouteQuality` was summing per-segment `coordinates.length - 1` as a length proxy. OSM way vertex density varies wildly: straight cycleways often have 4–5 coords for 800 m, while curvy residential streets pack 10+ coords into 200 m. Coord-count weighting systematically over-counted curvy non-preferred segments.
+
+**Decision**: Switch the in-app `computeRouteQuality` to actual on-the-ground haversine distance. The benchmark's `scorePreferred` was already distance-weighted, so the shipped benchmark numbers were always correct; only the in-app bar was biased. After this fix the two methodologies are consistent.
+
+**Status**: Shipped (PR #140).
+
+---
+
+## 2026-04-28: One legend table, one display-tier helper
+
+**Context**: Audit found three sites that drifted on tier display props — CSS rules redefining tier colors a different shade from the JS constants (`.qb-other` was `#fb923c` while the route polyline used `#f97316` for the same "non-preferred" concept); SimpleLegend's `SIMPLE_TIERS` had its own tier titles/descriptions that differed from `PATH_LEVEL_LABELS`'; admin-settings tier defaults inlined the same hex codes a second time.
+
+Worse: four display surfaces (legend, overlay, route polyline, quality bar) used **different sources of truth** for "what tier color does this way render at?" — the legend used `PROFILE_LEGEND[item].level`, while overlay/painter/bar used `classifyEdge.pathLevel`. These two classifiers diverge for the same OSM way in edge cases (residential streets with cycleway lanes, default-speed handling), so the same way could render one color in the legend swatch and a different color on the route polyline.
+
+**Decisions**:
+
+1. **`PATH_LEVEL_LABELS` in `utils/lts.ts` is the single legend table.** Carries `short`, `legendTitle`, `description`, `displayDescription`, `defaultColor`, `defaultWeight` per `PathLevel`. `DEFAULT_SETTINGS.tiers` and `SIMPLE_TIERS` derive from it. CSS rules that redefined tier colors were removed; DirectionsPanel inlines colors from constants.
+2. **`getDisplayPathLevel(itemName, mode, fallback)` is the single display-tier helper.** When an OSM way maps to a known legend item, the legend's level is canonical; else fall back to `classifyEdge`. Used by `clientRouter` (when setting `seg.pathLevel`) and `BikeMapOverlay` (when computing per-way color).
+3. **`classifyEdge` (LTS-tier) is now strictly the routing classifier.** `applyModeRule` reads it for accept/reject + cost decisions. Display surfaces never call it directly except via `getDisplayPathLevel`'s fallback.
+4. **`PREFERRED_COLOR` / `OTHER_COLOR` / `WALKING_COLOR`** in `classify.ts` are the source of truth for non-tier categorization colors.
+
+After this: same way renders the same color in legend, overlay, route polyline, and bar. The architectural rule from `learnings.md` ("one classifier drives both display and routing") is restored — display ⇒ `getDisplayPathLevel`; routing ⇒ `classifyEdge` + `applyModeRule`; bridging ⇒ `getDisplayPathLevel`'s legend lookup.
+
+**Status**: Shipped (PRs #145, #150). Architecture documented in `architecture.md`.
+
+---
+
+## 2026-04-28: Mode-switch state hygiene — sync clear + async generation guard
+
+**Context**: After the 2026-04-28 single-display-tier refactor, Bryan still saw stale colors when switching travel modes while a route was on screen. Two distinct bugs.
+
+**Decisions**:
+
+1. **Synchronous fix**: `handleProfileChange` clears `routes` and `selectedRouteIndex` immediately, before calling `computeRoute`. Even when start/end are unset (so `computeRoute` is skipped), the old route's segments don't linger with the new mode's `preferredItemNames`.
+2. **Async fix (generation guard)**: `routeRequestRef` is a monotonic counter. Each `computeRoute` bumps the ref at start and captures its own id. Before each setState that mutates shared route state (`setRoutes`, `setError`, `setIsLoading`), check the ref hasn't moved past — bail silently if a newer request is in flight. Suppresses superseded request's error toasts and loading spinner too.
+
+The async race only fires when two computes overlap (mode-switch while previous still running). PR #151 covered the sync case; PR #153 closes the async case.
+
+**Status**: Shipped (PRs #151, #153).
+
+---
+
+## 2026-04-28: Userback hostname gate — drop in favor of dashboard
+
+**Context**: Userback widget had a parallel hostname allowlist in client code (only `bike-map.fryanpan.com` would init the SDK), redundant with Userback's dashboard `allowed-domains` setting. Bryan asked why both — the answer was "no reason."
+
+**Decision**: Drop the client gate. Single source of truth = Userback's dashboard. The `VITE_USERBACK_TOKEN` unset check still acts as a kill switch (matches the Sentry / PostHog gate pattern). Bonus: localhost / Tailscale dev hosts now load the widget too, useful for testing without a deploy.
+
+**Status**: Shipped (PR #147).
+
+---
+
 ## 2026-06-02: Elevation-aware overlay (gradient gate + crossing hide)
 
 **Context**: Bryan browsing SF kid-confident saw (a) steep hiking trails on
@@ -683,3 +796,57 @@ not.
 
 **Rollback**: manifest-only, as before. A manifest pointing at a version *without* an
 overview level degrades cleanly to the 0.1° path rather than blanking the overlay.
+
+## 2026-08-22: maxspeed unit parsing + the "calmed street" ceiling (2a)
+
+Bryan reported Folsom St and 17th St missing from the SF Mission overlay for
+kid-traffic-savvy — he expected them in the blue "Bike route beside cars" tier
+and they painted nothing at all. Diagnosis against live OSM found two entangled
+defects in `classifyEdge`, both of which had to move together.
+
+**Defect 1 — `parseInt(tags.maxspeed)` dropped the unit.** OSM stores US speeds
+as `"25 mph"`. `parseInt` returned `25`, which the classifier then compared
+against a km/h threshold. Measured in central SF: **every** `maxspeed` value in
+the painted-lane corpus is mph-suffixed (213× `25 mph`, 104× `20 mph`, 85×
+`30 mph`, 23× `35 mph`; zero bare-numeric values). The consequence ran in the
+dangerous direction — the 85 ways posted `30 mph` (48 km/h, an arterial) were
+classifying as *"Painted bike lane on quiet street"* and painting as preferred
+family infrastructure.
+
+**Defect 2 — the 2a ceiling was 30 km/h, which no US street can satisfy.**
+25 mph is 40.2 km/h and even a 20 mph slow street is 32.2 km/h. So once the unit
+bug is fixed, a strict 30 km/h gate excludes essentially every calmed street in
+America. The two defects were cancelling: SF's blue tier existed *only* because
+mph values were being mis-read low enough to sneak under the gate. 301 of the
+338 SF ways then in 2a got there that way — fixing the parse alone would have
+collapsed the tier to 46 ways.
+
+**Decision 1 — one ceiling, set at 40 km/h** (`QUIET_STREET_MAX_KMH`), replacing
+the bare `30`. It is chosen so both real-world regimes that mean "calmed urban
+street" land inside it: a European Tempo-30 zone (30 km/h) and a US 25 mph
+street (40 km/h). A US 30 mph street (48 km/h) and a European 50 km/h
+Hauptstraße both stay out. Verified against live OSM: moving the ceiling 30 → 40
+changes **zero** ways in central Berlin, because Berlin streets are posted 30 or
+50 and nothing sits between. The threshold is global, not regional — no new
+per-city classification path.
+
+**Decision 2 — the untagged-`tertiary` speed guess drops 50 → 40.** Folsom and
+17th carry no `maxspeed` tag at all, so they were inheriting a road-class
+default of 50 km/h — above any plausible ceiling, which is why they painted
+nothing rather than painting as an arterial. Under the old defaults **pathLevel
+2a was unreachable for any way of class tertiary or above unless a mapper had
+typed an explicit `maxspeed ≤ 30`**, so in cities that don't tag speed densely
+the whole category was effectively dead. Berlin tags 99% of its tertiaries
+(413/417) so the default almost never fires there; SF leaves 137 of 210
+untagged. A tertiary is a minor connector, and 40 is the more honest guess.
+`secondary` and above keep 50+ — those genuinely are arterials, and an untagged
+secondary still correctly lands at '3'.
+
+**Rejected — a per-city speed profile in `src/data/cityProfiles/`.** That is
+architecturally where regional calibration belongs (Layer 2), but the only lever
+those profiles expose is `ClassificationRule` tag-matching, which overrides the
+*display* item name without touching `classifyEdge`. Using it here would have
+produced exactly the parallel-classifier drift the project forbids: the overlay
+would show Folsom as a quiet street while the router still costed it as an
+arterial. If 40 proves wrong for a specific city, the fix is to thread a region
+into `classifyEdge` itself so display and routing keep sharing one answer.
