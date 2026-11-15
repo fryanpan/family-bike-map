@@ -143,17 +143,6 @@ export function tileDone(row: number, col: number, loadedBytes: number): void {
   schedulePruneIfSettled()
 }
 
-/**
- * A tile fetch was abandoned before it started, because the viewport moved on.
- * The entry is removed rather than marked: nothing failed, and leaving it in
- * the burst would keep the loading indicator up for work nobody wants.
- */
-export function tileAbandoned(row: number, col: number): void {
-  if (!tiles.delete(`${row}:${col}`)) return
-  emit()
-  schedulePruneIfSettled()
-}
-
 /** A tile failed (network error, HTTP error, or timeout after retries). */
 export function tileError(row: number, col: number): void {
   const t = tiles.get(`${row}:${col}`)
