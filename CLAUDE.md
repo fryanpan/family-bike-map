@@ -68,6 +68,26 @@ See `docs/product/architecture.md` for full technical architecture.
 - No unnecessary abstractions for one-time operations
 - Clean up dead code created by your changes
 
+### Dependencies
+- **bun is the package manager.** `bun.lock` is the lockfile; CI and deploy both run
+  `bun install --frozen-lockfile`. `package-lock.json` is NOT an install input — it is
+  kept only because every Dependabot alert is attributed to it, and most alerted
+  packages are transitive. Don't delete it to tidy up without first confirming
+  that bun.lock-derived alerts actually cover the transitive tree.
+- **A security patch must move BOTH lockfiles. A version-update PR that moves only
+  `package-lock.json` should be closed.** Those two look the same in a diff and are
+  opposites. Dependabot scans `package-lock.json`, so patching that file is what
+  closes an alert — but nothing installs from it, so patching it alone changes not one
+  shipped byte. Patching `bun.lock` alone changes what ships and leaves the alert open.
+  Clearing the 44 alerts on 2026-11-14 (PR #250) required both files in the same
+  commit. Dependabot cannot write `bun.lock` from the npm ecosystem, which is why its
+  own PRs can only ever do half the job — close them and patch both files yourself.
+- Dependabot version updates are pinned to the `bun` ecosystem in
+  `.github/dependabot.yml`.
+- Dependency PRs with fresh green CI may be merged without asking. Check two things
+  first: the check's *date* (a green from before the last few dozen commits to main
+  proves nothing) and the *file list* (a lockfile-only diff upgrades nothing).
+
 @docs/process/learnings.md
 @.claude/rules/routing-changes.md
 @.claude/rules/rendering-changes.md
