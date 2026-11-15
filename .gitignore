@@ -1,4 +1,10 @@
 node_modules/
+# ...and as a SYMLINK, which is how a git worktree gets its deps without a
+# second 500MB install. `node_modules/` with the trailing slash matches a
+# DIRECTORY only, so a symlink of that name is not ignored and `git add -A`
+# commits it — an absolute path into whichever machine made the worktree.
+# Caught on 2026-11-14 after exactly that reached a pushed commit.
+node_modules
 dist/
 .env
 .env.*
