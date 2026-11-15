@@ -48,7 +48,7 @@ setElevationReferer('https://bike-map.fryanpan.com/')
 
 // ── Config ──────────────────────────────────────────────────────────────
 
-const OVERPASS_URL = 'https://bike-map.fryanpan.com/api/overpass'
+const OVERPASS_URL = process.env.OVERPASS_URL ?? 'https://bike-map.fryanpan.com/api/overpass'
 const TILE_DEGREES = 0.1
 
 // All 5 modes after the Layer 1.5 refactor.
@@ -120,6 +120,12 @@ const BROUTER_PROFILES: Record<ModeKey, string> = {
 
 const tileCache = new Map<string, OsmWay[]>()
 
+/** Tiles whose fetch failed every retry. A failed tile yields an empty way
+ *  list, so letting a run continue past one reports routing numbers measured
+ *  on data that was never fetched. `fetchTilesForCity` aborts on a non-empty
+ *  list rather than scoring a hole in the graph. */
+const FAILED_TILES: string[] = []
+
 async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
   const key = `${row}:${col}`
   if (tileCache.has(key)) return tileCache.get(key)!
@@ -153,6 +159,7 @@ async function fetchTile(row: number, col: number): Promise<OsmWay[]> {
 
   if (!resp || !resp.ok) {
     console.warn(`[Overpass] Tile ${row}:${col} FAILED after retries`)
+    FAILED_TILES.push(`${row}:${col}`)
     tileCache.set(key, [])
     return []
   }
@@ -212,7 +219,7 @@ async function fetchTilesForCity(cityName: string, bbox: CityBbox): Promise<OsmW
     for (let c = minCol; c <= maxCol; c++)
       tiles.push({ row: r, col: c })
 
-  console.log(`Fetching ${tiles.length} tiles for ${cityName}...`)
+  console.log(`Fetching ${tiles.length} tiles for ${cityName} via ${OVERPASS_URL}...`)
   const allWays: OsmWay[] = []
 
   for (let i = 0; i < tiles.length; i += 2) {
@@ -223,6 +230,17 @@ async function fetchTilesForCity(cityName: string, bbox: CityBbox): Promise<OsmW
     if (i + 2 < tiles.length) await new Promise((r) => setTimeout(r, 500))
   }
   console.log(`\n  Total: ${allWays.length} ways`)
+
+  // Abort rather than score a partial graph. An empty tile is indistinguishable
+  // from "no bike infrastructure here" by the time the numbers are printed.
+  if (FAILED_TILES.length > 0) {
+    throw new Error(
+      `${FAILED_TILES.length}/${tiles.length} tiles failed for ${cityName} ` +
+        `(${FAILED_TILES.join(', ')}). Refusing to report numbers measured on ` +
+        `a partial graph. Endpoint: ${OVERPASS_URL}`,
+    )
+  }
+
   return allWays
 }
 
