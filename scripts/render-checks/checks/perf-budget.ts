@@ -21,17 +21,24 @@ const LONG_TASK_THRESHOLD_MS = 50 // standard Web Vitals "long task" floor
 // Hard cap on the post-interaction (zoom-out) measurement phase. Observed
 // hang (2026-07-11): both waitForTilesSettled calls logged their "still
 // active" warning (so both settled, or hit their own internal ~15s
-// budget), then the check hung for ~4 minutes producing no result.
-// waitForTilesSettled is internally bounded, but the zoom-out to
-// `CENTER.zoom - 3` fans out to a citywide tile fetch, and a busy/looping
-// main thread (repeated synchronous overlay recompute per tile arrival —
-// see learnings.md "Overlay-wide computation must stay off the
-// tile-arrival hot path") can starve the very next call,
-// `page.evaluate()` reading `__longTasks`, which has NO timeout of its
-// own and waits indefinitely for the main thread to go idle. Race the
-// whole post-interaction phase against this cap so the check always
-// produces a number or a clean TIMEOUT-fail instead of hanging the
-// harness.
+// budget), then the check hung for ~4 minutes producing no result. The
+// cap turns that into a reported failure instead of a hung harness, and
+// it fired again on 2026-11-14 in a full-suite run.
+//
+// The guess recorded here until 2026-11-14 was that `page.evaluate()`
+// reading `__longTasks` waits indefinitely on a main thread wedged by
+// repeated synchronous overlay recompute. That is FALSIFIED for the
+// standalone case: scripts/render-checks/diag-zoomout-hang.ts splits the
+// phase into its four sub-calls and the evaluate returns in 1ms, with the
+// page's own longest frame gap at 720-980ms (= its longest long task).
+// The phase there costs ~16.8s, under this cap — dominated by the
+// hidden-wait burning its full internal 15s because `.tile-loading-boxes`
+// stays attached, which waitForTilesSettled documents as expected.
+//
+// So what pushes the same phase past 30s inside the suite is not known.
+// Rather than guess again, the phase now records how long each sub-call
+// took and reports that trail on the TIMEOUT, so the next occurrence says
+// where the time went instead of only that it went.
 const POST_INTERACTION_TIMEOUT_MS = 30_000
 
 class CheckTimeoutError extends Error {}
@@ -183,6 +190,20 @@ export async function runPerfBudgetCheck(baseUrl: string): Promise<CheckResult> 
     await clearLongTasks(page)
     await setEngineView(page, { lat: CENTER.lat, lng: CENTER.lng, zoom: CENTER.zoom - 3 })
 
+    // Written to from inside the raced promise, read from the TIMEOUT
+    // branch: whatever the trail holds when the cap fires is the list of
+    // sub-calls that finished, so the first sub-call MISSING from it is
+    // the one that was still in flight.
+    const trail: string[] = []
+    const step = async <T>(label: string, fn: () => Promise<T>): Promise<T> => {
+      const t0 = Date.now()
+      try {
+        return await fn()
+      } finally {
+        trail.push(`${label} ${Date.now() - t0}ms`)
+      }
+    }
+
     let zoomTasks: number[]
     try {
       // If the timeout wins the race, this inner promise keeps running in
@@ -190,8 +211,8 @@ export async function runPerfBudgetCheck(baseUrl: string): Promise<CheckResult> 
       // eventual rejection so it doesn't surface as an unhandled
       // rejection after the check has already returned a TIMEOUT result.
       const postInteraction = (async () => {
-        await waitForTilesSettled(page)
-        return readLongTasks(page)
+        await step('settle', () => waitForTilesSettled(page))
+        return step('readLongTasks', () => readLongTasks(page))
       })()
       postInteraction.catch(() => {})
       zoomTasks = await withTimeout(
@@ -210,6 +231,10 @@ export async function runPerfBudgetCheck(baseUrl: string): Promise<CheckResult> 
             { label: 'initial-load long tasks', value: String(loadTasks.length) },
             { label: 'initial-load TBT', value: `${loadTbt.toFixed(0)}ms (budget ${BUDGETS_MS.initialLoadTbt}ms)` },
             { label: 'zoom-out phase', value: `TIMEOUT after ${POST_INTERACTION_TIMEOUT_MS}ms` },
+            {
+              label: 'sub-calls that finished',
+              value: trail.length ? trail.join(', ') : 'none — the settle wait was still in flight',
+            },
           ],
         }
       }
