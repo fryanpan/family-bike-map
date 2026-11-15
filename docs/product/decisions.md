@@ -850,3 +850,40 @@ produced exactly the parallel-classifier drift the project forbids: the overlay
 would show Folsom as a quiet street while the router still costed it as an
 arterial. If 40 proves wrong for a specific city, the fix is to thread a region
 into `classifyEdge` itself so display and routing keep sharing one answer.
+
+---
+
+## 2026-11-15: Post-implementation runs `team-lead-fleet:ship-guarded`
+
+**Context**: `.claude/skills/` held local copies of six skills — `persist-plan`,
+`retro`, `ship-it`, `ticket-agent`, `ux-review` — that the fleet-wide
+`team-lead-fleet` plugin now publishes. PR #226 deletes the copies. Five of the
+six are referenced nowhere in the repo and go cleanly, but
+`.claude/rules/workflow-conventions.md` told every agent to "invoke the
+`ship-it` skill" after implementation, and the plugin publishes no skill by
+that name. It publishes three: `ship-auto`, `ship-guarded`, `ship-push-only`.
+Deleting the local copy without retargeting the rule leaves a standing
+instruction pointing at nothing.
+
+**Decision**: the rule names `team-lead-fleet:ship-guarded`.
+
+- **Not `ship-auto`.** `ship-auto` is the fleet default and ships with no
+  pre-merge risk pass. This project is deployed publicly at
+  `bike-map.fryanpan.com` and families route children on its output, so a
+  change-failure costs more than the pause does. `ship-guarded` adds a
+  regression and UX-break assessment and pauses *only* when the change touches
+  a user-facing flow, a removed feature, a schema or a performance-sensitive
+  path — so routine work still ships unattended.
+- **Not `ship-push-only`.** That one is for repos where humans own review and
+  merge. This is Bryan's own repo and the fleet rules already authorise merging
+  approved work once tests pass.
+- **Not a local copy kept for `ship-it` alone.** One skill per job. A local
+  fork drifts from the fleet version silently, which is the same failure class
+  as a parallel classifier.
+
+The project's existing gates are unaffected and still bind:
+`.claude/rules/routing-changes.md` (benchmark) and
+`.claude/rules/rendering-changes.md` (t0 vs t+15s stability, falsification
+pass, performance check) run regardless of which ship skill drives the PR.
+
+**Reversible**: it is one reference in one rules file.
