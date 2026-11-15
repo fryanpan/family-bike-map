@@ -4,6 +4,7 @@ import {
   classifyOsmTagsToItem, isOverlayHiddenSurface, isRoughSurface, isOverlayCrossing,
   isAbortError,
 } from '../services/overpass'
+import { TileFetchClaims } from '../services/tileFetchClaims'
 import { getDisplayPathLevel, getOverlayMaxGradientPct } from '../utils/classify'
 import { prefetchElevation, overlayGradientPct, hasFineElevationAt } from '../services/elevation'
 import { computeMoatIsolation, inheritStubVerdicts, smallFragmentIds } from '../services/overlayReachability'
@@ -750,44 +751,17 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
   // earlier navigation don't leak onto the map.
   const [activeKeys, setActiveKeys] = useState<string[]>([])
 
-  const loadingTilesRef = useRef<Set<string>>(new Set())
   const loadedTilesRef  = useRef<Set<string>>(new Set())
   const generationRef   = useRef(0)
-  // One controller per in-flight detail-tile fetch, so a fetch still waiting
-  // on the Overpass concurrency gate can be abandoned when the viewport no
-  // longer wants it. See abandonSuperseded.
-  const tileFetchesRef  = useRef<Map<string, AbortController>>(new Map())
+  // The record of which detail tiles have a fetch in flight, and the lever
+  // that abandons the ones the viewport has moved past. A fetch that already
+  // holds a gate slot is left to finish — its data is still correct for its
+  // own key, and cancelling would throw away a download for no gain.
+  const tileClaimsRef   = useRef<TileFetchClaims>(new TileFetchClaims())
 
-  /**
-   * Abandon in-flight detail-tile fetches that `desiredKeys` does not include.
-   *
-   * A wide-zoom pan over an un-baked region enqueues up to MAX_FETCH_TILES
-   * fetches behind a 2-wide gate. Zooming in then selects one or two tiles
-   * that are already "in flight" — queued, in fact, behind dozens the rider
-   * has left behind — and loadDetailTiles skips anything in loadingTilesRef,
-   * so nothing re-prioritises them. Dropping the superseded waiters lets the
-   * wanted tile reach the front of the queue. Measured 2026-11-15: reaching a
-   * z14 viewport via a z10 overview painted 45% of what a cold load painted,
-   * and no re-render recovered it.
-   *
-   * A fetch that already holds a gate slot is left to finish: its tile data is
-   * still correct for its own key, and cancelling it would throw away a
-   * download for no gain.
-   */
-  /** Abandon every queued tile fetch — used when the generation resets. */
-  const abandonAllTileFetches = useCallback(() => {
-    for (const controller of tileFetchesRef.current.values()) controller.abort()
-    tileFetchesRef.current.clear()
-  }, [])
-
+  /** Abandon in-flight detail-tile fetches that `desiredKeys` does not include. */
   const abandonSuperseded = useCallback((desiredKeys: string[]) => {
-    const keep = new Set(desiredKeys)
-    for (const [k, controller] of tileFetchesRef.current) {
-      if (keep.has(k)) continue
-      controller.abort()
-      tileFetchesRef.current.delete(k)
-      loadingTilesRef.current.delete(k)
-    }
+    tileClaimsRef.current.abandonSuperseded(desiredKeys)
   }, [])
 
   /** Fetch the 0.1° detail tiles (today's path, unchanged) into tileData.
@@ -801,16 +775,17 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
   ): Promise<{ anyError: boolean }> => {
     const toLoad = tiles.filter((t) => {
       const k = tileKey(t.row, t.col)
-      return !loadedTilesRef.current.has(k) && !loadingTilesRef.current.has(k)
+      return !loadedTilesRef.current.has(k) && !tileClaimsRef.current.has(k)
     })
     if (toLoad.length === 0) return { anyError: false }
 
-    for (const t of toLoad) loadingTilesRef.current.add(tileKey(t.row, t.col))
     let anyError = false
+    // Each callback claims its key synchronously, before its first await, so
+    // every tile in this batch is claimed before control returns to the
+    // caller — a re-entrant call cannot enqueue any of them a second time.
     await Promise.all(toLoad.map(async (t) => {
       const k = tileKey(t.row, t.col)
-      const controller = new AbortController()
-      tileFetchesRef.current.set(k, controller)
+      const controller = tileClaimsRef.current.claim(k)
       try {
         const ways = await fetchBikeInfraForTile(t.row, t.col, controller.signal)
         if (generationRef.current !== generation) return
@@ -828,8 +803,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
         console.warn(`[BikeMapOverlay] Tile ${t.row}:${t.col} failed:`, err)
         anyError = true
       } finally {
-        if (tileFetchesRef.current.get(k) === controller) tileFetchesRef.current.delete(k)
-        loadingTilesRef.current.delete(k)
+        tileClaimsRef.current.releaseIfCurrent(k, controller)
       }
     }))
     return { anyError }
@@ -971,8 +945,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
     if (!engine) return
     if (enabled) {
       generationRef.current++
-      abandonAllTileFetches()
-      loadingTilesRef.current = new Set()
+      tileClaimsRef.current.abandonAll()
       loadedTilesRef.current = new Set()
       engine.invalidateSize()
       const raf = requestAnimationFrame(() => {
@@ -1019,8 +992,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
       return () => { cancelAnimationFrame(raf) }
     } else {
       generationRef.current++
-      abandonAllTileFetches()
-      loadingTilesRef.current = new Set()
+      tileClaimsRef.current.abandonAll()
       loadedTilesRef.current = new Set()
       setTileData(new Map())
       setActiveKeys([])
