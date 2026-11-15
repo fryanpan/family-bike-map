@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
 import {
-  tileQueued, tileLoading, tileDone, tileError,
+  tileQueued, tileLoading, tileDone, tileError, tileAbandoned,
   __getTileLoadSnapshot, __resetTileLoadStatus,
 } from '../src/services/tileLoadStatus'
 
@@ -64,6 +64,33 @@ describe('tileLoadStatus store', () => {
     const s = __getTileLoadSnapshot()
     expect(s.totalCount).toBe(1)
     expect(s.queued.map((t) => t.key)).toEqual(['4:1'])
+  })
+
+  it('removes an abandoned tile from the burst rather than marking it', () => {
+    tileQueued(377, -1225)
+    tileQueued(377, -1224)
+    expect(__getTileLoadSnapshot().totalCount).toBe(2)
+
+    tileAbandoned(377, -1224)
+    const s = __getTileLoadSnapshot()
+    expect(s.totalCount).toBe(1)
+    expect(s.errorCount).toBe(0)           // abandoning is not failing
+    expect(s.queued.map((t) => t.key)).toEqual(['377:-1225'])
+    expect(s.active).toBe(true)            // the other tile is still wanted
+  })
+
+  it('goes inactive when the last queued tile is abandoned', () => {
+    tileQueued(377, -1225)
+    tileAbandoned(377, -1225)
+    const s = __getTileLoadSnapshot()
+    expect(s.active).toBe(false)
+    expect(s.totalCount).toBe(0)
+  })
+
+  it('ignores an abandon for a tile it never saw', () => {
+    tileQueued(1, 1)
+    tileAbandoned(9, 9)
+    expect(__getTileLoadSnapshot().totalCount).toBe(1)
   })
 
   it('keeps tiles sorted by key for stable display', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, AdaptiveConcurrencyGate, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
+import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, AdaptiveConcurrencyGate, isAbortError, isOwnAbandonment, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
 import { isEnrichedWay } from '../src/utils/types'
 
 // Minimal LatLngBounds stub
@@ -94,6 +94,90 @@ describe('isTileCached / getCachedTile', () => {
 function makeResponse(status: number, headers: Record<string, string> = {}): Response {
   return new Response(null, { status, headers })
 }
+
+describe('isOwnAbandonment', () => {
+  it('is true for an AbortError on a signal this caller aborted', () => {
+    const c = new AbortController()
+    c.abort()
+    expect(isOwnAbandonment(c.signal, new DOMException('Aborted', 'AbortError'))).toBe(true)
+  })
+
+  // iOS Safari reports an AbortSignal.timeout() expiry as AbortError, not
+  // TimeoutError. After retries exhaust it reaches the same catch as a real
+  // abandonment; treating it as one would report a blank viewport as 'ok'.
+  it('is false for an iOS-shaped timeout on a signal nobody aborted', () => {
+    const c = new AbortController()
+    expect(c.signal.aborted).toBe(false)
+    expect(isOwnAbandonment(c.signal, new DOMException('Aborted', 'AbortError'))).toBe(false)
+  })
+
+  it('is false for an ordinary failure on an aborted signal', () => {
+    const c = new AbortController()
+    c.abort()
+    expect(isOwnAbandonment(c.signal, new Error('HTTP 502'))).toBe(false)
+    expect(isOwnAbandonment(c.signal, new DOMException('Timed out', 'TimeoutError'))).toBe(false)
+  })
+})
+
+describe('AdaptiveConcurrencyGate abandonment', () => {
+  it('rejects a queued waiter when its signal aborts, and leaves the queue', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire()                     // takes the only slot
+    const ac = new AbortController()
+    const queued = gate.acquire(ac.signal)
+    expect(gate.queued).toBe(1)
+    ac.abort()
+    await expect(queued).rejects.toThrow()
+    expect(gate.queued).toBe(0)
+    expect(gate.inFlight).toBe(1)            // the abandoned waiter never took a slot
+  })
+
+  it('lets a still-wanted waiter through once the ones ahead of it abandon', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire()
+    const ahead = [new AbortController(), new AbortController(), new AbortController()]
+    const abandoned = ahead.map((ac) => gate.acquire(ac.signal).catch(() => 'abandoned'))
+    let wantedGranted = false
+    const wanted = gate.acquire().then(() => { wantedGranted = true })
+
+    expect(gate.queued).toBe(4)
+    for (const ac of ahead) ac.abort()
+    await Promise.all(abandoned)
+    expect(gate.queued).toBe(1)
+    expect(wantedGranted).toBe(false)        // still behind the one holding the slot
+
+    gate.release()                           // the slot frees; the wanted tile is next
+    await wanted
+    expect(wantedGranted).toBe(true)
+  })
+
+  it('throws without queueing when the signal is already aborted', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire()
+    const ac = new AbortController()
+    ac.abort()
+    await expect(gate.acquire(ac.signal)).rejects.toThrow()
+    expect(gate.queued).toBe(0)
+  })
+
+  it('ignores the signal once the slot is granted', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire()
+    const ac = new AbortController()
+    const queued = gate.acquire(ac.signal)
+    gate.release()                           // grants the queued waiter
+    await queued                             // resolves
+    ac.abort()                               // too late to matter
+    expect(gate.inFlight).toBe(1)
+  })
+
+  it('isAbortError tells an abandonment from a fetch failure', () => {
+    expect(isAbortError(new DOMException('Aborted', 'AbortError'))).toBe(true)
+    expect(isAbortError(new DOMException('Timed out', 'TimeoutError'))).toBe(false)
+    expect(isAbortError(new Error('Overpass HTTP 502'))).toBe(false)
+    expect(isAbortError(null)).toBe(false)
+  })
+})
 
 describe('AdaptiveConcurrencyGate', () => {
   it('starts at MIN_CONCURRENCY', () => {
