@@ -16,6 +16,7 @@
 //     standard `icon` field.
 //   - Popups → InfoWindow.
 
+import * as Sentry from '@sentry/react'
 import type {
   MapEngine, MapInitOptions, MapEventName, MapEvent,
   LatLng, LatLngBounds, FitBoundsOptions,
@@ -423,19 +424,43 @@ export class GoogleMapsEngine implements MapEngine {
   addPathLayer(features: PathLayerFeature[], handlers?: PathLayerHandlers): PathLayerHandle {
     const map = this.requireMap()
     const layerId = makeId()
-    void this.ensureDeckOverlay(map).then(({ GoogleMapsOverlay, PathLayer }) => {
-      if (!this.map) return // unmounted while loading
-      if (this.removedPathLayerIds.delete(layerId)) return // removed before the add landed
-      if (!this.deckOverlay) {
-        this.deckOverlay = new GoogleMapsOverlay({ layers: [] })
-        this.deckOverlay.setMap(this.map)
-      }
-      this.pathLayerFeatures.set(layerId, features)
-      if (handlers) this.pathLayerHandlers.set(layerId, handlers)
-      const layer = this.buildDeckPathLayer(PathLayer, layerId, features, handlers)
-      this.deckLayers.set(layerId, layer)
-      this.deckOverlay.setProps({ layers: Array.from(this.deckLayers.values()) })
-    })
+    void this.ensureDeckOverlay(map)
+      .then(({ GoogleMapsOverlay, PathLayer }) => {
+        if (!this.map) return // unmounted while loading
+        if (this.removedPathLayerIds.delete(layerId)) return // removed before the add landed
+        if (!this.deckOverlay) {
+          this.deckOverlay = new GoogleMapsOverlay({ layers: [] })
+          this.deckOverlay.setMap(this.map)
+        }
+        this.pathLayerFeatures.set(layerId, features)
+        if (handlers) this.pathLayerHandlers.set(layerId, handlers)
+        const layer = this.buildDeckPathLayer(PathLayer, layerId, features, handlers)
+        this.deckLayers.set(layerId, layer)
+        this.deckOverlay.setProps({ layers: Array.from(this.deckLayers.values()) })
+      })
+      .catch((err: unknown) => {
+        // Without this catch the rejection was an UNHANDLED one (Sentry
+        // BIKE-MAP-1Z, 2026-10-19): the overlay painted nothing, no report
+        // carried the layer it belonged to, and the rider saw an empty map
+        // with no explanation.
+        //
+        // There is deliberately no retry here, and in particular not a plain
+        // re-import of the same specifier. Measured 2026-11-14 in Playwright's
+        // bundled Chromium: after a failed dynamic import, importing the SAME
+        // url again issues no network request at all (2 requests for 3
+        // attempts), so that retry cannot help. Re-requesting under a changed
+        // url does work, and a page reload is what Vite's docs recommend for
+        // the stale-shell case. Both are rider-visible, so which to ship is
+        // the open decision on t-KpjhREkXUQvn.
+        //
+        // Clean the tombstone: if a removePathLayer raced in first it recorded
+        // this id expecting the pending add to consume it, and the add is now
+        // never going to.
+        this.removedPathLayerIds.delete(layerId)
+        Sentry.captureException(err, {
+          extra: { stage: 'deck-overlay-load', layerId, featureCount: features.length },
+        })
+      })
     return { __brand: 'pathLayer', id: layerId }
   }
 
@@ -456,7 +481,9 @@ export class GoogleMapsEngine implements MapEngine {
   // Lazy-load deck.gl modules. Both packages are dynamically imported on
   // first use so the deck.gl bundle (~150 KB gzip) doesn't ship with the
   // initial app shell. Cached by the import system after the first call.
-  private async ensureDeckOverlay(_map: google.maps.Map): Promise<{
+  // `protected`, not `private`, so a test can substitute a rejecting import
+  // without a second code path through the real one.
+  protected async ensureDeckOverlay(_map: google.maps.Map): Promise<{
     GoogleMapsOverlay: typeof import('@deck.gl/google-maps').GoogleMapsOverlay
     PathLayer: typeof import('@deck.gl/layers').PathLayer
   }> {
