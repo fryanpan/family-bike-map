@@ -161,7 +161,16 @@ Use descriptive commit messages that explain *why*, not just *what*.
 
 ## Post-Implementation
 
-When all implementation tasks are complete and tests pass, invoke the `ship-it` skill **before** handing control back to the user. This runs code review, creates the PR, and monitors CI/Copilot feedback automatically.
+When all implementation tasks are complete and tests pass, invoke the
+`team-lead-fleet:ship-guarded` skill **before** handing control back to the
+user. It runs code review, creates the PR, monitors CI and Copilot feedback,
+and merges and deploys without asking.
+
+`ship-guarded` rather than `ship-auto` because this project is deployed
+publicly and families route on it: it adds a regression and UX-break
+assessment before merge, and pauses only when the change actually touches a
+user-facing flow, a removed feature, a schema or a performance-sensitive
+path. Everything else ships unattended.
 
 ## Notifying the Conductor
 
