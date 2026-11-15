@@ -101,13 +101,9 @@ type Env = {
  * `overpass.private.coffee` both answer it with HTTP 500 while
  * kumi.systems serves real queries fine.
  *
- * **Order is by measured capacity, not by canonical-ness.** overpass-api.de is
- * the reference instance but it load-sheds this query: on 2026-10-17 it
- * answered the full production query for Boston with `502 "This Overpass API
- * server is currently at capacity"` in 0.5 s and Berlin with 504, while a
- * two-subquery reduction of the same tile got a 200 in 36.8 s. Re-measure
+ * **Order is by measured reachability, not by canonical-ness.** Re-measure
  * before reordering; "it worked from my laptop" can mean you sent a smaller
- * query, not that the instance is healthy.
+ * query, or that the host answers your IP and not Cloudflare's.
  *
  * Measured 2026-10-17, full production query, per tile:
  *
@@ -118,20 +114,67 @@ type Env = {
  *   | kumi.systems        | 500                | 500                |
  *   | private.coffee      | 500                | 500                |
  *
+ * Re-measured 2026-11-14. The 10-17 ordering is now backwards:
+ *
+ *   | instance            | from a laptop            | from the Worker  |
+ *   |---------------------|--------------------------|------------------|
+ *   | openstreetmap.fr    | 403 to every caller      | 403              |
+ *   | overpass-api.de     | 200, 3.8 MB, 38.5 s      | 521, then 522    |
+ *   | kumi.systems        | no response after 90 s   | TimeoutError     |
+ *
+ * `.fr` now answers "only available to white-listed usages" — a policy
+ * change, not capacity, so it fails for every caller and cannot be the
+ * primary. It stays second rather than being dropped because a whitelist
+ * decision is reversible and a 403 costs one sub-second round-trip. `.de` is
+ * first because it is the only instance that has produced a 200 on a full
+ * production query. Its 521/522 from Cloudflare's edge is connect-level and
+ * the cause is unattributed: a laptop connects to both of its IPv4 backends
+ * in 0.16 s, and the IPv6 hypothesis is untested (no IPv6 route here).
+ *
+ * As of 2026-11-14 NO entry in this list answers from the Worker, so every
+ * unbaked region paints nothing. The fix for that is baked tiles, not this
+ * list; see `scripts/pipeline/enrich-region.ts`, which reads a Geofabrik
+ * extract and does not touch Overpass at all.
+ *
  * kumi.systems and private.coffee returned byte-identical 646-byte Apache 500
  * pages, so treat them as ONE failure domain, not two fallbacks.
  */
 export const OVERPASS_ENDPOINTS = [
-  'https://overpass.openstreetmap.fr/api/interpreter',
   'https://overpass-api.de/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
 ] as const
 
-/** Per-attempt cap. The dense central-SF tile takes ~19 s and Boston measured
- *  28-36 s, so this has to be generous; the failure we're guarding against
- *  (a Cloudflare connect error) returns in ~3 s, so the realistic worst case
- *  is one slow success, not the sum of the caps. */
-const OVERPASS_ATTEMPT_TIMEOUT_MS = 40_000
+/**
+ * The slowest FULL production query ever measured coming back 200: Berlin
+ * from overpass-api.de, 3.8 MB in 38.5 s, 2026-11-14. Every cap below has to
+ * clear this, or the chain aborts the one upstream that still answers.
+ */
+export const SLOWEST_MEASURED_SUCCESS_MS = 38_500
+
+/** Per-attempt cap. Has to clear `SLOWEST_MEASURED_SUCCESS_MS` with headroom:
+ *  the dense central-SF tile takes ~19 s and Boston measured 28-36 s, so a
+ *  tight cap here reads as "upstream down" when it is only slow. */
+const OVERPASS_ATTEMPT_TIMEOUT_MS = 45_000
+
+/**
+ * Cap on the WHOLE fallback chain, not one attempt. The per-attempt cap alone
+ * is not a bound: three endpoints at 45 s is 135 s, and whichever side has
+ * the shorter patience gives up first. A client abort is the worst way to
+ * lose, because the client never receives the `X-Overpass-Attempts` trail and
+ * its own retry re-walks the same dead chain from the top. Answering inside
+ * the client's patience turns that into an honest HTTP error it already knows
+ * how to handle.
+ *
+ * Two bounds, both asserted in `workerOverpassFallback.test.ts` so they
+ * cannot drift apart again:
+ *   - ABOVE `SLOWEST_MEASURED_SUCCESS_MS`. This was 30 s, below the 38.5 s
+ *     Berlin success, which made that success unreachable — the budget would
+ *     have aborted the only upstream that answered. A cap set under a
+ *     measured success is not a timeout, it is an outage.
+ *   - BELOW the client's `FETCH_TIMEOUT_MS` in `src/services/overpass.ts`.
+ */
+export const OVERPASS_TOTAL_BUDGET_MS = 50_000
 
 /**
  * POST `body` to each Overpass instance until one answers with a usable
@@ -145,7 +188,10 @@ const OVERPASS_ATTEMPT_TIMEOUT_MS = 40_000
  * bike infrastructure, so it is NOT treated as a failure; the guard against
  * regional instances is the endpoint list above, not a runtime check.
  */
-export async function fetchOverpass(body: ArrayBuffer): Promise<{
+export async function fetchOverpass(
+  body: ArrayBuffer,
+  opts: { budgetMs?: number } = {},
+): Promise<{
   resp: Response
   respBody: ArrayBuffer
   endpoint: string
@@ -153,8 +199,17 @@ export async function fetchOverpass(body: ArrayBuffer): Promise<{
 }> {
   const attempts: { endpoint: string; status: number | string }[] = []
   let last: { resp: Response; respBody: ArrayBuffer; endpoint: string } | null = null
+  const deadline = Date.now() + (opts.budgetMs ?? OVERPASS_TOTAL_BUDGET_MS)
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    // Whatever is left of the shared budget, never more than one attempt's
+    // cap. A slow first instance shortens the later ones rather than pushing
+    // the whole chain past the point where the client is still listening.
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) {
+      attempts.push({ endpoint, status: 'skipped: budget spent' })
+      continue
+    }
     try {
       const resp = await fetch(endpoint, {
         method: 'POST',
@@ -163,7 +218,7 @@ export async function fetchOverpass(body: ArrayBuffer): Promise<{
           'User-Agent': 'FamilyBikeMap/0.1 (github.com/fryanpan/family-bike-map)',
         },
         body,
-        signal: AbortSignal.timeout(OVERPASS_ATTEMPT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(Math.min(OVERPASS_ATTEMPT_TIMEOUT_MS, remainingMs)),
       })
       const respBody = await resp.arrayBuffer()
       attempts.push({ endpoint, status: resp.status })

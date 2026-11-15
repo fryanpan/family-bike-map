@@ -95,9 +95,24 @@ export function injectCachedTile(row: number, col: number, ways: OsmWay[]): void
   _tileCache.set(tileKey(row, col), ways)
 }
 
-// Client-side fetch timeout (ms). Must exceed the server-side Overpass timeout so
-// we get a proper HTTP error response rather than a silent network abort.
-const FETCH_TIMEOUT_MS = 35_000
+// Client-side fetch timeout (ms). Must exceed the proxy's whole-chain budget
+// (`OVERPASS_TOTAL_BUDGET_MS` in `src/worker.ts`) so a failing tile comes back
+// as an HTTP error with the `X-Overpass-Attempts` trail on it, rather than as
+// a client abort that tells us nothing about which instances were tried.
+// Exported so the Worker test can assert that ordering still holds — it did
+// not when the proxy grew a three-instance fallback: 3 x 40 s per-attempt caps
+// outlived the old 35 s, so the client killed every request to a
+// slow-but-working mirror.
+//
+// This is deliberately long, and the cost is real: a user on a dead tile
+// waits the full time before the failure surfaces. The alternative is worse.
+// The slowest measured production success is a 38.5 s Berlin answer from
+// overpass-api.de (2026-11-14, `SLOWEST_MEASURED_SUCCESS_MS` in `worker.ts`),
+// so any client cap at or under that makes the one upstream that still
+// answers unreachable — the tile can never arrive, however healthy the
+// mirror is. Tiles fail open, so a slow tile degrades to an unpainted tile
+// rather than a broken map.
+export const FETCH_TIMEOUT_MS = 55_000
 
 // Maximum number of concurrent Overpass tile fetches.
 // Overpass-api.de rate-limits by IP; sending 4+ parallel requests from a single
