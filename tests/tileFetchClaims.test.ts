@@ -11,20 +11,41 @@ describe('TileFetchClaims', () => {
     expect(c.signal.aborted).toBe(false)
   })
 
-  it('aborts and drops only the keys the viewport no longer wants', () => {
+  it('aborts only the keys the viewport no longer wants', () => {
     const claims = new TileFetchClaims()
     const keep = claims.claim('a')
     const drop1 = claims.claim('b')
     const drop2 = claims.claim('c')
 
-    const dropped = claims.abandonSuperseded(['a'])
+    expect(claims.abandonSuperseded(['a']).sort()).toEqual(['b', 'c'])
 
-    expect(dropped.sort()).toEqual(['b', 'c'])
-    expect(claims.has('a')).toBe(true)
     expect(keep.signal.aborted).toBe(false)
     expect(drop1.signal.aborted).toBe(true)
     expect(drop2.signal.aborted).toBe(true)
+  })
+
+  // Aborting does not stop a fetch that already holds a gate slot, so the
+  // claim has to outlive the abort. Dropping it here let a rider who panned
+  // away and back start a second fetch for a tile already downloading.
+  it('keeps an aborted claim until its fetch settles', () => {
+    const claims = new TileFetchClaims()
+    const c = claims.claim('a')
+
+    claims.abandonSuperseded([])
+
+    expect(c.signal.aborted).toBe(true)
+    expect(claims.has('a')).toBe(true)   // still in flight — do not re-request
     expect(claims.size).toBe(1)
+
+    claims.releaseIfCurrent('a', c)      // the fetch finally settles
+    expect(claims.has('a')).toBe(false)
+  })
+
+  it('does not re-abort a claim it already abandoned', () => {
+    const claims = new TileFetchClaims()
+    claims.claim('a')
+    expect(claims.abandonSuperseded([])).toEqual(['a'])
+    expect(claims.abandonSuperseded([])).toEqual([])
   })
 
   it('keeps a desired key that has no claim without inventing one', () => {
@@ -34,13 +55,16 @@ describe('TileFetchClaims', () => {
     expect(claims.size).toBe(1)
   })
 
-  it('abandons everything on reset', () => {
+  it('aborts everything on reset, and the claims clear as they settle', () => {
     const claims = new TileFetchClaims()
     const a = claims.claim('a')
     const b = claims.claim('b')
     claims.abandonAll()
     expect(a.signal.aborted).toBe(true)
     expect(b.signal.aborted).toBe(true)
+    expect(claims.size).toBe(2)
+    claims.releaseIfCurrent('a', a)
+    claims.releaseIfCurrent('b', b)
     expect(claims.size).toBe(0)
   })
 
@@ -61,11 +85,12 @@ describe('TileFetchClaims', () => {
 
     claims.abandonSuperseded([])            // rider pans away
     expect(first.signal.aborted).toBe(true)
+    claims.releaseIfCurrent('377:-1225', first) // the queued waiter rejects
 
     const second = claims.claim('377:-1225') // rider comes back, refetch starts
     expect(claims.has('377:-1225')).toBe(true)
 
-    // first's cleanup finally runs, one microtask late
+    // a second settlement from the abandoned fetch must not touch the new claim
     expect(claims.releaseIfCurrent('377:-1225', first)).toBe(false)
     expect(claims.has('377:-1225')).toBe(true)
     expect(second.signal.aborted).toBe(false)

@@ -142,6 +142,19 @@ export function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError'
 }
 
+/**
+ * True when `err` is the caller abandoning its own fetch, not a failure.
+ *
+ * Both halves are load-bearing. iOS Safari raises `AbortError` when
+ * `AbortSignal.timeout()` fires (see fetchWithRetry), so an `AbortError` on a
+ * signal the caller never aborted is a real timeout that exhausted its
+ * retries. Testing the error name alone would suppress those, and a viewport
+ * with nothing painted on it would report success.
+ */
+export function isOwnAbandonment(signal: AbortSignal, err: unknown): boolean {
+  return signal.aborted && isAbortError(err)
+}
+
 export class AdaptiveConcurrencyGate {
   private _limit: number
   private _inFlight = 0

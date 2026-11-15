@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey,
   classifyOsmTagsToItem, isOverlayHiddenSurface, isRoughSurface, isOverlayCrossing,
-  isAbortError,
+  isOwnAbandonment,
 } from '../services/overpass'
 import { TileFetchClaims } from '../services/tileFetchClaims'
 import { getDisplayPathLevel, getOverlayMaxGradientPct } from '../utils/classify'
@@ -795,11 +795,11 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
           setActiveKeys((prev) => nextActiveKeys(prev, desiredKeys, (dk) => loadedTilesRef.current.has(dk)))
         }
       } catch (err) {
-        // An abandonment is this component's own doing, not a tile failure:
-        // abandonSuperseded has already cleared the key so a later viewport
-        // can request it again, and reporting it as an error would show the
-        // rider a problem that isn't one.
-        if (isAbortError(err)) return
+        // An abandonment is this component's own doing, not a tile failure,
+        // and reporting it would show the rider a problem that isn't one. A
+        // timeout that merely looks like one is a real failure — see
+        // isOwnAbandonment.
+        if (isOwnAbandonment(controller.signal, err)) return
         console.warn(`[BikeMapOverlay] Tile ${t.row}:${t.col} failed:`, err)
         anyError = true
       } finally {

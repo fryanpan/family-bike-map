@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, AdaptiveConcurrencyGate, isAbortError, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
+import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, AdaptiveConcurrencyGate, isAbortError, isOwnAbandonment, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
 import { isEnrichedWay } from '../src/utils/types'
 
 // Minimal LatLngBounds stub
@@ -94,6 +94,30 @@ describe('isTileCached / getCachedTile', () => {
 function makeResponse(status: number, headers: Record<string, string> = {}): Response {
   return new Response(null, { status, headers })
 }
+
+describe('isOwnAbandonment', () => {
+  it('is true for an AbortError on a signal this caller aborted', () => {
+    const c = new AbortController()
+    c.abort()
+    expect(isOwnAbandonment(c.signal, new DOMException('Aborted', 'AbortError'))).toBe(true)
+  })
+
+  // iOS Safari reports an AbortSignal.timeout() expiry as AbortError, not
+  // TimeoutError. After retries exhaust it reaches the same catch as a real
+  // abandonment; treating it as one would report a blank viewport as 'ok'.
+  it('is false for an iOS-shaped timeout on a signal nobody aborted', () => {
+    const c = new AbortController()
+    expect(c.signal.aborted).toBe(false)
+    expect(isOwnAbandonment(c.signal, new DOMException('Aborted', 'AbortError'))).toBe(false)
+  })
+
+  it('is false for an ordinary failure on an aborted signal', () => {
+    const c = new AbortController()
+    c.abort()
+    expect(isOwnAbandonment(c.signal, new Error('HTTP 502'))).toBe(false)
+    expect(isOwnAbandonment(c.signal, new DOMException('Timed out', 'TimeoutError'))).toBe(false)
+  })
+})
 
 describe('AdaptiveConcurrencyGate abandonment', () => {
   it('rejects a queued waiter when its signal aborts, and leaves the queue', async () => {

@@ -38,25 +38,32 @@ export class TileFetchClaims {
   }
 
   /**
-   * Abort and drop every claim whose key is not in `desired`.
-   * Returns the abandoned keys.
+   * Abort every claim whose key is not in `desired`. Returns the aborted keys.
+   *
+   * The claim itself survives the abort, and only `releaseIfCurrent` ever
+   * removes one. Aborting does not stop a fetch that already holds a gate
+   * slot — the signal stops mattering once the slot is granted — so dropping
+   * its claim here would let a rider who pans away and back start a SECOND
+   * fetch for a tile already downloading, taking another scarce slot. A
+   * queued waiter rejects immediately, so its claim clears a microtask later
+   * and the tile is re-requestable at the next viewport event.
    */
   abandonSuperseded(desired: Iterable<string>): string[] {
     const keep = desired instanceof Set ? desired : new Set(desired)
-    const dropped: string[] = []
+    const aborted: string[] = []
     for (const [key, controller] of this._claims) {
-      if (keep.has(key)) continue
+      if (keep.has(key) || controller.signal.aborted) continue
       controller.abort()
-      this._claims.delete(key)
-      dropped.push(key)
+      aborted.push(key)
     }
-    return dropped
+    return aborted
   }
 
-  /** Abort and drop every claim — the overlay is resetting. */
+  /** Abort every claim — the overlay is resetting. Claims clear as they settle. */
   abandonAll(): void {
-    for (const controller of this._claims.values()) controller.abort()
-    this._claims.clear()
+    for (const controller of this._claims.values()) {
+      if (!controller.signal.aborted) controller.abort()
+    }
   }
 
   /**
