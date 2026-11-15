@@ -25,20 +25,27 @@ const LONG_TASK_THRESHOLD_MS = 50 // standard Web Vitals "long task" floor
 // cap turns that into a reported failure instead of a hung harness, and
 // it fired again on 2026-11-14 in a full-suite run.
 //
-// The guess recorded here until 2026-11-14 was that `page.evaluate()`
-// reading `__longTasks` waits indefinitely on a main thread wedged by
-// repeated synchronous overlay recompute. That is FALSIFIED for the
-// standalone case: scripts/render-checks/diag-zoomout-hang.ts splits the
-// phase into its four sub-calls and the evaluate returns in 1ms, with the
-// page's own longest frame gap at 720-980ms (= its longest long task).
-// The phase there costs ~16.8s, under this cap — dominated by the
-// hidden-wait burning its full internal 15s because `.tile-loading-boxes`
-// stays attached, which waitForTilesSettled documents as expected.
+// The cause is `page.evaluate()` reading `__longTasks`, which has no
+// timeout of its own and waits for the main thread to go idle. The trail
+// below is what established it: on 2026-11-15 the TIMEOUT reported
+// `sub-calls that finished: settle 3505ms`, with readLongTasks absent —
+// so the evaluate alone held the remaining 26.5s.
 //
-// So what pushes the same phase past 30s inside the suite is not known.
-// Rather than guess again, the phase now records how long each sub-call
-// took and reports that trail on the TIMEOUT, so the next occurrence says
-// where the time went instead of only that it went.
+// What the standalone reproduction got wrong, and why the trail was
+// needed: scripts/render-checks/diag-zoomout-hang.ts splits the same
+// phase and sees the evaluate return in 1ms. The difference is how long
+// the settle took first. Standalone, `.tile-loading-boxes` stays attached
+// and the hidden-wait burns its full internal 15s, which is quiet time
+// the main thread uses to drain. In the suite the indicator cleared in
+// 3.5s, so the evaluate was issued into the middle of the zoom-out's
+// overlay work and starved there. The app therefore keeps the main thread
+// busy for 26s+ after a zoom-out to `CENTER.zoom - 3`, which is a real
+// responsiveness problem and is tracked as its own task, not a harness
+// artifact.
+//
+// Keep the trail. A phase that only reports "exceeded 30s" cost two
+// sessions of guessing; the first sub-call MISSING from the trail names
+// the culprit in one line.
 const POST_INTERACTION_TIMEOUT_MS = 30_000
 
 class CheckTimeoutError extends Error {}
