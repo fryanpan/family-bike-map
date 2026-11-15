@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, AdaptiveConcurrencyGate, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
+import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, AdaptiveConcurrencyGate, isAbortError, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
 import { isEnrichedWay } from '../src/utils/types'
 
 // Minimal LatLngBounds stub
@@ -94,6 +94,66 @@ describe('isTileCached / getCachedTile', () => {
 function makeResponse(status: number, headers: Record<string, string> = {}): Response {
   return new Response(null, { status, headers })
 }
+
+describe('AdaptiveConcurrencyGate abandonment', () => {
+  it('rejects a queued waiter when its signal aborts, and leaves the queue', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire()                     // takes the only slot
+    const ac = new AbortController()
+    const queued = gate.acquire(ac.signal)
+    expect(gate.queued).toBe(1)
+    ac.abort()
+    await expect(queued).rejects.toThrow()
+    expect(gate.queued).toBe(0)
+    expect(gate.inFlight).toBe(1)            // the abandoned waiter never took a slot
+  })
+
+  it('lets a still-wanted waiter through once the ones ahead of it abandon', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire()
+    const ahead = [new AbortController(), new AbortController(), new AbortController()]
+    const abandoned = ahead.map((ac) => gate.acquire(ac.signal).catch(() => 'abandoned'))
+    let wantedGranted = false
+    const wanted = gate.acquire().then(() => { wantedGranted = true })
+
+    expect(gate.queued).toBe(4)
+    for (const ac of ahead) ac.abort()
+    await Promise.all(abandoned)
+    expect(gate.queued).toBe(1)
+    expect(wantedGranted).toBe(false)        // still behind the one holding the slot
+
+    gate.release()                           // the slot frees; the wanted tile is next
+    await wanted
+    expect(wantedGranted).toBe(true)
+  })
+
+  it('throws without queueing when the signal is already aborted', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire()
+    const ac = new AbortController()
+    ac.abort()
+    await expect(gate.acquire(ac.signal)).rejects.toThrow()
+    expect(gate.queued).toBe(0)
+  })
+
+  it('ignores the signal once the slot is granted', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire()
+    const ac = new AbortController()
+    const queued = gate.acquire(ac.signal)
+    gate.release()                           // grants the queued waiter
+    await queued                             // resolves
+    ac.abort()                               // too late to matter
+    expect(gate.inFlight).toBe(1)
+  })
+
+  it('isAbortError tells an abandonment from a fetch failure', () => {
+    expect(isAbortError(new DOMException('Aborted', 'AbortError'))).toBe(true)
+    expect(isAbortError(new DOMException('Timed out', 'TimeoutError'))).toBe(false)
+    expect(isAbortError(new Error('Overpass HTTP 502'))).toBe(false)
+    expect(isAbortError(null)).toBe(false)
+  })
+})
 
 describe('AdaptiveConcurrencyGate', () => {
   it('starts at MIN_CONCURRENCY', () => {

@@ -19,7 +19,7 @@ export interface BoundsLike {
 }
 import * as Sentry from '@sentry/react'
 import { loadTile as loadTileFromIdb, storeTile as storeTileToIdb } from './tileStore'
-import { tileQueued, tileLoading, tileProgress, tileDone, tileError } from './tileLoadStatus'
+import { tileQueued, tileLoading, tileProgress, tileDone, tileError, tileAbandoned } from './tileLoadStatus'
 
 // Proxy through our own Cloudflare Worker (same-origin request) to avoid:
 //   - Content blockers on iOS that block third-party domains
@@ -128,6 +128,20 @@ const MAX_CONCURRENT_FETCHES = 2
 export const MIN_CONCURRENCY = MAX_CONCURRENT_FETCHES
 export const MAX_CONCURRENCY = 12
 
+/** The reason an aborted signal carries, or a plain AbortError when it has none. */
+function abortError(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('Aborted', 'AbortError')
+}
+
+/**
+ * True when `err` is an abandonment rather than a failure. A caller that
+ * abandoned its own fetch must not log it, report it to the concurrency
+ * gate, or count it as a tile error.
+ */
+export function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError'
+}
+
 export class AdaptiveConcurrencyGate {
   private _limit: number
   private _inFlight = 0
@@ -147,12 +161,44 @@ export class AdaptiveConcurrencyGate {
     return this._inFlight
   }
 
-  async acquire(): Promise<void> {
+  /**
+   * Take an in-flight slot, waiting in FIFO order when the limit is reached.
+   *
+   * Pass `signal` when the caller may stop wanting the fetch before it starts.
+   * A queued waiter that aborts leaves the queue and rejects with an
+   * `AbortError`; it never held a slot, so the caller must NOT call
+   * `release()` for it. Aborting a waiter is what lets a tile the viewport
+   * still wants reach the front of the queue: a wide-zoom pan can enqueue
+   * MAX_FETCH_TILES fetches behind a 2-wide gate, and without this the one
+   * tile the rider zoomed into waits for every one of them.
+   *
+   * Once the slot is granted the signal stops mattering — the fetch is left
+   * to finish and populate the tile cache.
+   */
+  async acquire(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw abortError(signal)
     if (this._inFlight < this._limit) {
       this._inFlight++
       return
     }
-    return new Promise((resolve) => this._queue.push(resolve))
+    return new Promise<void>((resolve, reject) => {
+      const waiter = () => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }
+      const onAbort = () => {
+        const i = this._queue.indexOf(waiter)
+        if (i !== -1) this._queue.splice(i, 1)
+        reject(abortError(signal!))
+      }
+      this._queue.push(waiter)
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+
+  /** Queued (not yet granted) waiter count, for tests/diagnostics. */
+  get queued(): number {
+    return this._queue.length
   }
 
   /**
@@ -631,7 +677,11 @@ async function readTileBody(
  * with the current profileKey at render time to get the profile-specific name.
  * This keeps the cache profile-independent so travel mode switching is instant.
  */
-export async function fetchBikeInfraForTile(row: number, col: number): Promise<OsmWay[]> {
+export async function fetchBikeInfraForTile(
+  row: number,
+  col: number,
+  signal?: AbortSignal,
+): Promise<OsmWay[]> {
   const key = tileKey(row, col)
   if (_tileCache.has(key)) return _tileCache.get(key)!
 
@@ -663,7 +713,15 @@ export async function fetchBikeInfraForTile(row: number, col: number): Promise<O
   // Report status so the browse map can show a live loading indicator. Only
   // network fetches register — the cache hits above returned already.
   tileQueued(row, col)
-  await _fetchGate.acquire()
+  try {
+    await _fetchGate.acquire(signal)
+  } catch (err) {
+    // Abandoned while queued: the viewport moved on before this tile ever
+    // reached the network. No slot was taken, so there is nothing to release
+    // and nothing to report to the gate.
+    if (isAbortError(err)) tileAbandoned(row, col)
+    throw err
+  }
   tileLoading(row, col, null)
   try {
     response = await fetchWithRetry(fetchUrl, {
