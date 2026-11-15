@@ -2,7 +2,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   fetchBikeInfraForTile, getVisibleTiles, isTileCached, getCachedTile, tileKey,
   classifyOsmTagsToItem, isOverlayHiddenSurface, isRoughSurface, isOverlayCrossing,
+  isOwnAbandonment,
 } from '../services/overpass'
+import { TileFetchClaims } from '../services/tileFetchClaims'
 import { getDisplayPathLevel, getOverlayMaxGradientPct } from '../utils/classify'
 import { prefetchElevation, overlayGradientPct, hasFineElevationAt } from '../services/elevation'
 import { computeMoatIsolation, inheritStubVerdicts, smallFragmentIds } from '../services/overlayReachability'
@@ -749,9 +751,18 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
   // earlier navigation don't leak onto the map.
   const [activeKeys, setActiveKeys] = useState<string[]>([])
 
-  const loadingTilesRef = useRef<Set<string>>(new Set())
   const loadedTilesRef  = useRef<Set<string>>(new Set())
   const generationRef   = useRef(0)
+  // The record of which detail tiles have a fetch in flight, and the lever
+  // that abandons the ones the viewport has moved past. A fetch that already
+  // holds a gate slot is left to finish — its data is still correct for its
+  // own key, and cancelling would throw away a download for no gain.
+  const tileClaimsRef   = useRef<TileFetchClaims>(new TileFetchClaims())
+
+  /** Abandon in-flight detail-tile fetches that `desiredKeys` does not include. */
+  const abandonSuperseded = useCallback((desiredKeys: string[]) => {
+    tileClaimsRef.current.abandonSuperseded(desiredKeys)
+  }, [])
 
   /** Fetch the 0.1° detail tiles (today's path, unchanged) into tileData.
    *  `desiredKeys` (the caller's full new selection) re-runs the key-swap guard
@@ -764,16 +775,21 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
   ): Promise<{ anyError: boolean }> => {
     const toLoad = tiles.filter((t) => {
       const k = tileKey(t.row, t.col)
-      return !loadedTilesRef.current.has(k) && !loadingTilesRef.current.has(k)
+      return !loadedTilesRef.current.has(k) && !tileClaimsRef.current.has(k)
     })
     if (toLoad.length === 0) return { anyError: false }
 
-    for (const t of toLoad) loadingTilesRef.current.add(tileKey(t.row, t.col))
     let anyError = false
+    // Each callback claims its key synchronously, before its first await, so
+    // every tile in this batch is claimed before control returns to the
+    // caller — a re-entrant call cannot enqueue any of them a second time.
     await Promise.all(toLoad.map(async (t) => {
       const k = tileKey(t.row, t.col)
+      const controller = tileClaimsRef.current.claim(k)
       try {
-        const ways = await fetchBikeInfraForTile(t.row, t.col)
+        const ways = await fetchBikeInfraForTile(
+          t.row, t.col, controller.signal, () => tileClaimsRef.current.markStarted(k),
+        )
         if (generationRef.current !== generation) return
         loadedTilesRef.current.add(k)
         setTileData((prev) => { const next = new Map(prev); next.set(k, ways); return next })
@@ -781,10 +797,15 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
           setActiveKeys((prev) => nextActiveKeys(prev, desiredKeys, (dk) => loadedTilesRef.current.has(dk)))
         }
       } catch (err) {
+        // An abandonment is this component's own doing, not a tile failure,
+        // and reporting it would show the rider a problem that isn't one. A
+        // timeout that merely looks like one is a real failure — see
+        // isOwnAbandonment.
+        if (isOwnAbandonment(controller.signal, err)) return
         console.warn(`[BikeMapOverlay] Tile ${t.row}:${t.col} failed:`, err)
         anyError = true
       } finally {
-        loadingTilesRef.current.delete(k)
+        tileClaimsRef.current.releaseIfCurrent(k, controller)
       }
     }))
     return { anyError }
@@ -856,6 +877,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
         // so naming the fallback keys before their tiles land would blank the
         // map exactly as the un-guarded overview swap did.
         const desired = [...bakedKeys, ...detailKeys]
+        abandonSuperseded(detailKeys)
         setActiveKeys((prev) => nextActiveKeys(prev, desired, (k) => loadedTilesRef.current.has(k)))
         const res = await loadDetailTiles(tiles, generation, desired)
         anyError = res.anyError
@@ -864,6 +886,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
         // previous viewport or the previous LEVEL.
         setActiveKeys(desired)
       } else {
+        abandonSuperseded([])
         setActiveKeys(bakedKeys)
       }
 
@@ -887,6 +910,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
     // would unmount the overlay for the round-trip. Overlapping pans have data
     // for at least one key, so they still swap — and pop in — immediately.
     const detailKeys = tiles.map((t) => tileKey(t.row, t.col))
+    abandonSuperseded(detailKeys)
     setActiveKeys((prev) => nextActiveKeys(prev, detailKeys, (k) => loadedTilesRef.current.has(k)))
     const { anyError } = await loadDetailTiles(tiles, generation, detailKeys)
 
@@ -897,7 +921,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
     )
     if (anyError && !hasAnyVisibleData) onStatusChange('error')
     else                                onStatusChange('ok')
-  }, [enabled, engine, onStatusChange, loadDetailTiles])
+  }, [enabled, engine, onStatusChange, loadDetailTiles, abandonSuperseded])
 
   // Subscribe to map move/zoom/resize via the engine event API.
   useEffect(() => {
@@ -923,7 +947,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
     if (!engine) return
     if (enabled) {
       generationRef.current++
-      loadingTilesRef.current = new Set()
+      tileClaimsRef.current.abandonAll()
       loadedTilesRef.current = new Set()
       engine.invalidateSize()
       const raf = requestAnimationFrame(() => {
@@ -970,7 +994,7 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
       return () => { cancelAnimationFrame(raf) }
     } else {
       generationRef.current++
-      loadingTilesRef.current = new Set()
+      tileClaimsRef.current.abandonAll()
       loadedTilesRef.current = new Set()
       setTileData(new Map())
       setActiveKeys([])
