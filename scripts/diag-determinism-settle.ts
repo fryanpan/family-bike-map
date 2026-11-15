@@ -21,8 +21,10 @@ import { gotoView, panAwayAndReturn, waitForTilesSettled } from './render-checks
 import { screenshotMapCanvas, screenshotWhenPaintSettles } from './render-checks/lib/screenshot'
 import { paintedMask, countPainted } from './render-checks/lib/pixels'
 
-const TARGET_VIEW = { lat: 37.7638, lng: -122.4152, zoom: 14 }
-const TRAVEL_MODE = 'kid-confident'
+// Imported, not copied: this script spent three weeks explaining the
+// determinism check's result while pointing at 37.7638,-122.4152, which is
+// not the viewport that check asserts on.
+import { TARGET_VIEW, TRAVEL_MODE } from './render-checks/checks/determinism'
 
 async function readBoth(page: import('playwright').Page, label: string) {
   await waitForTilesSettled(page)
@@ -58,9 +60,23 @@ try {
   console.log(`old method  (early  vs early ): ${cold.early} -> ${returned.early}   ratio ${(returned.early / cold.early).toFixed(2)}`)
   console.log(`new method  (settled vs settled): ${cold.settled} -> ${returned.settled}   ratio ${(returned.settled / cold.settled).toFixed(2)}`)
   console.log('')
-  console.log(returned.early / cold.early < 0.6
-    ? 'VERDICT: the old method still reproduces the shortfall -> paint arrives late; "never retried" is the wrong diagnosis.'
-    : 'VERDICT: the old method no longer reproduces it -> the underlying behaviour changed on main.')
+  // The verdict has to read BOTH numbers. The first version branched only on
+  // whether the old method still reproduced the shortfall and then asserted
+  // "paint arrives late" — a claim about growth, which it never consulted. On
+  // 2026-11-14 it printed exactly that against a measured growth of 1.00x.
+  const settledRatio = returned.settled / cold.settled
+  const growth = returned.early === 0 ? Infinity : returned.settled / returned.early
+  if (settledRatio >= 0.9) {
+    console.log(`VERDICT: the return recovers once paint is allowed to settle (ratio ${settledRatio.toFixed(2)}, growth ${growth.toFixed(2)}x).`)
+    console.log('         The shortfall under the old method was an early screenshot.')
+  } else if (growth >= 1.2) {
+    console.log(`VERDICT: paint DOES arrive late (growth ${growth.toFixed(2)}x) but not enough — the return still ends at ratio ${settledRatio.toFixed(2)}.`)
+    console.log('         Late arrival is real AND something is missing. Do not treat a long wait as the whole fix.')
+  } else {
+    console.log(`VERDICT: the return does NOT recover (ratio ${settledRatio.toFixed(2)}) and paint is NOT arriving late (growth ${growth.toFixed(2)}x).`)
+    console.log('         "Arrives late" is ruled out by this run. Look at whether the tiles are requested at all —')
+    console.log('         diag-determinism-return.ts prints per-URL request counts for both legs.')
+  }
 } finally {
   await browser.close()
   await app.stop()

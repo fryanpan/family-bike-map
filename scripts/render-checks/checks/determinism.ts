@@ -17,8 +17,11 @@ import { paintedMask, comparePaintedMasks } from '../lib/pixels'
 import { closeBrowser } from '../lib/bounds'
 import type { CheckResult } from '../lib/types'
 
-const TARGET_VIEW = { lat: 37.7649, lng: -122.4294, zoom: 14 }
-const TRAVEL_MODE = 'kid-confident'
+// Exported so a diagnostic cannot drift onto a different viewport from the
+// one this check asserts on. diag-determinism-settle.ts targeted
+// 37.7638,-122.4152 for three weeks while explaining THIS check's result.
+export const TARGET_VIEW = { lat: 37.7649, lng: -122.4294, zoom: 14 }
+export const TRAVEL_MODE = 'kid-confident'
 
 // A perfect 0-pixel-diff bar is too strict for a raster basemap (tile
 // redraw / label placement can jitter a handful of pixels even with no
