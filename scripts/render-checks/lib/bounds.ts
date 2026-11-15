@@ -66,13 +66,56 @@ export function withTimeout<T>(label: string, ms: number, work: Promise<T>): Pro
  * on its way up), and losing that to a cleanup failure would turn a
  * reported result into no result at all.
  */
+/** Cap for ONE context's close, inside the overall browser-close budget. */
+export const CONTEXT_CLOSE_TIMEOUT_MS = 10_000
+
+/** The browser's own close always gets at least this much of the budget, so a
+ *  slow set of contexts can shorten its share but never take it to nothing. */
+export const BROWSER_CLOSE_FLOOR_MS = 1_000
+
 export async function closeBrowser(browser: Browser, timeoutMs = BROWSER_CLOSE_TIMEOUT_MS): Promise<void> {
+  // Close the contexts BEFORE the browser. A context holding in-flight
+  // requests is the usual reason browser.close() does not return, and
+  // abandoning that close is not free: on 2026-11-14 time-stability's close
+  // was abandoned at the 30s cap and the NEXT check then threw, because its
+  // page never got a map canvas inside 15s while the previous browser was
+  // still alive and still fetching. Run alone, that check passes. The
+  // suite's own output named the abandoned close one line above the throw.
+  //
+  // `timeoutMs` is the budget for the WHOLE shutdown, not per call — one
+  // wedged context must not spend what the rest of the shutdown needs. Same
+  // shape as the Overpass chain budget: each step gets min(cap, remaining),
+  // and the last step keeps a floor.
+  const deadline = Date.now() + timeoutMs
+  const remaining = () => deadline - Date.now()
+
+  // Each context gets a FAIR SHARE of what is left over the browser's floor,
+  // not all of it. Giving the first context everything meant one wedged
+  // context skipped every healthy one behind it — and closing those is the
+  // whole reason this loop exists.
+  const contexts = browser.contexts()
+  for (let i = 0; i < contexts.length; i++) {
+    const ctx = contexts[i]
+    const spendable = Math.max(0, remaining() - BROWSER_CLOSE_FLOOR_MS)
+    const cap = Math.min(CONTEXT_CLOSE_TIMEOUT_MS, Math.floor(spendable / (contexts.length - i)))
+    if (cap <= 0) {
+      console.warn('[render-checks] out of shutdown budget — leaving a browser context open')
+      break
+    }
+    try {
+      await withTimeout('context.close()', cap, ctx.close())
+    } catch (err) {
+      console.warn(`[render-checks] a browser context did not close — continuing: ${String(err)}`)
+    }
+  }
+
   try {
-    await withTimeout('browser.close()', timeoutMs, browser.close())
+    await withTimeout('browser.close()', Math.max(BROWSER_CLOSE_FLOOR_MS, remaining()), browser.close())
   } catch (err) {
     console.warn(`[render-checks] browser did not shut down cleanly — continuing: ${String(err)}`)
   }
 }
+
 
 /**
  * Does this result fail the suite?

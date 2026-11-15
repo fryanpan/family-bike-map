@@ -76,7 +76,23 @@ async function runBounded(name: string, baseUrl: string): Promise<CheckResult> {
         ],
       }
     }
-    throw err
+    // Any OTHER error is reported too, not re-thrown. The comment above
+    // promised "one wedged check should cost its own result, not the whole
+    // suite's" and then honoured it for timeouts only: on 2026-11-14
+    // always-visible threw a Playwright TimeoutError from a locator wait,
+    // which aborted main() so perf-budget and overview-coverage never ran
+    // at all. A crash is an infrastructure failure for the same reason a
+    // hang is, so known-fails.ts cannot mask it either.
+    return {
+      name,
+      passed: false,
+      timedOut: true,
+      summary: `check "${name}" threw: ${err instanceof Error ? err.message.split('\n')[0] : String(err)}`,
+      details: [
+        { label: 'error', value: err instanceof Error ? (err.stack ?? err.message) : String(err) },
+        { label: 'note', value: 'a crash is an infrastructure failure — known-fails.ts cannot mask it' },
+      ],
+    }
   }
 }
 

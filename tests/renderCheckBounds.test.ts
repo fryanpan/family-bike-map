@@ -39,22 +39,59 @@ describe('withTimeout', () => {
 
 describe('closeBrowser', () => {
   it('gives up on a browser that never closes instead of hanging the check', async () => {
-    const hung = { close: () => never } as unknown as Browser
+    const hung = { contexts: () => [], close: () => never } as unknown as Browser
     // Resolves (does not reject, does not hang) — a cleanup failure must
     // not cost a check the verdict it already computed.
     expect(await closeBrowser(hung, 20)).toBeUndefined()
   })
 
   it('swallows a close() rejection for the same reason', async () => {
-    const broken = { close: () => Promise.reject(new Error('target closed')) } as unknown as Browser
+    const broken = {
+      contexts: () => [],
+      close: () => Promise.reject(new Error('target closed')),
+    } as unknown as Browser
     expect(await closeBrowser(broken, 1000)).toBeUndefined()
   })
 
   it('still closes a healthy browser', async () => {
     let closed = false
-    const ok = { close: async () => { closed = true } } as unknown as Browser
+    const ok = { contexts: () => [], close: async () => { closed = true } } as unknown as Browser
     await closeBrowser(ok, 1000)
     expect(closed).toBe(true)
+  })
+
+  it('closes every context BEFORE the browser', async () => {
+    // A context holding in-flight requests is why browser.close() hangs, and
+    // an abandoned close breaks the NEXT check rather than this one — that is
+    // how always-visible came to throw only when it ran after time-stability.
+    const order: string[] = []
+    const ctx = (name: string) => ({ close: async () => { order.push(name) } })
+    const b = {
+      contexts: () => [ctx('ctx-a'), ctx('ctx-b')],
+      close: async () => { order.push('browser') },
+    } as unknown as Browser
+
+    // Budget has to exceed BROWSER_CLOSE_FLOOR_MS or there is nothing to
+    // share out and every context is skipped by design.
+    await closeBrowser(b, 5000)
+    expect(order).toEqual(['ctx-a', 'ctx-b', 'browser'])
+  })
+
+  it('still closes the browser when one context refuses to close', async () => {
+    const order: string[] = []
+    const b = {
+      contexts: () => [
+        { close: () => never },
+        { close: async () => { order.push('ctx-b') } },
+      ],
+      close: async () => { order.push('browser') },
+    } as unknown as Browser
+
+    // The hung context gets a FAIR SHARE of the budget over the floor, not
+    // all of it, so ctx-b and the browser still get their turns. 3000ms
+    // total, 1000ms floor, 2 contexts: the hung one is capped at 1000ms.
+    await closeBrowser(b, 3000)
+    expect(order).toEqual(['ctx-b', 'browser'])
   })
 })
 
