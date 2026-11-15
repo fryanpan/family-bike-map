@@ -132,13 +132,18 @@ try {
   console.log(`return leg, settled           ${before} px  (${pct(before)})`)
   console.log(`+ hairline zoom nudge         ${after} px  (${pct(after)})`)
   console.log(`+ full zoom step out and in   ${afterStep} px  (${pct(afterStep)})`)
+  // The two ablation verdicts only mean anything while a shortfall exists.
+  // Once the fix is in, the return leg matches the cold load and there is
+  // nothing for a re-render to recover — say so, rather than reporting the
+  // absence of recovery as evidence of missing tiles.
   const moved = Math.max(after, afterStep) - before
-  console.log(
-    `\nVERDICT: ${moved > before * 0.2
+  const shortfall = cold === 0 ? 0 : 1 - before / cold
+  const verdict = shortfall <= 0.1
+    ? `NO SHORTFALL — the return leg already matches the cold load (${((before / cold) * 100).toFixed(1)}%), so neither cause is in play`
+    : moved > before * 0.2
       ? 'PAINT STALE — a re-render recovered the shortfall, so the data was in the page'
-      : 'TILES MISSING — no re-render recovered it, so the data was not in the page'}` +
-    ` (re-render recovered ${moved} px)`,
-  )
+      : 'TILES MISSING — no re-render recovered it, so the data was not in the page'
+  console.log(`\nVERDICT: ${verdict} (re-render recovered ${moved} px)`)
 } finally {
   await browser.close()
   await app.stop()
