@@ -787,7 +787,9 @@ function OverlayController({ enabled, profileKey, preferredItemNames, hasRoute, 
       const k = tileKey(t.row, t.col)
       const controller = tileClaimsRef.current.claim(k)
       try {
-        const ways = await fetchBikeInfraForTile(t.row, t.col, controller.signal)
+        const ways = await fetchBikeInfraForTile(
+          t.row, t.col, controller.signal, () => tileClaimsRef.current.markStarted(k),
+        )
         if (generationRef.current !== generation) return
         loadedTilesRef.current.add(k)
         setTileData((prev) => { const next = new Map(prev); next.set(k, ways); return next })

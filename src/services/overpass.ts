@@ -694,6 +694,7 @@ export async function fetchBikeInfraForTile(
   row: number,
   col: number,
   signal?: AbortSignal,
+  onStarted?: () => void,
 ): Promise<OsmWay[]> {
   const key = tileKey(row, col)
   if (_tileCache.has(key)) return _tileCache.get(key)!
@@ -735,6 +736,9 @@ export async function fetchBikeInfraForTile(
     if (isAbortError(err)) tileAbandoned(row, col)
     throw err
   }
+  // Past this point the slot is held and the signal no longer stops anything,
+  // so the caller must stop treating this fetch as cancellable.
+  onStarted?.()
   tileLoading(row, col, null)
   try {
     response = await fetchWithRetry(fetchUrl, {

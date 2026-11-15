@@ -24,28 +24,48 @@ describe('TileFetchClaims', () => {
     expect(drop2.signal.aborted).toBe(true)
   })
 
-  // Aborting does not stop a fetch that already holds a gate slot, so the
-  // claim has to outlive the abort. Dropping it here let a rider who panned
-  // away and back start a second fetch for a tile already downloading.
-  it('keeps an aborted claim until its fetch settles', () => {
+  // Aborting does not stop a fetch that already holds a gate slot, and
+  // dropping its claim would let a rider who panned away and back start a
+  // second fetch for a tile already downloading, taking another of the two
+  // slots. A started fetch is therefore left strictly alone.
+  it('leaves a started fetch alone, claim and all', () => {
     const claims = new TileFetchClaims()
     const c = claims.claim('a')
+    claims.markStarted('a')
 
-    claims.abandonSuperseded([])
+    expect(claims.abandonSuperseded([])).toEqual([])
 
-    expect(c.signal.aborted).toBe(true)
-    expect(claims.has('a')).toBe(true)   // still in flight — do not re-request
-    expect(claims.size).toBe(1)
-
-    claims.releaseIfCurrent('a', c)      // the fetch finally settles
+    expect(c.signal.aborted).toBe(false) // aborting it would do nothing anyway
+    expect(claims.has('a')).toBe(true)   // still downloading — do not re-request
+    claims.releaseIfCurrent('a', c)
     expect(claims.has('a')).toBe(false)
   })
 
-  it('does not re-abort a claim it already abandoned', () => {
+  // The other half of that split: a waiter still in the gate's queue is dead
+  // the moment it is aborted, and has to be re-requestable at once. Holding
+  // its claim is what made the return leg paint 35.6% of a cold load.
+  it('drops a queued waiter immediately so the tile can be re-requested', () => {
+    const claims = new TileFetchClaims()
+    const c = claims.claim('a')
+
+    expect(claims.abandonSuperseded([])).toEqual(['a'])
+
+    expect(c.signal.aborted).toBe(true)
+    expect(claims.has('a')).toBe(false)
+    expect(claims.size).toBe(0)
+  })
+
+  it('reports nothing the second time, having already dropped the waiter', () => {
     const claims = new TileFetchClaims()
     claims.claim('a')
     expect(claims.abandonSuperseded([])).toEqual(['a'])
     expect(claims.abandonSuperseded([])).toEqual([])
+  })
+
+  it('ignores markStarted for a key it never claimed', () => {
+    const claims = new TileFetchClaims()
+    claims.markStarted('ghost')
+    expect(claims.has('ghost')).toBe(false)
   })
 
   it('keeps a desired key that has no claim without inventing one', () => {
@@ -55,17 +75,21 @@ describe('TileFetchClaims', () => {
     expect(claims.size).toBe(1)
   })
 
-  it('aborts everything on reset, and the claims clear as they settle', () => {
+  // A reset bumps the generation, so a started fetch's result is discarded
+  // on arrival. Holding its claim would only stop the new generation from
+  // requesting that tile at all.
+  it('drops every claim on reset, started fetches included', () => {
     const claims = new TileFetchClaims()
-    const a = claims.claim('a')
-    const b = claims.claim('b')
+    const queued = claims.claim('a')
+    const started = claims.claim('b')
+    claims.markStarted('b')
+
     claims.abandonAll()
-    expect(a.signal.aborted).toBe(true)
-    expect(b.signal.aborted).toBe(true)
-    expect(claims.size).toBe(2)
-    claims.releaseIfCurrent('a', a)
-    claims.releaseIfCurrent('b', b)
+
+    expect(queued.signal.aborted).toBe(true)
     expect(claims.size).toBe(0)
+    // the started fetch settles later and must not disturb the new generation
+    expect(claims.releaseIfCurrent('b', started)).toBe(false)
   })
 
   it('releases a claim when its own fetch settles', () => {
@@ -85,7 +109,6 @@ describe('TileFetchClaims', () => {
 
     claims.abandonSuperseded([])            // rider pans away
     expect(first.signal.aborted).toBe(true)
-    claims.releaseIfCurrent('377:-1225', first) // the queued waiter rejects
 
     const second = claims.claim('377:-1225') // rider comes back, refetch starts
     expect(claims.has('377:-1225')).toBe(true)
