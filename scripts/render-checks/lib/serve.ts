@@ -17,6 +17,7 @@
 // server.proxy — the exact pattern documented there for local dev.
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { createServer } from 'node:net'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -69,6 +70,36 @@ async function waitForServer(url: string, timeoutMs = 30000): Promise<void> {
     await new Promise((r) => setTimeout(r, 300))
   }
   throw new Error(`server at ${url} did not become ready within ${timeoutMs}ms: ${String(lastErr)}`)
+}
+
+// Is this port bindable right now? waitForServer's content check already
+// catches a collision AFTER the fact, but by then the build has run and
+// 30s of readiness polling have burned, and the suite reports a startup
+// error rather than a check result.
+//
+// Why scanning and not another hand-picked constant: the default below was
+// already moved off 8787 to dodge one always-on local service, and on
+// 2026-11-15 a different long-lived `bun` process held 8793 AND 8795-8799
+// on this machine, so `bun run render-check` failed before the first check
+// with `not a smart-HTTP git request for one repo`. Dodging squatters by
+// hand does not scale on a machine that runs this many local services.
+function portFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createServer()
+    probe.once('error', () => resolve(false))
+    probe.once('listening', () => probe.close(() => resolve(true)))
+    probe.listen(port, '127.0.0.1')
+  })
+}
+
+/** First bindable port at or above `start`. The probe is released before
+ *  the real server binds, so a racing process could still take it — that
+ *  is what waitForServer's APP_MARKER check remains there for. */
+async function findFreePort(start: number, span = 40): Promise<number> {
+  for (let p = start; p < start + span; p++) {
+    if (await portFree(p)) return p
+  }
+  throw new Error(`no free port in ${start}-${start + span - 1} for the render-check server`)
 }
 
 function killTree(proc: ChildProcess): Promise<void> {
@@ -161,7 +192,12 @@ export async function serveApp(opts: { port?: number; workerPort?: number } = {}
   // background (see README.md "port collisions"). waitForServer's content
   // check catches a collision either way, but picking an uncommon port
   // avoids tripping over it in the first place.
-  const port = opts.port ?? 8793
+  // An explicit port is honoured as given — a caller that names a port
+  // wants that port, and a silent shift would measure the wrong server.
+  const port = opts.port ?? (await findFreePort(8793))
+  if (opts.port === undefined && port !== 8793) {
+    console.log(`[render-checks/serve] 8793 is taken; serving on ${port} instead`)
+  }
   // 8791 matches vite.config.ts's hardcoded `server.proxy['/api']` target —
   // do not change without updating that file too.
   const workerPort = opts.workerPort ?? 8791
