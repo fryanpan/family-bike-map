@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { computeLts, computeLtsBreakdown, familySafetyScore } from '../src/utils/lts'
+import { computeLts, computeLtsBreakdown, familySafetyScore, classifyEdge, parseMaxspeedKmh, UNKNOWN_POSTED_SPEED_KMH, QUIET_STREET_MAX_KMH } from '../src/utils/lts'
 import type { LtsBreakdown } from '../src/utils/lts'
 
 // ── computeLts ──────────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ describe('computeLts', () => {
     })
   })
 
-  describe('cycleway:right and cycleway:both fallback', () => {
+  describe('per-side cycleway tags', () => {
     it('cycleway:right=track → LTS 1', () => {
       expect(computeLts({ highway: 'secondary', 'cycleway:right': 'track' })).toBe(1)
     })
@@ -145,10 +145,95 @@ describe('computeLts', () => {
     it('cycleway:both=lane, 30 km/h, 2 lanes → LTS 2', () => {
       expect(computeLts({ highway: 'secondary', 'cycleway:both': 'lane', maxspeed: '30', lanes: '2' })).toBe(2)
     })
+
+    it('cycleway:left=track → LTS 1', () => {
+      expect(computeLts({ highway: 'secondary', 'cycleway:left': 'track' })).toBe(1)
+    })
+
+    // Every side is read independently. `cycleway:right=no` is a real and
+    // common tag ("explicitly nothing on this side"), and a `??` chain stops
+    // at it because it is PRESENT — which used to hide the left-side
+    // facility entirely.
+    it('cycleway:left=track is not masked by cycleway:right=no', () => {
+      expect(computeLts({ highway: 'primary', 'cycleway:left': 'track', 'cycleway:right': 'no' })).toBe(1)
+    })
+
+    it('cycleway:right=track is not masked by cycleway=no', () => {
+      expect(computeLts({ highway: 'secondary', cycleway: 'no', 'cycleway:right': 'track' })).toBe(1)
+    })
+
+    it('cycleway:left=lane on a calmed street → LTS 2', () => {
+      expect(computeLts({ highway: 'secondary', 'cycleway:left': 'lane', maxspeed: '30', lanes: '2' })).toBe(2)
+    })
+
+    it('explicit =no on every side scores the same as no cycleway tags at all', () => {
+      expect(computeLts({ highway: 'secondary', cycleway: 'no', 'cycleway:left': 'no', 'cycleway:right': 'no' }))
+        .toBe(computeLts({ highway: 'secondary' }))
+    })
   })
 
   it('unknown highway defaults to LTS 3', () => {
     expect(computeLts({ highway: 'motorway_link' })).toBe(3)
+  })
+})
+
+describe('classifyEdge — per-side cycleway tags', () => {
+  it('reads a left-only separated track as car-free bike infra', () => {
+    const c = classifyEdge({ highway: 'residential', 'cycleway:left': 'track', 'cycleway:right': 'no', maxspeed: '30' })
+    expect(c.carFree).toBe(true)
+    expect(c.bikeInfra).toBe(true)
+    expect(c.pathLevel).toBe('1a')
+  })
+
+  it('reads a left-only painted lane on a calmed street as 2a', () => {
+    const c = classifyEdge({ highway: 'tertiary', 'cycleway:left': 'lane', 'cycleway:right': 'no', maxspeed: '30' })
+    expect(c.carFree).toBe(false)
+    expect(c.bikeInfra).toBe(true)
+    expect(c.pathLevel).toBe('2a')
+  })
+
+  it('a left-only facility is invisible to no side — all four keys agree', () => {
+    const base = { highway: 'residential', maxspeed: '30' }
+    const levels = (['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'] as const).map(
+      (k) => classifyEdge({ ...base, [k]: 'track' }).pathLevel,
+    )
+    expect(new Set(levels).size).toBe(1)
+    expect(levels[0]).toBe('1a')
+  })
+
+  // Sharrows get no stress reduction under LTS, and buildQuery() does not
+  // fetch them. See docs/research/2026-06-26-sf-bike-infra-market-research.md.
+  it('a painted lane above the 2a speed ceiling demotes 2b -> 3, not up to 2a', () => {
+    // The one direction of this fix that is NOT an upgrade, and it is
+    // intentional: before the fix a left-side lane was invisible, so the street
+    // scored as ordinary quiet residential (2b). Seeing the lane on a 50 km/h
+    // street correctly reads it as a painted lane on a road too fast to count
+    // as calmed, which derivePathLevel demotes to 3 under the kid-first
+    // framing. 1 SF and 3 Berlin ways move this way — see
+    // docs/research/2026-10-18-cycleway-left-benchmark-results.md.
+    const street = { highway: 'residential', maxspeed: '50', lanes: '2' }
+    expect(classifyEdge(street).pathLevel).toBe('2b')
+    expect(classifyEdge({ ...street, 'cycleway:left': 'lane', 'cycleway:right': 'no' }).pathLevel).toBe('3')
+  })
+
+  it('share_busway is read on every side, not just the plain key', () => {
+    const base = { highway: 'secondary', maxspeed: '30' }
+    const levels = (['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'] as const).map(
+      (k) => classifyEdge({ ...base, [k]: 'share_busway' }).pathLevel,
+    )
+    expect(new Set(levels).size).toBe(1)
+    expect(levels[0]).toBe('2a')
+  })
+
+  it('cycleway=shared_lane is not bike infrastructure', () => {
+    const c = classifyEdge({ highway: 'residential', cycleway: 'shared_lane', maxspeed: '30' })
+    expect(c.bikeInfra).toBe(false)
+    expect(c.carFree).toBe(false)
+    expect(c.pathLevel).toBe('2b')
+  })
+
+  it('cycleway:left=shared_lane is not bike infrastructure either', () => {
+    expect(classifyEdge({ highway: 'residential', 'cycleway:left': 'shared_lane', maxspeed: '30' }).bikeInfra).toBe(false)
   })
 })
 
@@ -246,5 +331,101 @@ describe('familySafetyScore', () => {
       worstLts: 4, familySafetyScore: 0,
     }
     expect(familySafetyScore(bd)).toBeLessThanOrEqual(40)
+  })
+})
+
+// ── maxspeed unit parsing ───────────────────────────────────────────────────
+// Regression cover for the SF "missing Folsom and 17th" bug (2026-08-22):
+// `parseInt('25 mph')` silently read mph values as km/h, so a 30 mph (48 km/h)
+// arterial classified as a quiet street while untagged connectors fell back to
+// a 50 km/h road-class guess and dropped off the overlay entirely.
+
+describe('parseMaxspeedKmh', () => {
+  it('reads a bare number as km/h', () => {
+    expect(parseMaxspeedKmh('50')).toBe(50)
+    expect(parseMaxspeedKmh('30')).toBe(30)
+  })
+
+  it('converts mph to km/h instead of dropping the unit', () => {
+    expect(parseMaxspeedKmh('25 mph')).toBe(40)
+    expect(parseMaxspeedKmh('30 mph')).toBe(48)
+    expect(parseMaxspeedKmh('20mph')).toBe(32)
+  })
+
+  it('accepts explicit km/h suffixes', () => {
+    expect(parseMaxspeedKmh('50 km/h')).toBe(50)
+    expect(parseMaxspeedKmh('50 kph')).toBe(50)
+  })
+
+  it('maps walking pace and derestricted values', () => {
+    expect(parseMaxspeedKmh('walk')).toBe(7)
+    expect(parseMaxspeedKmh('none')).toBe(130)
+  })
+
+  it('returns null ONLY when the tag is absent', () => {
+    expect(parseMaxspeedKmh(undefined)).toBeNull()
+    expect(parseMaxspeedKmh('')).toBeNull()
+    expect(parseMaxspeedKmh('   ')).toBeNull()
+  })
+
+  it('resolves implicit country-coded values to statutory speeds', () => {
+    expect(parseMaxspeedKmh('DE:urban')).toBe(50)
+    expect(parseMaxspeedKmh('US:rural')).toBe(100)
+    expect(parseMaxspeedKmh('DE:living_street')).toBe(7)
+    expect(parseMaxspeedKmh('DE:zone30')).toBe(30)
+    expect(parseMaxspeedKmh('DE:zone:30')).toBe(30)
+  })
+
+  it('treats a PRESENT but unreadable value as fast, never as calm', () => {
+    // The dangerous direction. A way whose maxspeed we cannot parse must
+    // not fall through to "quiet street" -- someone posted a limit here.
+    // Mirrors the pre-fix parseInt->NaN behaviour, where NaN failed every
+    // `<=` comparison.
+    expect(parseMaxspeedKmh('signals')).toBe(UNKNOWN_POSTED_SPEED_KMH)
+    expect(parseMaxspeedKmh('variable')).toBe(UNKNOWN_POSTED_SPEED_KMH)
+    expect(parseMaxspeedKmh('0')).toBe(UNKNOWN_POSTED_SPEED_KMH)
+    expect(UNKNOWN_POSTED_SPEED_KMH).toBeGreaterThan(QUIET_STREET_MAX_KMH)
+  })
+
+  it('does not let an unreadable maxspeed promote a painted lane to 2a', () => {
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', maxspeed: 'signals', lanes: '2' }).pathLevel).toBe('3')
+    // ...while the same way with no maxspeed tag at all still reaches 2a
+    // via the tertiary road-class default (the Folsom/17th case).
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', lanes: '2' }).pathLevel).toBe('2a')
+  })
+})
+
+// ── pathLevel 2a: "bike infra on a calmed street" ───────────────────────────
+
+describe('pathLevel 2a — calmed-street ceiling', () => {
+  it('admits a US 25 mph street with a painted lane', () => {
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', maxspeed: '25 mph', lanes: '3' }).pathLevel).toBe('2a')
+  })
+
+  it('admits a US 20 mph slow street with a painted lane', () => {
+    expect(classifyEdge({ highway: 'residential', cycleway: 'lane', maxspeed: '20 mph' }).pathLevel).toBe('2a')
+  })
+
+  it('admits a European Tempo-30 street with a painted lane', () => {
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', maxspeed: '30', lanes: '2' }).pathLevel).toBe('2a')
+  })
+
+  it('rejects a US 30 mph arterial — 48 km/h is not a quiet street', () => {
+    expect(classifyEdge({ highway: 'secondary', cycleway: 'lane', maxspeed: '30 mph', lanes: '2' }).pathLevel).toBe('3')
+  })
+
+  it('rejects a European 50 km/h Hauptstraße with a painted lane', () => {
+    expect(classifyEdge({ highway: 'secondary', cycleway: 'lane', maxspeed: '50', lanes: '2' }).pathLevel).toBe('3')
+  })
+
+  it('admits an UNTAGGED tertiary with a painted lane (Folsom St, 17th St)', () => {
+    // Neither carries a maxspeed tag in OSM; the old tertiary default of
+    // 50 km/h put them above the ceiling and they painted nothing.
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', lanes: '2' }).pathLevel).toBe('2a')
+    expect(classifyEdge({ highway: 'tertiary', cycleway: 'lane', lanes: '3' }).pathLevel).toBe('2a')
+  })
+
+  it('still rejects an untagged secondary — arterials keep the 50 km/h guess', () => {
+    expect(classifyEdge({ highway: 'secondary', cycleway: 'lane' }).pathLevel).toBe('3')
   })
 })

@@ -1,0 +1,25 @@
+# This project installs with bun (`bun install --frozen-lockfile` in ci.yml and
+# deploy.yml). Without this file, Dependabot auto-detects the ecosystem, finds a
+# lockfile it recognises, and raises PRs against it — which is how nine PRs came
+# to be open against package-lock.json, a file nothing in this repo reads.
+#
+# `bun` needs the text-based bun.lock (bun >= 1.1.39), which is what we commit.
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR per batch keeps bun.lock conflicts to a single rebase instead of
+      # one per PR: any merge rewrites the lockfile and makes every sibling dirty.
+      dev-dependencies:
+        dependency-type: development
+      production-dependencies:
+        dependency-type: production
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

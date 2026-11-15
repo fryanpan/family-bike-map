@@ -4,8 +4,10 @@ import {
   selectFetchTiles,
   MAX_FETCH_TILES,
   OVERVIEW_MAX_ZOOM,
+  OVERVIEW_TILE_DEGREES,
   type Tile,
 } from '../src/utils/overlayZoom'
+import { nextActiveKeys } from '../src/components/BikeMapOverlay'
 
 describe('overviewStyle', () => {
   it('is the identity style at and above the overview cutoff', () => {
@@ -89,5 +91,76 @@ describe('selectFetchTiles', () => {
   it('defaults to MAX_FETCH_TILES', () => {
     const tiles = grid([360, 395], [-1245, -1210]) // large
     expect(selectFetchTiles(tiles, center).length).toBe(MAX_FETCH_TILES)
+  })
+})
+
+describe('selectFetchTiles — grid pitch', () => {
+  it('defaults to the 0.1° detail grid (behaviour unchanged for detail tiles)', () => {
+    const tiles: Tile[] = []
+    for (let r = 370; r < 390; r++) for (let c = -1230; c < -1210; c++) tiles.push({ row: r, col: c })
+    const center: [number, number] = [37.75, -122.45]
+    const withDefault = selectFetchTiles(tiles, center, MAX_FETCH_TILES)
+    const withExplicit = selectFetchTiles(tiles, center, MAX_FETCH_TILES, 0.1)
+    expect(withDefault).toEqual(withExplicit)
+    // Centre tile of the SF viewport is in the selection.
+    expect(withDefault).toContainEqual({ row: 377, col: -1225 })
+  })
+
+  it('uses the 1.0° pitch for overview cells — the same centre picks different rows', () => {
+    const cells: Tile[] = []
+    for (let r = 35; r < 40; r++) for (let c = -125; c < -120; c++) cells.push({ row: r, col: c })
+    const selected = selectFetchTiles(cells, [37.75, -122.45], 2, OVERVIEW_TILE_DEGREES)
+    expect(selected[0]).toEqual({ row: 37, col: -123 })
+  })
+})
+
+// ── Active-key swap guard (BikeMapOverlay.nextActiveKeys) ───────────────────
+//
+// Paint is scoped to the active key set and the overlay unmounts when that set
+// has no ways, so naming a new selection before its data lands blanks the map
+// for a round-trip — which is exactly what a zoom-out across OVERVIEW_MAX_ZOOM
+// (drop detail keys, name overview keys) or a cold pan does.
+
+describe('nextActiveKeys', () => {
+  const loaded = (...keys: string[]) => (k: string) => keys.includes(k)
+
+  it('swaps immediately when ANY key of the new selection has data (progressive pop-in)', () => {
+    const prev = ['377:-1223', '377:-1224']
+    const next = ['377:-1224', '377:-1225', '378:-1225']
+    // A same-level pan overlaps: 377:-1224 is already loaded.
+    expect(nextActiveKeys(prev, next, loaded('377:-1224'))).toEqual(next)
+  })
+
+  it('RETAINS the previous keys when nothing in the new selection has data yet', () => {
+    // The level swap: z12 → z11 drops the detail keys and names overview cells
+    // that have not been fetched. Un-guarded, this is a blank map.
+    const prev = ['377:-1223', '377:-1224']
+    const next = ['ov:37:-123', 'ov:38:-123']
+    expect(nextActiveKeys(prev, next, loaded('377:-1223'))).toEqual(prev)
+    // ...and a cold pan into never-loaded territory, at the same level.
+    expect(nextActiveKeys(prev, ['400:-1300'], loaded('377:-1223'))).toEqual(prev)
+  })
+
+  it('lands on EXACTLY the new selection once its data arrives — no leftovers from the old level', () => {
+    const prev = ['377:-1223', '377:-1224']
+    const next = ['ov:37:-123', 'ov:38:-123']
+    // First overview cell lands → swap, and the detail keys are gone.
+    const after = nextActiveKeys(prev, next, loaded('377:-1223', 'ov:37:-123'))
+    expect(after).toEqual(next)
+    expect(after.some((k) => prev.includes(k))).toBe(false)
+  })
+
+  it('never paints both key sets at once (the result is one selection or the other)', () => {
+    const prev = ['377:-1223']
+    const next = ['ov:37:-123']
+    for (const has of [loaded(), loaded('ov:37:-123')]) {
+      const result = nextActiveKeys(prev, next, has)
+      expect(result === prev || result === next).toBe(true)
+    }
+  })
+
+  it('an empty new selection cannot blank the map on its own', () => {
+    const prev = ['377:-1223']
+    expect(nextActiveKeys(prev, [], loaded('377:-1223'))).toEqual(prev)
   })
 })

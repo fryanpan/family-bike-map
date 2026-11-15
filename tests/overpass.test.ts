@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, Semaphore, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
+import { tileKey, latLngToTile, tileBounds, getVisibleTiles, isTileCached, getCachedTile, AdaptiveConcurrencyGate, reportFetchOutcome, MIN_CONCURRENCY, MAX_CONCURRENCY, buildQuery, classifyOsmTagsToItem, isEnrichedTilePayload, parseEnrichedTileResponse, fetchBikeInfraForTile, isControlNode } from '../src/services/overpass'
 import { isEnrichedWay } from '../src/utils/types'
 
 // Minimal LatLngBounds stub
@@ -91,42 +91,204 @@ describe('isTileCached / getCachedTile', () => {
   })
 })
 
-describe('Semaphore', () => {
-  it('allows up to N concurrent acquires immediately', async () => {
-    const sem = new Semaphore(2)
-    // Both acquires should resolve immediately without queuing
-    await sem.acquire()
-    await sem.acquire()
-    // Third acquire should queue — verify by releasing and reacquiring
+function makeResponse(status: number, headers: Record<string, string> = {}): Response {
+  return new Response(null, { status, headers })
+}
+
+describe('AdaptiveConcurrencyGate', () => {
+  it('starts at MIN_CONCURRENCY', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('widens the limit by one step on an enriched response', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on X-Tile-Source: overpass', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    // Widen a couple of steps first.
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 2)
+
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'overpass' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY when the header is missing', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+
+    reportFetchOutcome(gate, makeResponse(200)) // no X-Tile-Source, no X-Cache
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on X-Cache: MISS without the enriched header (a real upstream Overpass call)', () => {
+    // This is a cold Berlin tile: the Worker had nothing in R2 and nothing at
+    // the edge, so it really called overpass-api.de. Full rate-limit exposure.
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 2)
+
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'MISS' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('is NEUTRAL on X-Cache: HIT without the enriched header — the ocean-tile case', () => {
+    // An ocean / empty cell inside California has no R2 object, so it fails
+    // open to the Overpass proxy and comes back with no X-Tile-Source header.
+    // But an edge-cache HIT made ZERO upstream Overpass calls, so it carries
+    // no rate-limit exposure and must not snap the gate. An SF/Marin viewport
+    // is full of Pacific tiles — snapping on each would thrash the gate back
+    // to 2-wide in exactly the region this feature exists to speed up.
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    const widened = gate.limit
+    expect(widened).toBe(MIN_CONCURRENCY + 3)
+
+    // Several ocean tiles in a row must leave the limit EXACTLY where it was:
+    // neither widened (a HIT isn't proof of R2) nor snapped (it cost nothing).
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
+    expect(gate.limit).toBe(widened)
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
+    expect(gate.limit).toBe(widened)
+  })
+
+  it('a neutral HIT at MIN does not widen the gate either', () => {
+    // Neutral means neutral in both directions — an edge-cached Overpass tile
+    // never earns a step toward MAX, because it is not proof of R2 coverage.
+    const gate = new AdaptiveConcurrencyGate()
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Cache': 'HIT' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on HTTP 429', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+
+    reportFetchOutcome(gate, makeResponse(429))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on any 5xx', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+
+    reportFetchOutcome(gate, makeResponse(503))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    reportFetchOutcome(gate, makeResponse(500))
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('snaps back to MIN_CONCURRENCY on a network error (null response)', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    expect(gate.limit).toBe(MIN_CONCURRENCY + 1)
+
+    reportFetchOutcome(gate, null)
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+  })
+
+  it('never exceeds MAX_CONCURRENCY no matter how many enriched responses arrive', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    for (let i = 0; i < MAX_CONCURRENCY + 10; i++) {
+      reportFetchOutcome(gate, makeResponse(200, { 'X-Tile-Source': 'enriched' }))
+    }
+    expect(gate.limit).toBe(MAX_CONCURRENCY)
+  })
+
+  it('never drops below MIN_CONCURRENCY no matter how many snaps arrive', () => {
+    const gate = new AdaptiveConcurrencyGate()
+    for (let i = 0; i < 10; i++) {
+      reportFetchOutcome(gate, makeResponse(429))
+    }
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+    expect(gate.limit).toBeGreaterThanOrEqual(MIN_CONCURRENCY)
+  })
+
+  it('allows up to `limit` concurrent acquires immediately, queues beyond that', async () => {
+    const gate = new AdaptiveConcurrencyGate(2)
+    await gate.acquire()
+    await gate.acquire()
     let resolved = false
-    const pending = sem.acquire().then(() => { resolved = true })
-    expect(resolved).toBe(false)  // still waiting
-    sem.release()
+    const pending = gate.acquire().then(() => { resolved = true })
+    expect(resolved).toBe(false)
+    gate.release()
     await pending
     expect(resolved).toBe(true)
   })
 
-  it('serializes excess acquires through releases', async () => {
-    const sem = new Semaphore(1)
-    const order: number[] = []
+  it('growing the limit wakes queued waiters immediately, without waiting for a release', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    await gate.acquire() // fills the only slot; inFlight=1, limit=1
 
-    await sem.acquire()
-    const p1 = sem.acquire().then(() => { order.push(1); sem.release() })
-    const p2 = sem.acquire().then(() => { order.push(2); sem.release() })
+    let resolved = false
+    const pending = gate.acquire().then(() => { resolved = true })
+    // Give any stray microtask a chance to run — it should still be queued.
+    await Promise.resolve()
+    expect(resolved).toBe(false)
 
-    sem.release()  // unblocks p1
-    await Promise.all([p1, p2])
-    expect(order).toEqual([1, 2])  // FIFO ordering
+    // Widen the limit to 2 without releasing the first slot — the queued
+    // waiter should be granted immediately because inFlight(1) < limit(2).
+    gate.widen()
+    await pending
+    expect(resolved).toBe(true)
+    expect(gate.inFlight).toBe(2)
   })
 
-  it('restores count on release when queue is empty', async () => {
-    const sem = new Semaphore(2)
-    await sem.acquire()
-    sem.release()
-    // Should be back to full capacity — both acquires below should not block
-    await sem.acquire()
-    await sem.acquire()
-    // No assertion needed — if these hang the test times out
+  it('shrinking the limit does not abort in-flight work — it just withholds new grants', async () => {
+    const gate = new AdaptiveConcurrencyGate(4)
+    await gate.acquire()
+    await gate.acquire()
+    await gate.acquire()
+    expect(gate.inFlight).toBe(3)
+
+    // Snap the limit down below the current in-flight count.
+    gate.snapToMin()
+    expect(gate.limit).toBe(MIN_CONCURRENCY)
+
+    // The 3 already-acquired slots are untouched — no exception, no forced release.
+    expect(gate.inFlight).toBe(3)
+
+    // A new acquire queues rather than being granted, since inFlight(3) >= new limit.
+    let resolved = false
+    const pending = gate.acquire().then(() => { resolved = true })
+    await Promise.resolve()
+    expect(resolved).toBe(false)
+
+    // As in-flight work completes and drops below the new (lower) limit,
+    // the queued waiter is eventually granted — nothing was lost.
+    gate.release() // inFlight 3 -> 2, still below MIN_CONCURRENCY(2)? equal now
+    if (!resolved) gate.release()
+    await pending
+    expect(resolved).toBe(true)
+  })
+
+  it('FIFO orders queued waiters through releases, same as Semaphore', async () => {
+    const gate = new AdaptiveConcurrencyGate(1)
+    const order: number[] = []
+
+    await gate.acquire()
+    const p1 = gate.acquire().then(() => { order.push(1); gate.release() })
+    const p2 = gate.acquire().then(() => { order.push(2); gate.release() })
+
+    gate.release() // unblocks p1
+    await Promise.all([p1, p2])
+    expect(order).toEqual([1, 2])
   })
 })
 
@@ -158,6 +320,26 @@ describe('classifyOsmTagsToItem', () => {
     expect(classifyOsmTagsToItem({ highway: 'primary', 'cycleway:both': 'track' }, 'carrying-kid')).toBe('Protected bike lane on major road')
   })
 
+
+  it('reads cycleway:left, which the plain-key-only reads used to miss', () => {
+    expect(classifyOsmTagsToItem({ highway: 'tertiary', 'cycleway:left': 'track' }, 'kid-confident')).toBe('Protected bike lane on major road')
+    expect(classifyOsmTagsToItem({ highway: 'residential', 'cycleway:left': 'lane' }, 'kid-starting-out')).toBe('Painted bike lane on quiet street')
+  })
+
+  it('labels per-side opposite_track/opposite_lane the same as the plain-side equivalent', () => {
+    // The drift this pins: the display reads used to test opposite_* on the
+    // plain `cycleway` key only, while classifyEdge read it on every side. A
+    // residential `cycleway:left=opposite_track` therefore scored as a
+    // curb-separated track in routing but labelled "Bike path" — preferred for
+    // every mode, where "Elevated sidewalk path" is not. Both now go through
+    // anyCyclewaySide, so the label cannot contradict the routing tier.
+    for (const side of ['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'] as const) {
+      expect(classifyOsmTagsToItem({ highway: 'residential', [side]: 'opposite_track' }, 'carrying-kid'))
+        .toBe(classifyOsmTagsToItem({ highway: 'residential', [side]: 'track' }, 'carrying-kid'))
+      expect(classifyOsmTagsToItem({ highway: 'residential', [side]: 'opposite_lane' }, 'kid-starting-out'))
+        .toBe(classifyOsmTagsToItem({ highway: 'residential', [side]: 'lane' }, 'kid-starting-out'))
+    }
+  })
 
   it('returns Painted bike lane on quiet street for cycleway=lane on residential', () => {
     expect(classifyOsmTagsToItem({ highway: 'residential', cycleway: 'lane' }, 'kid-starting-out')).toBe('Painted bike lane on quiet street')
@@ -482,5 +664,31 @@ describe('isOverlayCrossing', () => {
     expect(isOverlayCrossing({ highway: 'cycleway' })).toBe(false)
     expect(isOverlayCrossing({ highway: 'footway', footway: 'sidewalk', bicycle: 'yes' })).toBe(false)
     expect(isOverlayCrossing({ highway: 'path', bicycle: 'designated' })).toBe(false)
+  })
+})
+
+// Display-surface cover for the 2026-08-22 "missing Folsom and 17th" bug.
+// These are the exact tag shapes those two corridors carry in OSM: tertiary
+// with a painted lane and NO maxspeed tag at all. The user-visible symptom was
+// the item name — they resolved to the level-3 "major road" item, which is
+// non-preferred for every profile and so painted nothing.
+describe('classifyOsmTagsToItem — untagged-speed painted lanes (Folsom St, 17th St)', () => {
+  const folsom = { highway: 'tertiary', cycleway: 'lane', lanes: '3', name: 'Folsom Street' }
+  const seventeenth = { highway: 'tertiary', cycleway: 'lane', lanes: '2', name: '17th Street' }
+
+  it('names them as a quiet-street lane for kid-traffic-savvy', () => {
+    expect(classifyOsmTagsToItem(folsom, 'kid-traffic-savvy')).toBe('Painted bike lane on quiet street')
+    expect(classifyOsmTagsToItem(seventeenth, 'kid-traffic-savvy')).toBe('Painted bike lane on quiet street')
+  })
+
+  it('is profile-independent — the item name comes from the tags, not the rider', () => {
+    for (const profile of ['kid-starting-out', 'kid-confident', 'carrying-kid', 'training']) {
+      expect(classifyOsmTagsToItem(folsom, profile)).toBe('Painted bike lane on quiet street')
+    }
+  })
+
+  it('still names a 30 mph arterial lane a major-road lane', () => {
+    const arterial = { highway: 'secondary', cycleway: 'lane', maxspeed: '30 mph', lanes: '2' }
+    expect(classifyOsmTagsToItem(arterial, 'kid-traffic-savvy')).toBe('Painted bike lane on major road')
   })
 })

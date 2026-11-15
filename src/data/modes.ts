@@ -161,8 +161,8 @@ const SMOOTH_ONLY = new Set(['asphalt', 'concrete', 'compacted'])
  *
  * LTS mapping summary (from user direction, anchored to Furth):
  *   kid-starting-out  — LTS 1 with minimal car risk (car-free OR bike-priority)
- *   kid-confident     — LTS 1 in full (includes ≤30 km/h low-density residential)
- *   kid-traffic-savvy — LTS 1 + LTS 2 (LTS 2 conditional: bike infra, ≤30, moderate)
+ *   kid-confident     — LTS 1 in full (includes calmed low-density residential)
+ *   kid-traffic-savvy — LTS 1 + LTS 2 (LTS 2 conditional: bike infra, calmed, moderate)
  *   carrying-kid      — LTS 1–3, no cobbles
  *   training          — LTS 1–3, smooth surfaces, adult pace
  *
@@ -216,7 +216,7 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
       'Good bike control, basic road awareness. Can stay right in a lane or on a path under ' +
       'parental command. Parent still needs time to correct mistakes — no split-second ' +
       'life-and-death decisions. Accepts full Furth LTS 1: physically separated tracks plus ' +
-      'quiet residential streets (≤30 km/h, low volume) even without bike-priority ' +
+      'quiet residential streets (up to 40 km/h / 25 mph, low volume) even without bike-priority ' +
       'designation. Can ride short cobblestone stretches slowly as a learning opportunity.',
     acceptedLevels: new Set<PathLevel>(['1a', '1b']),
     levelMultipliers: {},
@@ -255,7 +255,7 @@ export const MODE_RULES: Record<RideMode, ModeRule> = {
     // Accepts 1a-2a outright plus 2b with a 1.5× cost multiplier. LTS 3+
     // rejected (bridge-walks if a sidewalk exists). The speed-cap/density
     // filters of the old ltsConditions model are now baked into classifyEdge
-    // (painted lane on >30 km/h already classifies as pathLevel 3).
+    // (a painted lane above QUIET_STREET_MAX_KMH already classifies as 3).
     acceptedLevels: new Set<PathLevel>(['1a', '1b', '2a', '2b']),
     levelMultipliers: { '2a': 1.5, '2b': 1.5 },
     roughSurfaceMultiplier: 5.0,

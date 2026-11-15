@@ -39,11 +39,25 @@ export function simplifyPath(
   pixelTolerance = 1.5,
 ): [number, number][] {
   if (coords.length < 3 || zoom >= 16) return coords
-  const tol = degreesPerPixel(zoom) * pixelTolerance
+  return simplifyToTolerance(coords, degreesPerPixel(zoom) * pixelTolerance)
+}
+
+/**
+ * Douglas-Peucker at an explicit tolerance in DEGREES, rather than one derived
+ * from a zoom level. Used by the overview-tile bake
+ * (scripts/pipeline/bake-overview.ts), which simplifies once, offline, at a
+ * tolerance chosen for the overview zoom band — so the bake and the runtime
+ * overlay share ONE DP implementation instead of each carrying their own.
+ */
+export function simplifyToTolerance(
+  coords: [number, number][],
+  toleranceDegrees: number,
+): [number, number][] {
+  if (coords.length < 3 || toleranceDegrees <= 0) return coords
   const points = coords.map(([lat, lng]) => ({ x: lng, y: lat }))
   // highQuality=true → Douglas-Peucker. Slower than radial-distance
   // but preserves sharp turns, which we need on bike paths that snake
   // around obstacles.
-  const simplified = simplify(points, tol, true)
+  const simplified = simplify(points, toleranceDegrees, true)
   return simplified.map((p) => [p.y, p.x] as [number, number])
 }

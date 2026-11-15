@@ -5,9 +5,11 @@
 //       [--local] [--dry-run] [--concurrency 4]
 //
 // Uploads every `<row>_<col>.json` in the tile dir to
-// `<bucket>/<version>/<row>_<col>.json` via `wrangler r2 object put`, then —
-// only after EVERY tile succeeded — writes `manifest.json` naming the new
-// version. The Worker (src/workerEnrichedTiles.ts) resolves tiles through the
+// `<bucket>/<version>/<row>_<col>.json` via `wrangler r2 object put`, plus —
+// when the tile dir has an `overview/` subdir (scripts/pipeline/bake-overview.ts)
+// — every 1.0° overview cell to `<bucket>/<version>/overview/<row>_<col>.json`.
+// Then, only after EVERY tile of BOTH levels succeeded, writes `manifest.json`
+// naming the new version. The Worker (src/workerEnrichedTiles.ts) resolves tiles through the
 // manifest, so readers never observe a half-uploaded tileset: cutover is the
 // single manifest put.
 //
@@ -28,7 +30,10 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { parseArgs } from 'node:util'
 
-import { enrichedTileObjectKey, MANIFEST_KEY, type EnrichedManifest } from '../../src/workerEnrichedTiles'
+import {
+  enrichedTileObjectKey, overviewTileObjectKey, OVERVIEW_PREFIX,
+  MANIFEST_KEY, type EnrichedManifest,
+} from '../../src/workerEnrichedTiles'
 import { REGION_STATE_FILE, type RegionState } from './apply-diff'
 import type { EnrichedTile } from './lib/tiles'
 
@@ -50,6 +55,18 @@ export function listTileFiles(dir: string): TileFileEntry[] {
     .filter((name) => TILE_FILE_RE.test(name))
     .sort()
     .map((name) => ({ name, file: path.join(dir, name) }))
+}
+
+/**
+ * Baked 1.0° overview cells in the tile dir's `overview/` subdir (empty when
+ * the region has no overview bake — the client then falls back to 0.1° tiles).
+ * Both levels ship under ONE version prefix, so `--rollback-to` reverts them
+ * together in a single manifest write.
+ */
+export function listOverviewFiles(dir: string): TileFileEntry[] {
+  const sub = path.join(dir, OVERVIEW_PREFIX)
+  if (!fs.existsSync(sub)) return []
+  return listTileFiles(sub)
 }
 
 export interface DirProvenance {
@@ -97,6 +114,7 @@ export function buildManifest(
   prov: DirProvenance,
   tileCount: number,
   uploadedAt: string,
+  overviewTileCount = 0,
 ): EnrichedManifest {
   return {
     version,
@@ -104,6 +122,7 @@ export function buildManifest(
     pipelineVersion: prov.pipelineVersion,
     demSource: prov.demSource,
     tileCount,
+    overviewTileCount,
     uploadedAt,
   }
 }
@@ -117,20 +136,33 @@ export interface PutOp {
   body?: string
 }
 
+function tileCoords(name: string): { row: number; col: number } {
+  const m = /^(-?\d+)_(-?\d+)\.json$/.exec(name)!
+  return { row: Number(m[1]), col: Number(m[2]) }
+}
+
 /**
- * Ordered upload plan: all tile puts, then the manifest put LAST. The runner
- * must preserve this barrier (tiles may upload concurrently; the manifest only
- * goes up after every tile succeeded) — that ordering IS the atomic cutover.
+ * Ordered upload plan: all 0.1° tile puts, then all 1.0° overview puts, then
+ * the manifest put LAST. The runner must preserve this barrier (tiles may
+ * upload concurrently; the manifest only goes up after every tile succeeded) —
+ * that ordering IS the atomic cutover, and it now covers BOTH levels: the
+ * manifest flip publishes detail + overview together, and `--rollback-to`
+ * reverts both.
  */
 export function planUploadOps(
   version: string,
   entries: TileFileEntry[],
   manifest: EnrichedManifest,
+  overviewEntries: TileFileEntry[] = [],
 ): PutOp[] {
   const ops: PutOp[] = entries.map((e) => {
-    const m = /^(-?\d+)_(-?\d+)\.json$/.exec(e.name)!
-    return { key: enrichedTileObjectKey(version, Number(m[1]), Number(m[2])), file: e.file }
+    const { row, col } = tileCoords(e.name)
+    return { key: enrichedTileObjectKey(version, row, col), file: e.file }
   })
+  for (const e of overviewEntries) {
+    const { row, col } = tileCoords(e.name)
+    ops.push({ key: overviewTileObjectKey(version, row, col), file: e.file })
+  }
   ops.push({ key: MANIFEST_KEY, body: JSON.stringify(manifest) + '\n' })
   return ops
 }
@@ -252,12 +284,13 @@ async function main(): Promise<void> {
 
   const dir = path.resolve(values.tiles)
   const entries = listTileFiles(dir)
+  const overviewEntries = listOverviewFiles(dir)
   const prov = readDirProvenance(dir, entries)
   const version = values.version ?? deriveVersion(prov.builtFromSeq, new Date())
-  const manifest = buildManifest(version, prov, entries.length, uploadedAt)
-  const ops = planUploadOps(version, entries, manifest)
+  const manifest = buildManifest(version, prov, entries.length, uploadedAt, overviewEntries.length)
+  const ops = planUploadOps(version, entries, manifest, overviewEntries)
 
-  console.log(`Uploading ${entries.length} tiles from ${dir}`)
+  console.log(`Uploading ${entries.length} tiles + ${overviewEntries.length} overview cells from ${dir}`)
   console.log(`  bucket:  ${bucket} (${local ? 'local miniflare' : 'remote R2'})`)
   console.log(`  version: ${version}  (builtFromSeq ${prov.builtFromSeq ?? 'null'})`)
   if (values['dry-run']) {

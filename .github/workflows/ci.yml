@@ -33,3 +33,11 @@ jobs:
 
       - name: Run tests
         run: bun test
+
+      # Pure-script perf tripwire for the overlay classify/gate/simplify
+      # pipeline (scripts/render-checks/README.md has the full rendering-
+      # changes-gate context). Deterministic, no browser, no network — the
+      # Playwright render-check suite (`bun run render-check`) is a
+      # separate local/manual command, not run in CI yet.
+      - name: Overlay-paint perf budget
+        run: bun scripts/bench-overlay-paint.ts

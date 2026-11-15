@@ -6,13 +6,16 @@ import * as path from 'node:path'
 import {
   buildManifest,
   deriveVersion,
+  listOverviewFiles,
   listTileFiles,
   planUploadOps,
   readDirProvenance,
   runUpload,
   type PutOp,
 } from '../../scripts/pipeline/upload-tiles'
-import { enrichedTileObjectKey, MANIFEST_KEY, parseManifest } from '../../src/workerEnrichedTiles'
+import {
+  enrichedTileObjectKey, overviewTileObjectKey, MANIFEST_KEY, parseManifest,
+} from '../../src/workerEnrichedTiles'
 
 let dir: string
 
@@ -126,5 +129,62 @@ describe('runUpload', () => {
   test('refuses a plan that does not end with the manifest', async () => {
     const ops = planUploadOps('v1', entries, manifest).slice(0, -1)
     await expect(runUpload('b', ops, { local: true, concurrency: 1, put: async () => {} })).rejects.toThrow(/manifest/)
+  })
+})
+
+// ── Overview level (1.0° cells in the tile dir's overview/ subdir) ──────────
+
+describe('overview level upload', () => {
+  let ovDir: string
+  beforeAll(() => {
+    ovDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-tiles-ov-'))
+    for (const name of ['377_-1223.json', '378_-1223.json']) {
+      fs.writeFileSync(path.join(ovDir, name), JSON.stringify({ meta: META, ways: [] }))
+    }
+    fs.mkdirSync(path.join(ovDir, 'overview'))
+    for (const name of ['37_-123.json', '38_-123.json']) {
+      fs.writeFileSync(path.join(ovDir, 'overview', name), JSON.stringify({ meta: META, ways: [] }))
+    }
+  })
+  afterAll(() => fs.rmSync(ovDir, { recursive: true, force: true }))
+
+  test('the overview/ subdir is not mistaken for a detail tile', () => {
+    expect(listTileFiles(ovDir).map((e) => e.name)).toEqual(['377_-1223.json', '378_-1223.json'])
+  })
+
+  test('listOverviewFiles finds the baked cells; empty when the region has no overview bake', () => {
+    expect(listOverviewFiles(ovDir).map((e) => e.name)).toEqual(['37_-123.json', '38_-123.json'])
+    expect(listOverviewFiles(dir)).toEqual([]) // the plain fixture dir has no overview/
+  })
+
+  test('both levels ship under ONE version prefix, manifest still LAST (atomic two-level cutover)', () => {
+    const entries = listTileFiles(ovDir)
+    const overview = listOverviewFiles(ovDir)
+    const manifest = buildManifest('v9', { ...META, builtFromSeq: 2800 }, entries.length, 'now', overview.length)
+    const ops = planUploadOps('v9', entries, manifest, overview)
+
+    expect(ops.map((o) => o.key)).toEqual([
+      enrichedTileObjectKey('v9', 377, -1223),
+      enrichedTileObjectKey('v9', 378, -1223),
+      overviewTileObjectKey('v9', 37, -123),
+      overviewTileObjectKey('v9', 38, -123),
+      MANIFEST_KEY,
+    ])
+    expect(parseManifest(ops[ops.length - 1].body!)?.overviewTileCount).toBe(2)
+  })
+
+  test('runUpload puts every overview cell before the manifest cutover', async () => {
+    const entries = listTileFiles(ovDir)
+    const overview = listOverviewFiles(ovDir)
+    const manifest = buildManifest('v9', { ...META, builtFromSeq: 2800 }, entries.length, 'now', overview.length)
+    const ops = planUploadOps('v9', entries, manifest, overview)
+
+    const order: string[] = []
+    const put = async (_bucket: string, op: PutOp) => { order.push(op.key) }
+    await runUpload('b', ops, { local: true, concurrency: 4, put })
+
+    expect(order).toHaveLength(5)
+    expect(order[order.length - 1]).toBe(MANIFEST_KEY)
+    expect(order.slice(0, -1)).toContain(overviewTileObjectKey('v9', 37, -123))
   })
 })

@@ -4,6 +4,8 @@ import {
   _resetManifestCache,
   enrichedTileObjectKey,
   getEnrichedTileResponse,
+  getOverviewTileResponse,
+  overviewTileObjectKey,
   MANIFEST_KEY,
   MANIFEST_TTL_MS,
   parseManifest,
@@ -157,6 +159,66 @@ describe('getEnrichedTileResponse', () => {
     const seen: unknown[] = []
     const resp = await getEnrichedTileResponse(bucket, 377, -1223, { onError: (e) => seen.push(e) })
     expect(resp).toBeNull()
+    expect(seen).toEqual([boom])
+  })
+})
+
+// ── Overview level (1.0° cells) ─────────────────────────────────────────────
+//
+// Same manifest, one level deeper in the key space. The contract that differs:
+// a miss is a HARD 404 at the route (no Overpass fail-open — Overpass cannot
+// serve a 1° bbox); the CLIENT falls back to the 0.1° path instead.
+
+const OVERVIEW_BODY = JSON.stringify({ meta: { builtFromSeq: 2776 }, ways: [{ osmId: 1 }] })
+
+describe('overviewTileObjectKey', () => {
+  test('nests the overview level under the SAME version prefix (one manifest, one rollback)', () => {
+    expect(overviewTileObjectKey('2026-07-03-seq2776', 37, -123))
+      .toBe('2026-07-03-seq2776/overview/37_-123.json')
+    // Cell (37,-123) must not collide with detail tile (37,-123).
+    expect(overviewTileObjectKey('v', 37, -123)).not.toBe(enrichedTileObjectKey('v', 37, -123))
+  })
+})
+
+describe('getOverviewTileResponse', () => {
+  test('serves a baked cell resolved through the active manifest', async () => {
+    const { bucket, getCalls } = makeBucket({
+      [MANIFEST_KEY]: MANIFEST,
+      '2026-07-03-seq2776/overview/37_-123.json': OVERVIEW_BODY,
+    })
+    const resp = await getOverviewTileResponse(bucket, 37, -123)
+    expect(resp).not.toBeNull()
+    expect(resp!.headers.get('X-Tile-Source')).toBe('overview')
+    expect(resp!.headers.get('X-Enriched-Version')).toBe('2026-07-03-seq2776')
+    expect(await resp!.text()).toBe(OVERVIEW_BODY)
+    expect(getCalls).toEqual([MANIFEST_KEY, '2026-07-03-seq2776/overview/37_-123.json'])
+  })
+
+  test('missing object → null (route answers 404; no Overpass fail-open)', async () => {
+    const { bucket } = makeBucket({ [MANIFEST_KEY]: MANIFEST })
+    expect(await getOverviewTileResponse(bucket, 52, 13)).toBeNull()
+  })
+
+  test('no manifest → null (a version with no overview bake degrades to the 0.1° path)', async () => {
+    const { bucket } = makeBucket({ '2026-07-03-seq2776/overview/37_-123.json': OVERVIEW_BODY })
+    expect(await getOverviewTileResponse(bucket, 37, -123)).toBeNull()
+  })
+
+  test('rollback to a version without an overview level → null (clean degrade, not a blank map)', async () => {
+    const { bucket, objects } = makeBucket({
+      [MANIFEST_KEY]: MANIFEST,
+      '2026-07-03-seq2776/overview/37_-123.json': OVERVIEW_BODY,
+    })
+    expect(await getOverviewTileResponse(bucket, 37, -123, { now: 0 })).not.toBeNull()
+    objects[MANIFEST_KEY] = JSON.stringify({ version: 'older-version-with-no-overview' })
+    expect(await getOverviewTileResponse(bucket, 37, -123, { now: MANIFEST_TTL_MS + 1 })).toBeNull()
+  })
+
+  test('R2 errors → null + onError (never a 500 to the client)', async () => {
+    const boom = new Error('r2 down')
+    const bucket: R2BucketLike = { get: async () => { throw boom } }
+    const seen: unknown[] = []
+    expect(await getOverviewTileResponse(bucket, 37, -123, { onError: (e) => seen.push(e) })).toBeNull()
     expect(seen).toEqual([boom])
   })
 })
