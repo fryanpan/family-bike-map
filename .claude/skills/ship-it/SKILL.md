@@ -19,8 +19,9 @@ Dispatch **both** as background agents simultaneously:
 - Return a list of issues (blocking vs. advisory)
 
 **Agent B — Codex review:**
-- Run: `codex review -c 'model="gpt-5.4"' --base <base-branch>`
-- Capture output
+- Run: `codex review --base <base-branch>`
+- Do NOT pin a model with `-c 'model="..."'`. A pin this account cannot run makes the review exit without doing anything, and the real error is the LAST line of output — two unrelated CloudFront 403s from an MCP transport print above it. Let the account default choose.
+- Capture output. Check that the output actually contains a verdict or findings; a run that only prints transport errors did not review anything.
 
 Wait for both to complete. Merge findings. Fix **blocking** issues. Re-run reviewers only if fixes were non-trivial (>10 lines changed).
 
