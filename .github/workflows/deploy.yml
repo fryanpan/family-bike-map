@@ -18,7 +18,7 @@ jobs:
       # re-downloaded all 200 packages from the registry on every deploy,
       # costing ~12 minutes. Keyed on bun.lock — any dep change invalidates.
       - name: Cache bun packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
