@@ -138,10 +138,10 @@ async function serveViaViteDevFallback(vitePort: number, workerPort: number): Pr
 
   const viteProc = spawn('bunx', ['vite', '--port', String(vitePort), '--strictPort'], {
     cwd: REPO_ROOT,
-    // vite.config.ts's server.proxy already routes /api -> localhost:8791;
-    // only override the port if the caller asked for a non-default one.
+    // vite.config.ts's server.proxy reads WORKER_PORT, so the proxy follows
+    // whatever port we actually started wrangler on instead of assuming 8791.
     // Same engine-forcing overrides as the build path — see HERMETIC_BUILD_ENV.
-    env: HERMETIC_BUILD_ENV,
+    env: { ...HERMETIC_BUILD_ENV, WORKER_PORT: String(workerPort) },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const url = `http://localhost:${vitePort}`
@@ -198,8 +198,8 @@ export async function serveApp(opts: { port?: number; workerPort?: number } = {}
   if (opts.port === undefined && port !== 8793) {
     console.log(`[render-checks/serve] 8793 is taken; serving on ${port} instead`)
   }
-  // 8791 matches vite.config.ts's hardcoded `server.proxy['/api']` target —
-  // do not change without updating that file too.
+  // Matches vite.config.ts's DEFAULT_WORKER_PORT. A non-default value is
+  // handed to vite through WORKER_PORT, so the /api proxy follows it.
   const workerPort = opts.workerPort ?? 8791
 
   const distIndex = join(REPO_ROOT, 'dist', 'index.html')
