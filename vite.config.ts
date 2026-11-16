@@ -23,6 +23,14 @@ function resolveAppVersion(): string {
   }
 }
 const APP_VERSION = resolveAppVersion()
+
+/**
+ * Port the local Worker (`wrangler dev`) listens on, which `/api/*` is proxied
+ * to. Defaults to 8791; the render-check harness sets WORKER_PORT when it has
+ * to pick a different one.
+ */
+const DEFAULT_WORKER_PORT = 8791
+const WORKER_PORT = Number(process.env.WORKER_PORT) || DEFAULT_WORKER_PORT
 console.log(`[vite] APP_VERSION = ${APP_VERSION}`)
 
 /**
@@ -61,9 +69,13 @@ export default defineConfig({
       release: { name: APP_VERSION },
     }),
   ],
-  // Vite HMR serves the app; /api/* is proxied to the local wrangler dev
-  // on :8791 so Worker routes (feedback, mapillary, overpass) still work.
+  // Vite HMR serves the app; /api/* is proxied to the local wrangler dev so
+  // Worker routes (feedback, mapillary, overpass) still work.
   // Run both: `bunx wrangler dev --port 8791` + `bunx vite`.
+  // WORKER_PORT overrides the target: the render-check harness can be asked
+  // to run its wrangler on a different port, and before this was configurable
+  // the proxy still pointed at 8791 and silently served /api from whatever
+  // else was listening there.
   server: {
     host: true, // listen on 0.0.0.0 so Tailscale / LAN hosts can reach it
     port: 5173,
@@ -76,7 +88,7 @@ export default defineConfig({
       '127.0.0.1',
     ],
     proxy: {
-      '/api': 'http://localhost:8791',
+      '/api': `http://localhost:${WORKER_PORT}`,
     },
   },
   build: {

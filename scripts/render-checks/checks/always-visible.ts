@@ -20,6 +20,7 @@ import { serveApp } from '../lib/serve'
 import { gotoView, waitForTilesSettled } from '../lib/mapControl'
 import { screenshotMapCanvas } from '../lib/screenshot'
 import { paintedMask, countPainted } from '../lib/pixels'
+import { closeBrowser } from '../lib/bounds'
 import type { CheckResult } from '../lib/types'
 
 // Outer Sunset — a residential SF neighborhood, deliberately NOT downtown.
@@ -79,7 +80,7 @@ export async function runAlwaysVisibleCheck(baseUrl: string): Promise<CheckResul
       ],
     }
   } finally {
-    await browser.close()
+    await closeBrowser(browser)
   }
 }
 

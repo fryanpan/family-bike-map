@@ -89,6 +89,14 @@ const VIEW_TOLERANCE = { latLng: 0.01, zoom: 0.5 }
 export async function armRenderCheckHook(page: Page): Promise<void> {
   await page.addInitScript(() => {
     (window as unknown as { __RENDER_CHECK__: boolean }).__RENDER_CHECK__ = true
+    // Dismiss the IntroCard (src/components/IntroCard.tsx) before it can
+    // mount. It renders as a centered card on desktop and a near-fullscreen
+    // bottom sheet on mobile, sitting INSIDE the [data-testid="map-canvas"]
+    // container that screenshotMapCanvas crops to — so leaving it up means
+    // every check measures only the paint peeking out around it. At phone
+    // width that is almost the whole map: a Mission viewport read 13 painted
+    // px of the 2a tier with the card up and 17,898 with it dismissed.
+    try { localStorage.setItem('bike-route-intro-dismissed', '1') } catch { /* storage blocked */ }
   })
 }
 
@@ -151,6 +159,27 @@ export async function gotoView(page: Page, baseUrl: string, view: ViewState, ext
   await setEngineView(page, view)
   // Let tiles for the new viewport load.
   await waitForNetworkSettled(page)
+
+  // Verify the fallback ACTUALLY landed. Without this the function
+  // returned success unconditionally, so a map that never initialized
+  // (see HERMETIC_BUILD_ENV in serve.ts — Google Maps 403s on localhost
+  // and leaves the engine at center [0,0] zoom 0) sailed through every
+  // check, which then measured static app chrome instead of overlay
+  // paint and reported an identical painted-pixel count at every zoom.
+  // A viewport the harness could not reach is a broken run, not a pass.
+  const settled = await readCurrentView(page)
+  if (!settled) {
+    throw new Error('[render-checks] map engine never exposed a view — the map did not initialize')
+  }
+  if (!closeEnough(settled, view)) {
+    throw new Error(
+      `[render-checks] map failed to reach the requested viewport: asked for ` +
+      `(${view.lat}, ${view.lng}) z${view.zoom}, engine reports ` +
+      `(${settled.lat}, ${settled.lng}) z${settled.zoom}. ` +
+      `A degenerate (0, 0) z0 reading means the map never initialized — check the browser console ` +
+      `for RefererNotAllowedMapError (a local .env map key leaking into the harness build).`,
+    )
+  }
   return { viaUrl: false }
 }
 

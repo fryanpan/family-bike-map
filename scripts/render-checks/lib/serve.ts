@@ -17,6 +17,7 @@
 // server.proxy — the exact pattern documented there for local dev.
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { createServer } from 'node:net'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -31,9 +32,9 @@ export interface ServedApp {
   stop: () => Promise<void>
 }
 
-function runToCompletion(cmd: string, args: string[]): Promise<{ ok: boolean; output: string }> {
+function runToCompletion(cmd: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { cwd: REPO_ROOT, env: process.env })
+    const proc = spawn(cmd, args, { cwd: REPO_ROOT, env })
     let output = ''
     proc.stdout?.on('data', (d) => { output += d.toString() })
     proc.stderr?.on('data', (d) => { output += d.toString() })
@@ -69,6 +70,36 @@ async function waitForServer(url: string, timeoutMs = 30000): Promise<void> {
     await new Promise((r) => setTimeout(r, 300))
   }
   throw new Error(`server at ${url} did not become ready within ${timeoutMs}ms: ${String(lastErr)}`)
+}
+
+// Is this port bindable right now? waitForServer's content check already
+// catches a collision AFTER the fact, but by then the build has run and
+// 30s of readiness polling have burned, and the suite reports a startup
+// error rather than a check result.
+//
+// Why scanning and not another hand-picked constant: the default below was
+// already moved off 8787 to dodge one always-on local service, and on
+// 2026-11-15 a different long-lived `bun` process held 8793 AND 8795-8799
+// on this machine, so `bun run render-check` failed before the first check
+// with `not a smart-HTTP git request for one repo`. Dodging squatters by
+// hand does not scale on a machine that runs this many local services.
+function portFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createServer()
+    probe.once('error', () => resolve(false))
+    probe.once('listening', () => probe.close(() => resolve(true)))
+    probe.listen(port, '127.0.0.1')
+  })
+}
+
+/** First bindable port at or above `start`. The probe is released before
+ *  the real server binds, so a racing process could still take it — that
+ *  is what waitForServer's APP_MARKER check remains there for. */
+async function findFreePort(start: number, span = 40): Promise<number> {
+  for (let p = start; p < start + span; p++) {
+    if (await portFree(p)) return p
+  }
+  throw new Error(`no free port in ${start}-${start + span - 1} for the render-check server`)
 }
 
 function killTree(proc: ChildProcess): Promise<void> {
@@ -107,9 +138,10 @@ async function serveViaViteDevFallback(vitePort: number, workerPort: number): Pr
 
   const viteProc = spawn('bunx', ['vite', '--port', String(vitePort), '--strictPort'], {
     cwd: REPO_ROOT,
-    // vite.config.ts's server.proxy already routes /api -> localhost:8791;
-    // only override the port if the caller asked for a non-default one.
-    env: { ...process.env },
+    // vite.config.ts's server.proxy reads WORKER_PORT, so the proxy follows
+    // whatever port we actually started wrangler on instead of assuming 8791.
+    // Same engine-forcing overrides as the build path — see HERMETIC_BUILD_ENV.
+    env: { ...HERMETIC_BUILD_ENV, WORKER_PORT: String(workerPort) },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const url = `http://localhost:${vitePort}`
@@ -126,6 +158,28 @@ async function serveViaViteDevFallback(vitePort: number, workerPort: number): Pr
 }
 
 /**
+ * Env overrides applied to the harness's build so the app resolves to the
+ * Leaflet/OSM-Carto engine — the ONE engine lib/pixels.ts is calibrated
+ * against.
+ *
+ * pixels.ts assumed "CI/local render-check runs never set those secrets."
+ * That is false on a dev machine with a local `.env`: Vite bakes
+ * VITE_GOOGLE_MAPS_KEY into the bundle, resolveEngine picks Google, and
+ * Google Maps then refuses to initialize on http://localhost (the key is
+ * referer-locked to the prod domain) with RefererNotAllowedMapError. The
+ * result is not a loud failure — it is a map that never renders at all,
+ * stuck at center [0,0] zoom 0, while every check happily "passes" by
+ * measuring ~154 px of static app chrome inside the map container.
+ * Setting these empty makes the harness hermetic w.r.t. whatever `.env`
+ * the developer happens to have. Discovered 2026-08-22.
+ */
+const HERMETIC_BUILD_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  VITE_GOOGLE_MAPS_KEY: '',
+  VITE_MAPTILER_KEY: '',
+}
+
+/**
  * Build + serve the app for the render-check harness. Tries the wrangler-
  * dev path first (full API + static assets on one port); falls back to
  * vite dev + a separate wrangler worker if the build fails on an
@@ -138,13 +192,18 @@ export async function serveApp(opts: { port?: number; workerPort?: number } = {}
   // background (see README.md "port collisions"). waitForServer's content
   // check catches a collision either way, but picking an uncommon port
   // avoids tripping over it in the first place.
-  const port = opts.port ?? 8793
-  // 8791 matches vite.config.ts's hardcoded `server.proxy['/api']` target —
-  // do not change without updating that file too.
+  // An explicit port is honoured as given — a caller that names a port
+  // wants that port, and a silent shift would measure the wrong server.
+  const port = opts.port ?? (await findFreePort(8793))
+  if (opts.port === undefined && port !== 8793) {
+    console.log(`[render-checks/serve] 8793 is taken; serving on ${port} instead`)
+  }
+  // Matches vite.config.ts's DEFAULT_WORKER_PORT. A non-default value is
+  // handed to vite through WORKER_PORT, so the /api proxy follows it.
   const workerPort = opts.workerPort ?? 8791
 
   const distIndex = join(REPO_ROOT, 'dist', 'index.html')
-  const build = await runToCompletion('bun', ['run', 'build'])
+  const build = await runToCompletion('bun', ['run', 'build'], HERMETIC_BUILD_ENV)
   if (build.ok && existsSync(distIndex)) {
     console.log('[render-checks/serve] build OK -> wrangler dev (dist/ + live /api on one port)')
     return serveViaWranglerDev(port)
